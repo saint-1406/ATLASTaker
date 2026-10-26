@@ -1319,6 +1319,73 @@ textarea {
   border-color: var(--ok);
 }
 
+/* pictures: the markdown line stays (quiet), the picture shows under it */
+.sheet .cm-editor .cm-line.cm-img-src,
+.sheet .cm-editor .cm-line.cm-img-src span {
+  font-family: var(--font-mono);
+  font-size: 0.76em;
+  color: var(--ink-faint);
+  text-decoration: none;
+}
+
+.sheet .cm-editor .cm-line.cm-img-src span {
+  font-size: inherit;
+}
+
+.sheet .cm-editor .cm-image {
+  padding: 6px 4px 12px;
+}
+
+.sheet .cm-editor .cm-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 440px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  cursor: zoom-in;
+}
+
+.sheet .cm-editor .cm-image.missing {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.scrim:has(.lightbox) {
+  place-items: center;
+  padding: 3vh 3vw;
+}
+
+.modal.lightbox {
+  width: auto;
+  max-width: 94vw;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  cursor: zoom-out;
+}
+
+[data-skin="atlas"] .modal.lightbox::before {
+  display: none;
+}
+
+.lightbox-img {
+  display: block;
+  max-width: 94vw;
+  max-height: 86vh;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.lightbox-caption {
+  margin-top: 8px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
 /* comment lines: notes pinned under a task */
 .sheet .cm-editor .cm-line.cm-note-line {
   /* hanging indent: a wrapped comment continues under its text, not under the task's checkbox */

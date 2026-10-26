@@ -92,6 +92,25 @@ test('bad ids and bodies get client errors, not crashes', async (t) => {
   assert.equal(res.status, 403);
 });
 
+test('a picture is stored, served back and kept to safe names', async (t) => {
+  const { app } = await start(t);
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+  const upload = await fetch(`${app.url}api/assets`, { method: 'POST', headers: { 'Content-Type': 'image/png', 'X-Atlas-Token': app.token }, body: png });
+  assert.equal(upload.status, 201);
+  const { name } = await upload.json();
+  assert.match(name, /^a-[a-z0-9]+\.png$/);
+
+  const served = await fetch(`${app.url}note-assets/${name}`);
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get('content-type'), 'image/png');
+  assert.deepEqual(Buffer.from(await served.arrayBuffer()), png);
+
+  assert.equal((await fetch(`${app.url}note-assets/..%2F..%2Fpackage.json`)).status, 404);
+  assert.equal((await fetch(`${app.url}api/assets`, { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: png })).status, 403);
+  const notImage = await fetch(`${app.url}api/assets`, { method: 'POST', headers: { 'Content-Type': 'text/html', 'X-Atlas-Token': app.token }, body: '<b>' });
+  assert.equal(notImage.status, 415);
+});
+
 test('only one server may own a notes folder; a dead owner\'s lock is taken over', async (t) => {
   const dir = mkdtempSync(path.join(tmpdir(), 'atlas-lock-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

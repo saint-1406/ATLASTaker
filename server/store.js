@@ -8,6 +8,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 export const ID_RE = /^n-[a-z0-9]{6,40}$/;
+export const ASSET_RE = /^a-[a-z0-9]{6,40}\.(png|jpg|gif|webp)$/;
+export const ASSET_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
 const META_FILE = 'atlas.json';
 const RETRYABLE = new Set(['EPERM', 'EBUSY', 'EACCES']);
 const STATE_RULES = {
@@ -107,7 +109,9 @@ function cleanCursor(c) {
 
 export function createStore(dir) {
   const trashDir = path.join(dir, '.trash');
+  const assetsDir = path.join(dir, 'assets'); // pictures, referenced from the notes as assets/<name>
   fs.mkdirSync(trashDir, { recursive: true });
+  fs.mkdirSync(assetsDir, { recursive: true });
   const metaPath = path.join(dir, META_FILE);
   const meta = readMeta(metaPath);
   const seq = new Map(); // id → number of the latest write; older ones give way
@@ -236,6 +240,21 @@ export function createStore(dir) {
       delete meta.notes[id];
       if (meta.state.lastOpen === id) meta.state.lastOpen = null;
       scheduleMeta();
+    },
+
+    /** Saves a picture under a fresh name and returns the name. */
+    async saveAsset(bytes, type) {
+      const ext = ASSET_TYPES[type];
+      if (!ext) throw httpError(415, 'нужна картинка PNG, JPEG, GIF или WebP');
+      if (!bytes?.length) throw httpError(400, 'пустая картинка');
+      const name = `a-${Date.now().toString(36)}${crypto.randomBytes(4).toString('hex')}.${ext}`;
+      await atomicWrite(path.join(assetsDir, name), bytes);
+      return name;
+    },
+
+    assetFile(name) {
+      if (typeof name !== 'string' || !ASSET_RE.test(name)) throw httpError(404, 'нет такой картинки');
+      return path.join(assetsDir, name);
     },
 
     getState() {

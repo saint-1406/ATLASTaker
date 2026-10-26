@@ -25,6 +25,9 @@ const MIME = {
   '.woff2': 'font/woff2',
   '.woff': 'font/woff',
   '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
   '.ico': 'image/x-icon',
 };
 const CSP = [
@@ -71,8 +74,7 @@ function send(res, status, body, type = 'application/json; charset=utf-8', extra
   res.end(payload);
 }
 
-async function readJson(req) {
-  if (!String(req.headers['content-type'] ?? '').startsWith('application/json')) throw new HttpError(415, 'expected JSON');
+async function readBody(req) {
   const chunks = [];
   let size = 0;
   for await (const chunk of req) {
@@ -80,9 +82,15 @@ async function readJson(req) {
     if (size > MAX_BODY) throw new HttpError(413, 'body too large');
     chunks.push(chunk);
   }
-  if (!size) return {};
+  return Buffer.concat(chunks);
+}
+
+async function readJson(req) {
+  if (!String(req.headers['content-type'] ?? '').startsWith('application/json')) throw new HttpError(415, 'expected JSON');
+  const body = await readBody(req);
+  if (!body.length) return {};
   try {
-    const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    const value = JSON.parse(body.toString('utf8'));
     return value && typeof value === 'object' ? value : {};
   } catch {
     throw new HttpError(400, 'bad JSON');
@@ -118,6 +126,19 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
     if (rel === '/' || rel === '/index.html') {
       const html = await fsp.readFile(path.join(ROOT, 'index.html'), 'utf8');
       send(res, 200, html.replace('__ATLAS_TOKEN__', token), MIME['.html']);
+      return;
+    }
+    // Pictures in notes. <img> can't send the token, but the names are random and
+    // Cross-Origin-Resource-Policy keeps other sites from embedding them.
+    if (rel.startsWith('/note-assets/')) {
+      const file = store.assetFile(rel.slice('/note-assets/'.length));
+      let data;
+      try {
+        data = await fsp.readFile(file);
+      } catch {
+        throw new HttpError(404, 'not found');
+      }
+      send(res, 200, data, MIME[path.extname(file)], { 'Cache-Control': 'private, max-age=31536000, immutable' });
       return;
     }
     let file = fixedAssets[rel];
@@ -181,6 +202,10 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
       await store.idle();
       store.flush();
       return send(res, 204);
+    }
+    if (route === 'assets' && req.method === 'POST') {
+      const type = String(req.headers['content-type'] ?? '').split(';')[0].trim();
+      return send(res, 201, { name: await store.saveAsset(await readBody(req), type) });
     }
     if (route === 'ping' && req.method === 'POST') return send(res, 204);
     if (route === 'open-folder' && req.method === 'POST') {

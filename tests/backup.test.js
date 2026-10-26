@@ -41,6 +41,15 @@ function readZip(bytes) {
   return entries;
 }
 
+test('pictures go into the zip as raw bytes under assets/', () => {
+  const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 255, 7]);
+  const zip = makeZip([{ name: 'assets/a-test01.png', bytes }]);
+  const view = new DataView(zip.buffer);
+  const size = view.getUint32(18, true);
+  assert.equal(size, bytes.length);
+  assert.deepEqual([...zip.subarray(30 + 'assets/a-test01.png'.length, 30 + 'assets/a-test01.png'.length + size)], [...bytes]);
+});
+
 test('the zip holds every note, byte for byte', () => {
   const files = [
     { name: 'Экспедиция.md', text: '# Экспедиция\n\n- [ ] палатка\n', date: Date.UTC(2026, 9, 26, 12) },

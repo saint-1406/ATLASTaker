@@ -5,8 +5,8 @@ import { EditorSelection } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { api, rescue } from './bridge.js';
 import { createEditor, insertComment, insertCodeBlock, pasteText, codeLanguageAt, urlAt } from './editor.js';
-import { analyze, formatCount, WORD_FORMS } from './markdown.js';
-import { commentTarget, commentsUnder } from './comments.js';
+import { analyze, formatCount, imageRefs, WORD_FORMS } from './markdown.js';
+import { commentTarget, commentsUnder, formatStamp } from './comments.js';
 import { COPY, normalizeLook } from './skins.js';
 import { Outline } from './outline.js';
 import { hashString } from './terrain.js';
@@ -20,6 +20,7 @@ import {
   confirmDialog,
   commandPalette,
   openSettings,
+  showImage,
   toast,
   isOverlayOpen,
   showBlocker,
@@ -126,6 +127,9 @@ async function boot() {
     onOpenLink: (url) => api.openExternal(url),
     onContextMenu: openEditorMenu,
     onCopy: (text) => api.copy(text),
+    onImage: addImage,
+    resolveImage: (name) => (api.assetUrl ? api.assetUrl(name) : Promise.resolve(null)),
+    openImage: showImage,
   });
   editor.view.scrollDOM.addEventListener(
     'scroll',
@@ -763,21 +767,59 @@ function exportNote(id) {
   api.download(fileNameFor(titleOf(note), new Set()), content);
 }
 
-/** Every note as a .md file in one .zip: the backup of the browser build, and handy anywhere. */
-async function exportAll() {
+const IMAGE_LIMIT = 15 * 1024 * 1024;
+
+/** A pasted or dropped picture: stored by the app, then shown in the note on a line of its own. */
+async function addImage(file, pos) {
+  if (!api.saveAsset) {
+    toast('Здесь картинки не поддерживаются');
+    return;
+  }
+  if (file.size > IMAGE_LIMIT) {
+    toast('Картинка больше 15 МБ — уменьшите её и вставьте снова');
+    return;
+  }
+  let name;
+  try {
+    name = await api.saveAsset(file);
+  } catch (err) {
+    toast(`Картинка не сохранилась: ${err.message}`);
+    return;
+  }
+  const { view } = editor;
+  const line = view.state.doc.lineAt(pos ?? view.state.selection.main.head);
+  // a clipboard screenshot arrives as "image.png"; a dropped file keeps its own name
+  const named = file.name && !/^image\.\w+$/i.test(file.name);
+  const alt = (named ? file.name.replace(/\.[^.]+$/, '') : `Скриншот ${formatStamp(new Date())}`).replace(/[[\]\n]/g, ' ');
+  const blank = !line.text.trim();
+  const at = blank ? line.from : line.to;
+  const text = `${blank ? '' : '\n'}![${alt}](assets/${name})\n`;
+  view.dispatch({ changes: { from: at, insert: text }, selection: { anchor: at + text.length }, scrollIntoView: true, userEvent: 'input.image' });
+  view.focus();
+}
+
+/** What a backup holds: every note as a .md file, and the pictures they show under assets/. */
+async function backupFiles() {
   await flushSave();
   const used = new Set();
-  const files = [...notes.values()]
-    .sort((a, b) => a.created - b.created)
-    .map((note) => ({
-      name: fileNameFor(titleOf(note), used),
-      text: note.id === currentId ? editor.view.state.doc.toString() : note.content,
-      date: note.updated,
-    }));
+  const sorted = [...notes.values()].sort((a, b) => a.created - b.created);
+  const texts = sorted.map((note) => (note.id === currentId ? editor.view.state.doc.toString() : note.content));
+  const files = sorted.map((note, i) => ({ name: fileNameFor(titleOf(note), used), text: texts[i], date: note.updated }));
+  for (const name of new Set(texts.flatMap(imageRefs))) {
+    const bytes = api.readAsset ? await api.readAsset(name).catch(() => null) : null;
+    if (bytes) files.push({ name: `assets/${name}`, bytes });
+  }
+  return files;
+}
+
+/** Every note as a .md file in one .zip: the backup of the browser build, and handy anywhere. */
+async function exportAll() {
+  const files = await backupFiles();
   const stamp = new Date().toISOString().slice(0, 10);
   api.download(`ATLAS-заметки-${stamp}.zip`, makeZip(files), 'application/zip');
   api.setState({ lastBackup: Date.now() }).catch(() => {});
-  toast(`Скачано: ${formatCount(files.length, NOTE_FORMS)}`);
+  const count = files.filter((file) => !file.bytes).length;
+  toast(`Скачано: ${formatCount(count, NOTE_FORMS)}`);
 }
 
 /** Brings .md / .txt files in as new notes (from a backup, another app or another computer). */
@@ -1040,6 +1082,8 @@ window.__atlas = {
     openEditorMenu({ clientX: c.left + 12, clientY: c.bottom + 6 }, view);
   },
   paste: (text) => pasteText(editor.view, text, onSmartPaste),
+  addImage: (blob) => addImage(blob, null),
+  backupFiles: async () => (await backupFiles()).map((file) => ({ name: file.name, size: file.bytes?.length ?? file.text.length })),
   palette: (initial) => openPalette(initial),
   settings: showSettings,
   setLook,

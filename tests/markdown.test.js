@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyze, countWords, deriveTitle, formatCount, WORD_FORMS } from '../src/markdown.js';
+import { analyze, countWords, deriveTitle, formatCount, imageRefs, WORD_FORMS } from '../src/markdown.js';
+
+test('picture references are found once each, foreign links are not', () => {
+  const text = [
+    '![Скриншот 26.10.2026 18:42](assets/a-mvp1abc.png)',
+    'ещё раз ![](assets/a-mvp1abc.png) и ![схема](assets/a-zz9900.webp)',
+    '![чужая](https://example.com/x.png) ![выход](assets/../secret.png)',
+  ].join('\n');
+  assert.deepEqual(imageRefs(text), ['a-mvp1abc.png', 'a-zz9900.webp']);
+});
 
 test('the title is the first meaningful line, without markup', () => {
   assert.equal(deriveTitle('\n\n# Экспедиция на север\n\nтекст'), 'Экспедиция на север');

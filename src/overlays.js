@@ -469,6 +469,17 @@ export function openSettings({ getPrefs, onChange, data }) {
   );
 }
 
+/** A picture from a note, as large as the window allows; a click or Esc closes it. */
+export function showImage(src, alt) {
+  openDialog(
+    (box, close) => {
+      box.append(h('img', { class: 'lightbox-img', src, alt: alt || '' }), alt ? h('div', { class: 'lightbox-caption' }, alt) : null);
+      box.addEventListener('click', () => close(null));
+    },
+    { className: 'lightbox' },
+  );
+}
+
 let toastNode = null;
 let toastTimer = 0;
 

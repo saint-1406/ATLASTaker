@@ -36,7 +36,7 @@ function dosStamp(ms) {
   };
 }
 
-/** files: [{ name, text, date }] → the bytes of a .zip archive (UTF-8 names). */
+/** files: [{ name, text | bytes, date }] → the bytes of a .zip archive (UTF-8 names). */
 export function makeZip(files) {
   const encoder = new TextEncoder();
   const parts = [];
@@ -45,7 +45,7 @@ export function makeZip(files) {
 
   for (const file of files) {
     const name = encoder.encode(file.name);
-    const data = encoder.encode(file.text);
+    const data = file.bytes ?? encoder.encode(file.text ?? '');
     const crc = crc32(data);
     const { time, date } = dosStamp(file.date ?? Date.now());
 

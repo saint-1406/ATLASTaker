@@ -28,6 +28,19 @@ async function call(method, route, body, { keepalive = false } = {}) {
 }
 
 const enc = encodeURIComponent;
+const IMAGE_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
+const newAssetName = (type) => `a-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}.${IMAGE_TYPES[type]}`;
+
+async function fetchOk(url, init) {
+  let res;
+  try {
+    res = await fetch(url, init);
+  } catch (err) {
+    throw Object.assign(new Error('Сервер ATLAS не отвечает'), { offline: true, cause: err });
+  }
+  if (!res.ok) throw Object.assign(new Error(`${url} → ${res.status}`), { status: res.status });
+  return res;
+}
 
 function serverApi() {
   return {
@@ -41,6 +54,16 @@ function serverApi() {
     setState: (patch) => call('PATCH', 'state', patch),
     ping: () => call('POST', 'ping'),
     openNotesFolder: () => call('POST', 'open-folder'),
+    /** Stores a picture next to the notes (notes/assets) and returns its file name. */
+    async saveAsset(blob) {
+      if (!IMAGE_TYPES[blob.type]) throw new Error('нужна картинка PNG, JPEG, GIF или WebP');
+      const res = await fetchOk('/api/assets', { method: 'POST', headers: { 'Content-Type': blob.type, 'X-Atlas-Token': token }, body: blob });
+      return (await res.json()).name;
+    },
+    assetUrl: async (name) => `/note-assets/${enc(name)}`,
+    async readAsset(name) {
+      return new Uint8Array(await (await fetchOk(`/note-assets/${enc(name)}`)).arrayBuffer());
+    },
     // The window is closing. keepalive lets a request outlive the page but caps its body at 64 KB
     // (bytes, and Cyrillic takes two per letter); a longer note goes out as a plain request, which the
     // local server usually receives before the page is gone. The rescue copy covers the rest.
@@ -69,12 +92,15 @@ const finished = (t) =>
 // to a trash store instead of disappearing.
 function browserApi() {
   const opened = new Promise((resolve, reject) => {
-    const r = indexedDB.open('atlas-notetaker', 1);
+    // v2 added pictures; each store is created only if missing, so existing notes stay put
+    const r = indexedDB.open('atlas-notetaker', 2);
     r.onupgradeneeded = () => {
       const db = r.result;
-      db.createObjectStore('notes', { keyPath: 'id' });
-      db.createObjectStore('trash', { autoIncrement: true });
-      db.createObjectStore('state');
+      const has = (name) => db.objectStoreNames.contains(name);
+      if (!has('notes')) db.createObjectStore('notes', { keyPath: 'id' });
+      if (!has('trash')) db.createObjectStore('trash', { autoIncrement: true });
+      if (!has('state')) db.createObjectStore('state');
+      if (!has('assets')) db.createObjectStore('assets');
     };
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
@@ -82,9 +108,28 @@ function browserApi() {
   navigator.storage?.persist?.().catch(() => {}); // ask the browser not to evict us under storage pressure
   const store = async (name, mode = 'readonly') => (await opened).transaction(name, mode).objectStore(name);
   const newId = () => `n-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const assetUrls = new Map(); // name → object URL, made once per window
 
   return {
     kind: 'browser',
+    async saveAsset(blob) {
+      if (!IMAGE_TYPES[blob.type]) throw new Error('нужна картинка PNG, JPEG, GIF или WebP');
+      const name = newAssetName(blob.type);
+      await request((await store('assets', 'readwrite')).put(blob, name));
+      return name;
+    },
+    async assetUrl(name) {
+      if (!assetUrls.has(name)) {
+        const blob = await request((await store('assets')).get(name));
+        if (!blob) return null;
+        assetUrls.set(name, URL.createObjectURL(blob));
+      }
+      return assetUrls.get(name);
+    },
+    async readAsset(name) {
+      const blob = await request((await store('assets')).get(name));
+      return blob ? new Uint8Array(await blob.arrayBuffer()) : null;
+    },
     async list() {
       return request((await store('notes')).getAll());
     },

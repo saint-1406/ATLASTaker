@@ -1,7 +1,7 @@
 // CodeMirror setup: markdown with highlighted code fences (copy button, line count), comment lines,
 // task lines, smart paste of code, Ctrl+click on links and Russian strings for the search panel.
 
-import { EditorState } from '@codemirror/state';
+import { EditorState, StateField } from '@codemirror/state';
 import {
   EditorView,
   keymap,
@@ -24,6 +24,7 @@ import { syntaxHighlighting, HighlightStyle, syntaxTree, bracketMatching, indent
 import { tags as t } from '@lezer/highlight';
 import { classifyPaste, detectLanguage } from './codeDetect.js';
 import { planComment } from './comments.js';
+import { IMAGE_RE } from './markdown.js';
 
 const PHRASES = {
   Find: 'Найти',
@@ -154,6 +155,71 @@ class CodeHeadWidget extends WidgetType {
   }
 }
 
+class ImageWidget extends WidgetType {
+  constructor(name, alt, resolve, open) {
+    super();
+    Object.assign(this, { name, alt, resolve, open });
+  }
+
+  eq(other) {
+    return other.name === this.name && other.alt === this.alt;
+  }
+
+  get estimatedHeight() {
+    return 240;
+  }
+
+  toDOM(view) {
+    const wrap = document.createElement('div');
+    wrap.className = 'cm-image';
+    const img = document.createElement('img');
+    img.alt = this.alt;
+    img.draggable = false;
+    const missing = () => {
+      wrap.classList.add('missing');
+      wrap.textContent = `Картинка не найдена: ${this.name}`;
+      view.requestMeasure();
+    };
+    img.addEventListener('load', () => view.requestMeasure()); // the real height is known only now
+    img.addEventListener('error', missing);
+    img.addEventListener('mousedown', (e) => e.preventDefault());
+    img.addEventListener('click', () => this.open(img.src, this.alt));
+    this.resolve(this.name).then(
+      (url) => (url ? (img.src = url) : missing()),
+      missing,
+    );
+    wrap.append(img);
+    return wrap;
+  }
+
+  ignoreEvent() {
+    return true;
+  }
+}
+
+// Pictures are block widgets (they take their own space under the line), and block decorations
+// may only come from a state field, not from a view plugin.
+function imagesField(resolve, open) {
+  const build = (state) => {
+    const widgets = [];
+    for (let n = 1; n <= state.doc.lines; n++) {
+      const line = state.doc.line(n);
+      if (!line.text.includes('](assets/')) continue;
+      for (const m of line.text.matchAll(IMAGE_RE)) {
+        widgets.push(Decoration.widget({ widget: new ImageWidget(m[2], m[1], resolve, open), block: true, side: 1 }).range(line.to));
+      }
+    }
+    return Decoration.set(widgets, true);
+  };
+  return StateField.define({
+    create: build,
+    update: (decorations, tr) => (tr.docChanged ? build(tr.state) : decorations),
+    provide: (field) => EditorView.decorations.from(field),
+  });
+}
+
+const imageFile = (transfer) => [...(transfer?.files ?? [])].find((file) => file.type.startsWith('image/')) ?? null;
+
 function buildDecorations(view, copy) {
   const { state } = view;
   const { doc } = state;
@@ -221,6 +287,7 @@ function buildDecorations(view, copy) {
 
     for (let pos = from; pos <= to; ) {
       const line = doc.lineAt(pos);
+      if (line.text.includes('](assets/') && !lineClasses.get(line.from)?.has('cm-cb')) addLine(line, 'cm-img-src');
       const m = STAMP_RE.exec(line.text);
       if (m && !lineClasses.get(line.from)?.has('cm-cb')) {
         addLine(line, 'cm-note-line');
@@ -348,7 +415,18 @@ export function insertComment(view, lineNumber, body, date = new Date()) {
   return true;
 }
 
-export function createEditor({ parent, onDocChange, onSelectionChange, onSmartPaste, onOpenLink, onContextMenu, onCopy }) {
+export function createEditor({
+  parent,
+  onDocChange,
+  onSelectionChange,
+  onSmartPaste,
+  onOpenLink,
+  onContextMenu,
+  onCopy,
+  onImage,
+  resolveImage,
+  openImage,
+}) {
   const extensions = [
     history(),
     drawSelection(),
@@ -368,15 +446,30 @@ export function createEditor({ parent, onDocChange, onSelectionChange, onSmartPa
     syntaxHighlighting(atlasHighlight),
     placeholder('Начните писать. Первая строка станет названием, «# » в начале строки — разделом.'),
     structurePlugin(onCopy),
+    imagesField(resolveImage, openImage),
     EditorView.contentAttributes.of({ spellcheck: 'true', autocapitalize: 'sentences', 'aria-label': 'Текст заметки' }),
     keymap.of([{ key: 'Mod-e', run: insertCodeBlock }, ...searchKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]),
     EditorView.domEventHandlers({
       paste(event, view) {
+        // a screenshot in the clipboard (Win+Shift+S, then Ctrl+V) becomes a picture in the note
+        const image = imageFile(event.clipboardData);
+        if (image) {
+          event.preventDefault();
+          onImage(image, null);
+          return true;
+        }
         const text = event.clipboardData?.getData('text/plain');
         if (!text || view.state.selection.ranges.length > 1) return false;
         if (insideCode(view.state, view.state.selection.main.from) || !classifyPaste(text)) return false;
         event.preventDefault();
         pasteText(view, text, onSmartPaste);
+        return true;
+      },
+      drop(event, view) {
+        const image = imageFile(event.dataTransfer);
+        if (!image) return false;
+        event.preventDefault();
+        onImage(image, view.posAtCoords({ x: event.clientX, y: event.clientY }));
         return true;
       },
       contextmenu(event, view) {
