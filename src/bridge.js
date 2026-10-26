@@ -1,6 +1,6 @@
 // How the page reaches its notes. Served by server/server.js, it talks to that server's API and the
-// notes are .md files on disk. Opened any other way (index.html straight from the folder) the same
-// interface is backed by localStorage, so the UI still works.
+// notes are .md files on disk. Opened any other way (the single-file browser build) the same
+// interface is backed by the browser's IndexedDB, or localStorage where that is missing.
 
 const token = document.querySelector('meta[name="atlas-token"]')?.content ?? '';
 const onServer = location.protocol.startsWith('http') && token !== '' && !token.startsWith('__');
@@ -48,6 +48,91 @@ function serverApi() {
       const body = { id, content, meta };
       const bytes = new Blob([JSON.stringify(body)]).size;
       call('POST', 'flush', body, { keepalive: bytes < 60_000 }).catch(() => {});
+    },
+  };
+}
+
+const request = (r) =>
+  new Promise((resolve, reject) => {
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+const finished = (t) =>
+  new Promise((resolve, reject) => {
+    t.oncomplete = () => resolve();
+    t.onerror = () => reject(t.error);
+    t.onabort = () => reject(t.error);
+  });
+
+// The browser build (one HTML file, no server): notes live in this browser's IndexedDB, which holds
+// far more than localStorage and is kept unless the user clears the browser's data. Deleted notes go
+// to a trash store instead of disappearing.
+function browserApi() {
+  const opened = new Promise((resolve, reject) => {
+    const r = indexedDB.open('atlas-notetaker', 1);
+    r.onupgradeneeded = () => {
+      const db = r.result;
+      db.createObjectStore('notes', { keyPath: 'id' });
+      db.createObjectStore('trash', { autoIncrement: true });
+      db.createObjectStore('state');
+    };
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+  navigator.storage?.persist?.().catch(() => {}); // ask the browser not to evict us under storage pressure
+  const store = async (name, mode = 'readonly') => (await opened).transaction(name, mode).objectStore(name);
+  const newId = () => `n-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
+  return {
+    kind: 'browser',
+    async list() {
+      return request((await store('notes')).getAll());
+    },
+    async create(content = '') {
+      const now = Date.now();
+      const note = { id: newId(), content: String(content), created: now, updated: now, cursor: null, scroll: 0 };
+      await request((await store('notes', 'readwrite')).put(note));
+      return note;
+    },
+    async write(id, content) {
+      const notes = await store('notes', 'readwrite');
+      const note = await request(notes.get(id));
+      if (!note) throw Object.assign(new Error(`нет заметки ${id}`), { status: 404 });
+      note.content = content;
+      note.updated = Date.now();
+      await request(notes.put(note));
+      return { updated: note.updated };
+    },
+    async setMeta(id, meta) {
+      const notes = await store('notes', 'readwrite');
+      const note = await request(notes.get(id));
+      if (!note) return;
+      if (meta?.cursor) note.cursor = meta.cursor;
+      if (Number.isFinite(meta?.scroll)) note.scroll = meta.scroll;
+      await request(notes.put(note));
+    },
+    async trash(id) {
+      const t = (await opened).transaction(['notes', 'trash'], 'readwrite');
+      const note = await request(t.objectStore('notes').get(id));
+      if (note) {
+        t.objectStore('trash').add({ ...note, deletedAt: Date.now() });
+        t.objectStore('notes').delete(id);
+      }
+      await finished(t);
+    },
+    async getState() {
+      return (await request((await store('state')).get('state'))) ?? {};
+    },
+    async setState(patch) {
+      const states = await store('state', 'readwrite');
+      const state = { ...((await request(states.get('state'))) ?? {}), ...patch };
+      await request(states.put(state, 'state'));
+      return state;
+    },
+    // The page is closing: start the writes; the rescue copy (localStorage, synchronous) covers the rest.
+    flushOnExit(id, content, meta) {
+      if (typeof content === 'string') this.write(id, content).catch(() => {});
+      if (meta) this.setMeta(id, meta).catch(() => {});
     },
   };
 }
@@ -157,13 +242,19 @@ export const rescue = (() => {
   };
 })();
 
+function pickApi() {
+  if (onServer) return serverApi();
+  return typeof indexedDB === 'object' && indexedDB ? browserApi() : localApi();
+}
+
 export const api = {
-  ...(onServer ? serverApi() : localApi()),
+  ...pickApi(),
   copy: (text) => navigator.clipboard.writeText(text),
   readClipboard: () => navigator.clipboard.readText(),
   openExternal: (url) => window.open(url, '_blank', 'noopener,noreferrer'),
-  download(filename, text) {
-    const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
+  /** Hands the user a file: `data` is text (saved as Markdown) or bytes with their own `type`. */
+  download(filename, data, type = 'text/markdown;charset=utf-8') {
+    const url = URL.createObjectURL(new Blob([data], { type }));
     const link = document.createElement('a');
     link.href = url;
     link.download = filename;

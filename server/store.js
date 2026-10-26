@@ -18,6 +18,7 @@ const STATE_RULES = {
   fontScale: (v) => typeof v === 'number' && v >= 0.7 && v <= 1.8,
   lastOpen: (v) => v === null || (typeof v === 'string' && ID_RE.test(v)),
   welcomed: (v) => typeof v === 'boolean',
+  lastBackup: (v) => Number.isFinite(v) && v > 0,
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

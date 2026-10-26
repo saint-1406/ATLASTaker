@@ -354,7 +354,7 @@ export function commandPalette({ notes, commands, onPick, onCreate, initial = ''
  * Ctrl+,: the look of the app. Changes apply at once; getPrefs() is read again after each one,
  * so the dialog always shows what is on screen.
  */
-export function openSettings({ getPrefs, onChange }) {
+export function openSettings({ getPrefs, onChange, data }) {
   openDialog(
     (box, close) => {
       const body = h('div', { class: 'set-body' });
@@ -428,11 +428,25 @@ export function openSettings({ getPrefs, onChange }) {
           choice('fontScale', prefs.fontScale + 0.08, h('button', { type: 'button', class: 'seg-btn', 'aria-label': 'Крупнее' }, '+')),
           choice('fontScale', 1, h('button', { type: 'button', class: 'seg-btn seg-reset' }, 'Сбросить')),
         );
+        const storage = data
+          ? group(
+              'Заметки',
+              h('div', { class: 'set-note' }, data.text),
+              h(
+                'div',
+                { class: 'set-actions' },
+                data.actions.map((action) =>
+                  h('button', { type: 'button', class: 'seg-btn', onclick: () => { close(null); action.run(); } }, action.text),
+                ),
+              ),
+            )
+          : null;
         body.replaceChildren(
           group('Оформление', skins),
           group('Тема', themes),
           group('Акцент', accents, atlas ? h('div', { class: 'set-note' }, 'У «Атласа» своя палитра, акцент работает в «Минимале».') : null),
           group('Размер текста', size),
+          storage,
         );
         // keep keyboard focus on the control that was just used
         if (focused) body.querySelector(`[data-focus-key="${CSS.escape(focused)}"]`)?.focus();

@@ -24,7 +24,9 @@ import {
   isOverlayOpen,
   showBlocker,
 } from './overlays.js';
+import { fileNameFor, makeZip } from './backup.js';
 import welcomeText from './welcome.md';
+import welcomeBrowserText from './welcome-browser.md';
 
 const $ = (sel) => document.querySelector(sel);
 const number = new Intl.NumberFormat('ru-RU');
@@ -36,7 +38,9 @@ const NOTE_FORMS = { one: 'заметка', few: 'заметки', many: 'зам
 const UNTITLED = 'Без названия';
 const SAVE_DELAY = 400;
 const LOOK_KEY = 'atlas-notetaker:look';
+const BACKUP_EVERY = 7 * 24 * 60 * 60 * 1000;
 const systemDark = matchMedia('(prefers-color-scheme: dark)');
+const inBrowser = api.kind !== 'server'; // the single-file build: notes live in this browser
 
 const notes = new Map(); // id → { id, content, created, updated, cursor, scroll, info }
 const editorStates = new Map(); // id → EditorState, keeps undo history while the window is open
@@ -106,8 +110,9 @@ async function boot() {
   applyFontScale(prefs.fontScale, { persist: false });
 
   let list = await api.list();
+  const firstRun = !list.length && !saved.welcomed;
   if (!list.length) {
-    list = [await api.create(saved.welcomed ? '' : welcomeText)];
+    list = [await api.create(saved.welcomed ? '' : inBrowser ? welcomeBrowserText : welcomeText)];
     api.setState({ welcomed: true }).catch(() => {});
   }
   for (const note of list) notes.set(note.id, { ...note, info: analyze(note.content) });
@@ -146,9 +151,16 @@ async function boot() {
   await Promise.all([...fonts.map((f) => document.fonts.load(f)), document.fonts.ready].map((p) => p.catch(() => {})));
   await openNote(notes.has(saved.lastOpen) ? saved.lastOpen : newestId());
   if (restored) toast(`Вернул несохранённый текст: ${formatCount(restored, NOTE_FORMS)}`, { timeout: 6000 });
+  else if (inBrowser && !firstRun && Date.now() - (saved.lastBackup ?? 0) > BACKUP_EVERY) remindBackup(saved.lastBackup);
   if (api.ping) setInterval(ping, 20_000);
   setInterval(tickPace, 10_000);
   markReady();
+}
+
+// In the browser build clearing the browser's data would take the notes with it, hence the nudge.
+function remindBackup(lastBackup) {
+  const since = lastBackup ? `Последняя копия — ${dayFmt.format(lastBackup).replace('.', '')}.` : 'Копии ещё не было.';
+  toast(`Заметки хранятся только в этом браузере. ${since}`, { action: { text: 'Скачать .zip', run: exportAll }, timeout: 10_000 });
 }
 
 function pickDefined(source, keys) {
@@ -184,7 +196,13 @@ function restoreRescued() {
 
 // ---------- one window at a time ----------
 
-const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('atlas-notetaker') : null;
+const channel = (() => {
+  try {
+    return new BroadcastChannel('atlas-notetaker');
+  } catch {
+    return null; // no BroadcastChannel (or not for file:// pages): one-window mode is off
+  }
+})();
 const windowId = Math.random().toString(36).slice(2);
 
 // The newest window wins. Before it reads any note it asks older windows to save and step aside,
@@ -742,8 +760,43 @@ function exportNote(id) {
   const note = notes.get(id);
   if (!note) return;
   const content = id === currentId ? editor.view.state.doc.toString() : note.content;
-  const name = titleOf(note).replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 80) || 'Заметка';
-  api.download(`${name}.md`, content);
+  api.download(fileNameFor(titleOf(note), new Set()), content);
+}
+
+/** Every note as a .md file in one .zip: the backup of the browser build, and handy anywhere. */
+async function exportAll() {
+  await flushSave();
+  const used = new Set();
+  const files = [...notes.values()]
+    .sort((a, b) => a.created - b.created)
+    .map((note) => ({
+      name: fileNameFor(titleOf(note), used),
+      text: note.id === currentId ? editor.view.state.doc.toString() : note.content,
+      date: note.updated,
+    }));
+  const stamp = new Date().toISOString().slice(0, 10);
+  api.download(`ATLAS-заметки-${stamp}.zip`, makeZip(files), 'application/zip');
+  api.setState({ lastBackup: Date.now() }).catch(() => {});
+  toast(`Скачано: ${formatCount(files.length, NOTE_FORMS)}`);
+}
+
+/** Brings .md / .txt files in as new notes (from a backup, another app or another computer). */
+function importFiles() {
+  const input = h('input', { type: 'file', multiple: true, accept: '.md,.markdown,.txt,text/markdown,text/plain' });
+  input.addEventListener('change', async () => {
+    let last = null;
+    for (const file of input.files) {
+      const text = (await file.text()).replace(/\r\n?/g, '\n');
+      const note = await api.create(text);
+      notes.set(note.id, { ...note, info: analyze(note.content) });
+      last = note.id;
+    }
+    if (!last) return;
+    renderIndex();
+    await openNote(last);
+    toast(`Добавлено: ${formatCount(input.files.length, NOTE_FORMS)}`);
+  });
+  input.click();
 }
 
 // ---------- the look: skin, theme, accent ----------
@@ -824,7 +877,16 @@ function toggleFocus(on = !focusMode) {
 }
 
 function showSettings() {
+  const where = inBrowser
+    ? 'Заметки хранятся в этом браузере. Если очистить его данные, они пропадут — время от времени скачивайте копию.'
+    : 'Заметки — обычные файлы .md в папке %APPDATA%\\ATLAS Notetaker\\notes.';
+  const actions = [
+    { text: 'Скачать все заметки (.zip)', run: exportAll },
+    { text: 'Импорт .md', run: importFiles },
+  ];
+  if (api.openNotesFolder) actions.push({ text: 'Открыть папку', run: () => api.openNotesFolder() });
   openSettings({
+    data: { text: where, actions },
     getPrefs: () => ({ ...prefs }),
     onChange(patch) {
       if ('fontScale' in patch) applyFontScale(patch.fontScale);
@@ -852,6 +914,8 @@ function commandList() {
     { icon: '❝', title: 'Комментарий к строке', kbd: 'Ctrl+Shift+M', keywords: 'comment', run: () => requestComment(editor.view) },
     { icon: '⌗', title: 'Блок кода', kbd: 'Ctrl+E', keywords: 'code код', run: () => insertCodeBlock(editor.view) },
     { icon: '⇩', title: 'Сохранить копию .md', keywords: 'export экспорт скачать', run: () => exportNote(currentId) },
+    { icon: '⇊', title: 'Скачать все заметки (.zip)', keywords: 'backup резервная копия архив экспорт zip', run: exportAll },
+    { icon: '⇡', title: 'Импорт .md', keywords: 'import импорт загрузить файлы', run: importFiles },
   ];
   if (isAtlas()) list.splice(1, 0, { icon: '▦', title: 'Атлас заметок', kbd: 'Ctrl+M', keywords: 'atlas карта архипелаг', run: toggleAtlas });
   if (api.openNotesFolder) list.push({ icon: '▭', title: 'Открыть папку заметок', keywords: 'folder папка файлы', run: () => api.openNotesFolder() });

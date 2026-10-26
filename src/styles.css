@@ -2001,7 +2001,19 @@ textarea {
 
 .set-note {
   font-size: 12px;
+  line-height: 1.5;
   color: var(--ink-faint);
+}
+
+.set-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.set-actions .seg-btn {
+  border: 1px solid var(--hairline);
+  color: var(--ink-soft);
 }
 
 /* toasts */
