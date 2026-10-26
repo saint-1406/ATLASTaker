@@ -16,6 +16,14 @@ import { createStore } from './store.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
+// Fingerprint of the code this process runs. The launcher compares it with the files on disk, so a
+// server left over from before an update is replaced even when the version number did not change.
+export const BUILD = crypto
+  .createHash('sha256')
+  .update(Buffer.concat(['server.js', 'store.js'].map((file) => fs.readFileSync(path.join(ROOT, 'server', file)))))
+  .update(VERSION)
+  .digest('hex')
+  .slice(0, 12);
 export const DEFAULT_PORT = 47813;
 const MAX_BODY = 20 * 1024 * 1024;
 const MIME = {
@@ -162,7 +170,7 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
   async function handleApi(req, res, url) {
     const route = url.pathname.slice('/api/'.length);
     if (route === 'hello' && req.method === 'GET') {
-      send(res, 200, { app: 'atlas-notetaker', version: VERSION });
+      send(res, 200, { app: 'atlas-notetaker', version: VERSION, build: BUILD });
       return;
     }
     const origin = req.headers.origin;

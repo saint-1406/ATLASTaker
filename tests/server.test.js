@@ -4,7 +4,14 @@ import http from 'node:http';
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { acquireLock, createAtlasServer } from '../server/server.js';
+import { acquireLock, BUILD, createAtlasServer, VERSION } from '../server/server.js';
+
+test('hello names the code the server runs, so the launcher can spot a stale one', async (t) => {
+  const { app } = await start(t);
+  const hello = await (await fetch(`${app.url}api/hello`)).json();
+  assert.deepEqual(hello, { app: 'atlas-notetaker', version: VERSION, build: BUILD });
+  assert.match(BUILD, /^[0-9a-f]{12}$/);
+});
 
 async function start(t) {
   const dataDir = mkdtempSync(path.join(tmpdir(), 'atlas-server-'));

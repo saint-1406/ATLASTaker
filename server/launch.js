@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { defaultDataDir, VERSION } from './server.js';
+import { BUILD, defaultDataDir } from './server.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -37,7 +37,7 @@ async function runningServer(dataDir) {
     const info = JSON.parse(await fsp.readFile(path.join(dataDir, 'server.json'), 'utf8'));
     if (!Number.isInteger(info.port)) return null;
     const answer = await hello(info.port);
-    return answer ? { ...info, version: answer.version } : null;
+    return answer ? { ...info, build: answer.build } : null;
   } catch {
     return null;
   }
@@ -61,9 +61,9 @@ async function main() {
   await fsp.mkdir(dataDir, { recursive: true });
 
   let server = await runningServer(dataDir);
-  if (server && server.version !== VERSION) {
-    // An older build is still serving (the app was updated while it ran): replace it, so the window
-    // gets the code that is on disk now. Writes are atomic, so stopping it mid-way loses nothing.
+  if (server && server.build !== BUILD) {
+    // A server from before an update is still running (its code differs from the files on disk):
+    // replace it, so page and server match. Writes are atomic, so stopping it mid-way loses nothing.
     try {
       process.kill(server.pid);
     } catch {
