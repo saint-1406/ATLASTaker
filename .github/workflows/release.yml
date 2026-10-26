@@ -1,5 +1,6 @@
 # Tests the app, then packs it as a Windows installer (MSI) and a portable zip.
 # A pushed tag v* also publishes both as a GitHub release; other runs keep them as artifacts.
+# A manual run with `release` set replaces the files of that existing release.
 name: Windows installer
 
 on:
@@ -7,6 +8,11 @@ on:
     branches: [main]
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      release:
+        description: Existing release tag whose files to replace (empty = artifacts only)
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -39,10 +45,17 @@ jobs:
         run: |
           dotnet tool install --global wix --version 5.0.2
           New-Item -ItemType Directory -Force out | Out-Null
+          # absolute: WiX resolves <Files Include> against the .wxs folder, not the working directory
+          $stage = (Resolve-Path out/stage).Path
+          $msi = "out/ATLASTaker-${{ steps.version.outputs.value }}-x64.msi"
           wix build installer/ATLASTaker.wxs -arch x64 `
             -d Version=${{ steps.version.outputs.value }} `
-            -d StageDir=out/stage `
-            -o out/ATLASTaker-${{ steps.version.outputs.value }}-x64.msi
+            -d "StageDir=$stage" `
+            -o $msi
+          # an MSI that found no files still builds; the app and its Node weigh tens of megabytes
+          $size = (Get-Item $msi).Length
+          if ($size -lt 20MB) { throw "MSI is only $size bytes: the app files were not picked up" }
+          "MSI: $([math]::Round($size / 1MB, 1)) MB"
 
       - name: Portable zip
         shell: pwsh
@@ -61,3 +74,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${{ github.ref_name }}" out/*.msi out/*.zip --title "ATLAS Notetaker ${{ github.ref_name }}" --generate-notes
+
+      - name: Replace the files of an existing release
+        if: github.event_name == 'workflow_dispatch' && inputs.release != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.release }}" out/*.msi out/*.zip --clobber
