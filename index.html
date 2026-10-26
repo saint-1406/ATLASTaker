@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ru" data-skin="minimal" data-theme="dark" data-accent="lime">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <meta name="atlas-token" content="__ATLAS_TOKEN__">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'">
+  <title>ATLAS Notetaker</title>
+  <link rel="icon" href="assets/icon.png">
+  <link rel="stylesheet" href="dist/styles.css">
+</head>
+<body>
+  <div id="terrain" class="terrain" aria-hidden="true"></div>
+
+  <div class="app" id="app">
+    <header class="titlebar">
+      <div class="brand" aria-label="ATLAS Notetaker">
+        <svg class="brand-mark minimal-only" viewBox="0 0 16 16" aria-hidden="true">
+          <rect x="1.5" y="1.5" width="13" height="13" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+          <circle cx="8" cy="8" r="2.4" class="brand-dot"/>
+        </svg>
+        <svg class="brand-mark atlas-only" viewBox="0 0 32 32" aria-hidden="true">
+          <circle cx="16" cy="16" r="13.5" fill="none" stroke="currentColor" stroke-width="1"/>
+          <circle cx="16" cy="16" r="10" fill="none" stroke="currentColor" stroke-width=".6" stroke-dasharray="1 2"/>
+          <path d="M16 2.5 18.3 13.7 29.5 16 18.3 18.3 16 29.5 13.7 18.3 2.5 16 13.7 13.7Z" fill="currentColor" opacity=".3"/>
+          <path d="M16 2.5 18.3 13.7 16 16 13.7 13.7Z" class="brand-north"/>
+        </svg>
+        <span class="brand-name">ATLAS</span>
+        <span class="brand-sub">notetaker</span>
+      </div>
+      <div class="crumb" id="crumb"></div>
+      <nav class="tb-actions" aria-label="Действия">
+        <button class="tb-btn tb-search" id="btn-find" type="button" title="Заметки и команды (Ctrl+K)">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="m10.4 10.4 3.6 3.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          <span data-copy="search">Поиск и команды</span>
+          <kbd class="minimal-only">Ctrl K</kbd>
+        </button>
+        <button class="tb-btn atlas-only" id="btn-atlas" type="button" title="Все заметки на одной карте (Ctrl+M)">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5 5.5 2l5 1.5 4-1.5v10.5l-4 1.5-5-1.5-4 1.5ZM5.5 2v10.5M10.5 3.5V14" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>
+          <span>Атлас</span>
+        </button>
+        <button class="tb-btn icon" id="btn-theme" type="button" title="Светлая / тёмная (Ctrl+Shift+L)" aria-label="Сменить тему">☀</button>
+        <button class="tb-btn icon" id="btn-settings" type="button" title="Настройки (Ctrl+,)" aria-label="Настройки">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 11.5h11" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><circle cx="6" cy="4.5" r="1.8" fill="var(--bg)" stroke="currentColor" stroke-width="1.2"/><circle cx="10.5" cy="11.5" r="1.8" fill="var(--bg)" stroke="currentColor" stroke-width="1.2"/></svg>
+        </button>
+        <button class="tb-btn icon accent" id="btn-new" type="button" title="Новая заметка (Ctrl+N)" aria-label="Новая заметка">＋</button>
+      </nav>
+    </header>
+
+    <div class="body">
+      <aside class="index" id="index" aria-label="Список заметок">
+        <div class="index-head">
+          <span class="legend-label" data-copy="notes">Заметки</span>
+          <span class="index-count" id="index-count"></span>
+        </div>
+        <div class="index-search"><input class="field" id="index-filter" type="search" data-copy-placeholder="filter" placeholder="Фильтр" spellcheck="false" aria-label="Фильтр заметок"></div>
+        <ol class="index-list" id="index-list"></ol>
+        <button class="index-new" id="btn-new-2" type="button"><span aria-hidden="true">＋</span> <span data-copy="newNote">Новая заметка</span><kbd class="minimal-only">Ctrl N</kbd></button>
+      </aside>
+      <main class="stage" id="stage">
+        <div class="progress" id="progress" aria-hidden="true"></div>
+        <section class="sheet" id="sheet"><div id="editor" class="editor-host"></div></section>
+      </main>
+      <aside class="outline" id="outline" aria-label="Содержание заметки">
+        <div class="outline-label"></div>
+        <ol class="outline-list"></ol>
+      </aside>
+    </div>
+
+    <footer class="statusbar">
+      <span class="sb-item" id="sb-coords"></span>
+      <span class="sb-item" id="sb-sel" hidden></span>
+      <span class="sb-item sb-lang" id="sb-lang" hidden></span>
+      <span class="sb-spacer"></span>
+      <span class="sb-item sb-pace minimal-only" id="sb-pace" title="Темп набора за последние две минуты" hidden></span>
+      <span class="sb-item atlas-only" id="sb-peaks"></span>
+      <span class="sb-item" id="sb-words"></span>
+      <span class="sb-item sb-save" id="sb-save" data-state="saved" role="status" aria-live="polite"><i aria-hidden="true"></i><b></b></span>
+    </footer>
+  </div>
+
+  <div id="atlas" class="atlas" hidden>
+    <canvas class="atlas-canvas"></canvas>
+    <div class="atlas-cartouche">
+      <div class="atlas-title">Архипелаг заметок</div>
+      <div class="atlas-sub" id="atlas-sub"></div>
+    </div>
+    <div class="atlas-search"><input class="field" id="atlas-filter" type="search" placeholder="Найти остров…" spellcheck="false" aria-label="Поиск по островам"></div>
+    <div class="atlas-actions">
+      <button class="tb-btn" id="atlas-new" type="button">＋ <span>Новый остров</span></button>
+      <button class="tb-btn" id="atlas-close" type="button" title="Назад к заметке (Esc)">✕ <span>Закрыть</span></button>
+    </div>
+    <div class="atlas-hint">колесо — масштаб · перетаскивание — обзор · клик — высадиться · Esc — назад</div>
+    <svg class="atlas-compass" viewBox="-12 -16 124 128" aria-hidden="true">
+      <circle cx="50" cy="50" r="46" fill="none" stroke="currentColor" stroke-width=".8"/>
+      <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" stroke-width=".5" stroke-dasharray="1 3"/>
+      <path d="M50 20 53 47 80 50 53 53 50 80 47 53 20 50 47 47Z" transform="rotate(45 50 50)" fill="currentColor" opacity=".2"/>
+      <path d="M50 4 55 45 96 50 55 55 50 96 45 55 4 50 45 45Z" fill="currentColor" opacity=".32"/>
+      <path d="M50 4 55 45 50 50 45 45Z" class="north"/>
+      <text x="50" y="-4" text-anchor="middle">N</text>
+    </svg>
+    <div class="atlas-tip" id="atlas-tip" hidden></div>
+  </div>
+
+  <div id="overlays"></div>
+  <script src="dist/app.js"></script>
+</body>
+</html>

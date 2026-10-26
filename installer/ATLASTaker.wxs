@@ -1,0 +1,67 @@
+<!--
+  ATLAS Notetaker installer (WiX 5). Built in CI by .github/workflows/release.yml:
+    wix build installer/ATLASTaker.wxs -d Version=0.2.0 -d StageDir=out/stage -arch x64 -o ATLASTaker.msi
+  Installs per machine into Program Files: the app, its own Node runtime and two shortcuts.
+  Notes are not part of the install: they live in %APPDATA%\ATLAS Notetaker and survive uninstall.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="ATLAS Notetaker"
+    Manufacturer="ATLAS"
+    Version="$(var.Version)"
+    UpgradeCode="5b0c7a52-3c1e-4d8a-9f61-2e4b7d9a1c30"
+    Scope="perMachine">
+
+    <MajorUpgrade DowngradeErrorMessage="Уже установлена более новая версия ATLAS Notetaker." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="AppIcon" SourceFile="$(var.StageDir)\app\assets\icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/saint-1406/ATLASTaker" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="ATLAS Notetaker" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.StageDir)\**" />
+    </ComponentGroup>
+
+    <!-- The shortcuts run the bundled Node on the launcher; it starts the server and opens the window. -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut">
+        <Shortcut
+          Id="StartMenuLink"
+          Name="ATLAS Notetaker"
+          Description="Блокнот ATLAS"
+          Target="[INSTALLFOLDER]node\node.exe"
+          Arguments="&quot;[INSTALLFOLDER]app\server\launch.js&quot;"
+          WorkingDirectory="INSTALLFOLDER"
+          Icon="AppIcon"
+          Show="minimized" />
+        <RegistryValue Root="HKLM" Key="Software\ATLAS\Notetaker" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcut">
+        <Shortcut
+          Id="DesktopLink"
+          Name="ATLAS Notetaker"
+          Description="Блокнот ATLAS"
+          Target="[INSTALLFOLDER]node\node.exe"
+          Arguments="&quot;[INSTALLFOLDER]app\server\launch.js&quot;"
+          WorkingDirectory="INSTALLFOLDER"
+          Icon="AppIcon"
+          Show="minimized" />
+        <RegistryValue Root="HKLM" Key="Software\ATLAS\Notetaker" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="ATLAS Notetaker">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+  </Package>
+</Wix>

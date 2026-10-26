@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "notetaker",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["server/server.js", "--port", "5183", "--data", ".dev-data", "--no-idle-exit"],
+      "port": 5183
+    }
+  ]
+}
