@@ -41,6 +41,7 @@ const SAVE_DELAY = 400;
 const LOOK_KEY = 'atlas-notetaker:look';
 const BACKUP_EVERY = 7 * 24 * 60 * 60 * 1000;
 const systemDark = matchMedia('(prefers-color-scheme: dark)');
+const narrow = matchMedia('(max-width: 820px)'); // the list becomes a panel that slides over the text
 const inBrowser = api.kind !== 'server'; // the single-file build: notes live in this browser
 
 const notes = new Map(); // id → { id, content, created, updated, cursor, scroll, info }
@@ -618,6 +619,7 @@ function makeIndexItem(note) {
   );
   const open = () => {
     const r = li.getBoundingClientRect();
+    closeIndexPanel();
     openNote(note.id, { origin: { x: r.right, y: r.top + r.height / 2 } });
   };
   li.addEventListener('click', (e) => {
@@ -901,6 +903,21 @@ function applySidebar(show, { persist = true } = {}) {
   requestAnimationFrame(() => terrain?.render('fade'));
 }
 
+/** The list button and Ctrl+B: a column to hide or show on wide windows, a sliding panel on narrow ones. */
+function toggleIndex() {
+  if (!narrow.matches) {
+    applySidebar(!prefs.sidebar);
+    return;
+  }
+  const open = $('#app').classList.toggle('index-open');
+  if (open) $('#index-filter').focus({ preventScroll: true });
+  else editor.view.focus();
+}
+
+function closeIndexPanel() {
+  $('#app').classList.remove('index-open');
+}
+
 function applyFontScale(scale, { persist = true } = {}) {
   prefs.fontScale = Math.round(Math.max(0.75, Math.min(1.6, scale)) * 100) / 100;
   document.documentElement.style.setProperty('--fs', String(prefs.fontScale));
@@ -951,7 +968,7 @@ function commandList() {
       run: () => setLook({ skin: isAtlas() ? 'minimal' : 'atlas' }),
     },
     { icon: '⚙', title: 'Настройки', kbd: 'Ctrl+,', keywords: 'settings акцент цвет шрифт размер', run: showSettings },
-    { icon: '▤', title: prefs.sidebar ? 'Скрыть список заметок' : 'Показать список заметок', kbd: 'Ctrl+B', keywords: 'sidebar', run: () => applySidebar(!prefs.sidebar) },
+    { icon: '▤', title: 'Список заметок: показать / скрыть', kbd: 'Ctrl+B', keywords: 'sidebar панель список', run: toggleIndex },
     { icon: '◎', title: focusMode ? 'Выйти из режима фокуса' : 'Режим фокуса', kbd: 'Ctrl+.', keywords: 'focus фокус', run: () => toggleFocus() },
     { icon: '❝', title: 'Комментарий к строке', kbd: 'Ctrl+Shift+M', keywords: 'comment', run: () => requestComment(editor.view) },
     { icon: '⌗', title: 'Блок кода', kbd: 'Ctrl+E', keywords: 'code код', run: () => insertCodeBlock(editor.view) },
@@ -988,6 +1005,11 @@ function toggleAtlas() {
 }
 
 function onGlobalKey(e) {
+  if (e.key === 'Escape' && $('#app').classList.contains('index-open') && !isOverlayOpen()) {
+    closeIndexPanel();
+    editor.view.focus();
+    return;
+  }
   if (e.key === 'Escape' && focusMode && !isOverlayOpen() && !atlas.isOpen) {
     toggleFocus(false);
     return;
@@ -1001,7 +1023,7 @@ function onGlobalKey(e) {
   else if ((code === 'KeyP' || code === 'KeyK') && !shiftKey) openPalette();
   else if (code === 'KeyM' && shiftKey) requestComment(editor.view);
   else if (code === 'KeyM' && isAtlas()) toggleAtlas();
-  else if (code === 'KeyB' && !shiftKey) applySidebar(!prefs.sidebar);
+  else if (code === 'KeyB' && !shiftKey) toggleIndex();
   else if (code === 'KeyL' && shiftKey) toggleTheme();
   else if (code === 'Comma') showSettings();
   else if (code === 'Period') toggleFocus();
@@ -1020,7 +1042,16 @@ function onGlobalKey(e) {
 
 function bindChrome() {
   $('#btn-new').addEventListener('click', () => createNote());
-  $('#btn-new-2').addEventListener('click', () => createNote());
+  $('#btn-new-2').addEventListener('click', () => {
+    closeIndexPanel();
+    createNote();
+  });
+  $('#btn-index').addEventListener('click', toggleIndex);
+  // the sliding panel closes on a click anywhere else, and when the window grows wide again
+  document.addEventListener('pointerdown', (e) => {
+    if ($('#app').classList.contains('index-open') && !e.target.closest('#index, #btn-index')) closeIndexPanel();
+  });
+  narrow.addEventListener('change', closeIndexPanel);
   $('#btn-atlas').addEventListener('click', toggleAtlas);
   $('#btn-find').addEventListener('click', () => openPalette());
   $('#btn-theme').addEventListener('click', toggleTheme);
