@@ -59,9 +59,9 @@ test('trash moves the file aside and blocks late writes', async (t) => {
 
 test('state keeps only known keys with valid values', (t) => {
   const { store } = fresh(t);
-  store.setState({ theme: 'system', skin: 'atlas', accent: 'cyan', fontScale: 1.1 });
-  const state = store.setState({ theme: 'neon', skin: 'neon', accent: '#fff', fontScale: 9, evil: true, lastOpen: '../x' });
-  assert.deepEqual(state, { theme: 'system', skin: 'atlas', accent: 'cyan', fontScale: 1.1 });
+  store.setState({ theme: 'system', skin: 'atlas', accent: 'cyan', fontScale: 1.1, lang: 'en' });
+  const state = store.setState({ theme: 'neon', skin: 'neon', accent: '#fff', fontScale: 9, evil: true, lastOpen: '../x', lang: 'de' });
+  assert.deepEqual(state, { theme: 'system', skin: 'atlas', accent: 'cyan', fontScale: 1.1, lang: 'en' });
   store.flush();
 });
 

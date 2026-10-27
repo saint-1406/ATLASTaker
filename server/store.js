@@ -16,6 +16,7 @@ const STATE_RULES = {
   skin: (v) => v === 'minimal' || v === 'atlas',
   theme: (v) => v === 'dark' || v === 'light' || v === 'system',
   accent: (v) => ['lime', 'cyan', 'orange', 'violet'].includes(v),
+  lang: (v) => v === 'ru' || v === 'en',
   sidebar: (v) => typeof v === 'boolean',
   fontScale: (v) => typeof v === 'number' && v >= 0.7 && v <= 1.8,
   lastOpen: (v) => v === null || (typeof v === 'string' && ID_RE.test(v)),

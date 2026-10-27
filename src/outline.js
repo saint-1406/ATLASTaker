@@ -2,8 +2,7 @@
 // the cursor marked. A click jumps to the heading.
 
 import { h } from './overlays.js';
-
-const number = new Intl.NumberFormat('ru-RU');
+import { formatNumber } from './i18n.js';
 
 /** Index of the last heading at or above `line`, or -1 before the first one. */
 export function activeHeading(headings, line) {
@@ -43,7 +42,7 @@ export class Outline {
           'li',
           { class: 'outline-item', title: hd.text },
           h('span', { class: 'outline-text' }, hd.text),
-          h('span', { class: 'outline-words' }, number.format(hd.words)),
+          h('span', { class: 'outline-words' }, formatNumber(hd.words)),
         );
         item.style.setProperty('--depth', String(hd.level - top));
         item.addEventListener('click', () => this.onJump(hd.line));

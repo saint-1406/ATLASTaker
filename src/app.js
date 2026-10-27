@@ -5,9 +5,10 @@ import { EditorSelection } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { api, rescue } from './bridge.js';
 import { createEditor, insertComment, insertCodeBlock, pasteText, codeLanguageAt, urlAt } from './editor.js';
-import { analyze, formatCount, imageRefs, WORD_FORMS } from './markdown.js';
+import { analyze, imageRefs } from './markdown.js';
 import { commentTarget, commentsUnder, formatStamp } from './comments.js';
-import { COPY, normalizeLook } from './skins.js';
+import { normalizeLook } from './skins.js';
+import { browserLanguages, count, formatDay, formatTime, isLang, pickLang, setLang, t, ui } from './i18n.js';
 import { Outline } from './outline.js';
 import { hashString } from './terrain.js';
 import { TerrainView } from './terrainView.js';
@@ -29,15 +30,14 @@ import {
 import { fileNameFor, makeZip } from './backup.js';
 import welcomeText from './welcome.md';
 import welcomeBrowserText from './welcome-browser.md';
+import welcomeTextEn from './welcome-en.md';
+import welcomeBrowserTextEn from './welcome-browser-en.md';
 
 const $ = (sel) => document.querySelector(sel);
-const number = new Intl.NumberFormat('ru-RU');
-const timeFmt = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' });
-const dayFmt = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' });
-const PEAK_FORMS = { one: 'вершина', few: 'вершины', many: 'вершин', other: 'вершины' };
-const COMMENT_FORMS = { one: 'комментарий', few: 'комментария', many: 'комментариев', other: 'комментария' };
-const NOTE_FORMS = { one: 'заметка', few: 'заметки', many: 'заметок', other: 'заметки' };
-const UNTITLED = 'Без названия';
+const WELCOME = {
+  ru: { server: welcomeText, browser: welcomeBrowserText },
+  en: { server: welcomeTextEn, browser: welcomeBrowserTextEn },
+};
 const SAVE_DELAY = 400;
 const LOOK_KEY = 'atlas-notetaker:look';
 const BACKUP_EVERY = 7 * 24 * 60 * 60 * 1000;
@@ -48,7 +48,14 @@ const inBrowser = api.kind !== 'server'; // the single-file build: notes live in
 const notes = new Map(); // id → { id, content, created, updated, cursor, scroll, info }
 const editorStates = new Map(); // id → EditorState, keeps undo history while the window is open
 const indexItems = new Map(); // id → <li>
-const prefs = { ...normalizeLook(cachedLook()), sidebar: true, fontScale: 1 };
+const cached = cachedLook();
+// a cached look without a language is someone who used ATLAS when it spoke only Russian
+const prefs = {
+  ...normalizeLook(cached),
+  lang: pickLang({ saved: cached.lang, existing: Boolean(cached.skin), preferred: browserLanguages() }),
+  sidebar: true,
+  fontScale: 1,
+};
 let currentId = null;
 let dirty = false;
 let focusMode = false;
@@ -73,13 +80,10 @@ const ready = new Promise((resolve) => {
   markReady = resolve;
 });
 
-const copy = () => COPY[prefs.skin];
+const copy = () => ui().look[prefs.skin];
 const isAtlas = () => prefs.skin === 'atlas';
-const when = (ms) => {
-  const d = new Date(ms);
-  return d.toDateString() === new Date().toDateString() ? timeFmt.format(d) : dayFmt.format(d).replace('.', '');
-};
-const titleOf = (note) => note?.info.title || UNTITLED;
+const when = (ms) => (new Date(ms).toDateString() === new Date().toDateString() ? formatTime(ms) : formatDay(ms));
+const titleOf = (note) => note?.info.title || t('untitled');
 const newestId = () => [...notes.values()].sort((a, b) => b.updated - a.updated)[0]?.id ?? null;
 const effectiveTheme = () => (prefs.theme === 'system' ? (systemDark.matches ? 'dark' : 'light') : prefs.theme);
 
@@ -92,14 +96,14 @@ function cachedLook() {
   }
 }
 
-applyLook({ persist: false });
+applyLanguage({ persist: false });
 
 boot().catch((err) => {
   console.error(err);
   showBlocker({
-    title: 'ATLAS не загрузился',
-    text: `${err.message}. Закройте окно и запустите ATLAS ещё раз.`,
-    action: { text: 'Перезагрузить', run: () => location.reload() },
+    title: t('boot.title'),
+    text: t('boot.text', err.message),
+    action: { text: t('boot.reload'), run: () => location.reload() },
   });
 });
 
@@ -109,13 +113,20 @@ async function boot() {
   Object.assign(prefs, normalizeLook({ ...prefs, ...pickDefined(saved, ['skin', 'theme', 'accent']) }));
   if (typeof saved.sidebar === 'boolean') prefs.sidebar = saved.sidebar;
   if (typeof saved.fontScale === 'number') prefs.fontScale = saved.fontScale;
+  // the language is settled once and stored, so it no longer follows the browser's afterwards
+  const lang = pickLang({ saved: saved.lang, existing: Boolean(saved.welcomed), preferred: browserLanguages() });
+  if (saved.lang !== lang) api.setState({ lang }).catch(() => {});
+  if (lang !== prefs.lang) {
+    prefs.lang = lang;
+    applyLanguage({ persist: false });
+  }
   applySidebar(prefs.sidebar, { persist: false });
   applyFontScale(prefs.fontScale, { persist: false });
 
   let list = await api.list();
   const firstRun = !list.length && !saved.welcomed;
   if (!list.length) {
-    list = [await api.create(saved.welcomed ? '' : inBrowser ? welcomeBrowserText : welcomeText)];
+    list = [await api.create(saved.welcomed ? '' : WELCOME[prefs.lang][inBrowser ? 'browser' : 'server'])];
     api.setState({ welcomed: true }).catch(() => {});
   }
   for (const note of list) notes.set(note.id, { ...note, info: analyze(note.content) });
@@ -165,8 +176,8 @@ async function boot() {
 
 // In the browser build clearing the browser's data would take the notes with it, hence the nudge.
 function remindBackup(lastBackup) {
-  const since = lastBackup ? `Последняя копия — ${dayFmt.format(lastBackup).replace('.', '')}.` : 'Копии ещё не было.';
-  toast(`Заметки хранятся только в этом браузере. ${since}`, { action: { text: 'Скачать .zip', run: exportAll }, timeout: 10_000 });
+  const since = lastBackup ? t('backup.lastCopy', formatDay(lastBackup)) : t('backup.noCopy');
+  toast(t('backup.onlyHere', since), { action: { text: t('backup.download'), run: exportAll }, timeout: 10_000 });
 }
 
 function pickDefined(source, keys) {
@@ -191,7 +202,7 @@ function unsavedDrafts() {
   for (const [id, saved] of Object.entries(rescue.all())) {
     const note = notes.get(id);
     if (typeof saved?.content !== 'string' || (note && saved.content === note.content)) rescue.drop(id);
-    else if (note && saved.at <= note.updated) putAside(id, saved, 'старее сохранённой');
+    else if (note && saved.at <= note.updated) putAside(id, saved, t('restore.olderLabel'));
     else offer.push({ id, content: saved.content, at: saved.at, note });
   }
   return offer.sort((a, b) => b.at - a.at);
@@ -200,7 +211,7 @@ function unsavedDrafts() {
 /** Keeps the text in the backups folder (the browser's trash in the browser build), then forgets the copy. */
 async function putAside(id, saved, label) {
   try {
-    await api.keepDraft?.({ title: analyze(saved.content).title || UNTITLED, content: saved.content, at: saved.at, label });
+    await api.keepDraft?.({ title: analyze(saved.content).title || t('untitled'), content: saved.content, at: saved.at, label });
     rescue.drop(id, saved.content);
     return true;
   } catch (err) {
@@ -211,15 +222,15 @@ async function putAside(id, saved, label) {
 
 const changeSize = (before, after) => {
   const diff = after.length - before.length;
-  return diff ? `${diff > 0 ? '+' : '−'}${number.format(Math.abs(diff))} зн.` : 'правки той же длины';
+  return diff ? `${diff > 0 ? '+' : '−'}${count(Math.abs(diff), 'char')}` : t('restore.sameLength');
 };
 
 /** Asks which texts to put back; returns the note to open when one came back. */
 async function offerRestore(drafts) {
-  const keptWhere = api.openBackupsFolder ? 'в папку бэкапов' : 'в корзину браузера';
+  const keptWhere = t(api.openBackupsFolder ? 'restore.toBackups' : 'restore.toTrash');
   const items = drafts.map((d) => ({
-    title: analyze(d.content).title || UNTITLED,
-    meta: `${dayFmt.format(d.at).replace('.', '')}, ${timeFmt.format(d.at)} · ${d.note ? changeSize(d.note.content, d.content) : 'заметки уже нет — вернётся новой'}`,
+    title: analyze(d.content).title || t('untitled'),
+    meta: `${formatDay(d.at)}, ${formatTime(d.at)} · ${d.note ? changeSize(d.note.content, d.content) : t('restore.noteGone')}`,
   }));
   const answers = await openRestoreDialog({ items, keptWhere });
   let back = 0;
@@ -227,7 +238,7 @@ async function offerRestore(drafts) {
   let openId = null;
   for (const [i, d] of drafts.entries()) {
     if (!answers[i]) {
-      if (await putAside(d.id, d, 'не возвращено')) aside++;
+      if (await putAside(d.id, d, t('restore.skippedLabel'))) aside++;
       continue;
     }
     const id = await restoreDraft(d);
@@ -236,10 +247,10 @@ async function offerRestore(drafts) {
       openId ??= id;
     }
   }
-  if (back) toast(`Вернул несохранённый текст: ${formatCount(back, NOTE_FORMS)}`, { timeout: 6000 });
+  if (back) toast(t('restore.restored', count(back, 'note')), { timeout: 6000 });
   else if (aside) {
-    const action = api.openBackupsFolder ? { text: 'Открыть', run: () => api.openBackupsFolder() } : undefined;
-    toast(`Отложено ${keptWhere}: ${formatCount(aside, NOTE_FORMS)}`, { action, timeout: 8000 });
+    const action = api.openBackupsFolder ? { text: t('notes.open'), run: () => api.openBackupsFolder() } : undefined;
+    toast(t('restore.putAside', keptWhere, count(aside, 'note')), { action, timeout: 8000 });
   }
   return openId;
 }
@@ -253,14 +264,14 @@ async function restoreDraft(d) {
       rescue.drop(d.id, d.content);
       return note.id;
     }
-    await api.keepDraft?.({ title: titleOf(d.note), content: d.note.content, at: d.note.updated, label: 'было на диске' }).catch((err) => console.error(err));
+    await api.keepDraft?.({ title: titleOf(d.note), content: d.note.content, at: d.note.updated, label: t('restore.replacedLabel') }).catch((err) => console.error(err));
     const { updated } = await api.write(d.id, d.content);
     Object.assign(d.note, { content: d.content, info: analyze(d.content), updated });
     rescue.drop(d.id, d.content);
     return d.id;
   } catch (err) {
     console.error(err);
-    toast(`Не получилось вернуть «${analyze(d.content).title || UNTITLED}»: ${err.message}. Копия подождёт следующего запуска.`);
+    toast(t('restore.failed', analyze(d.content).title || t('untitled'), err.message));
     return null;
   }
 }
@@ -315,11 +326,9 @@ async function yieldTo(claimant) {
   suspended = true;
   channel.postMessage({ type: 'released', to: claimant });
   showBlocker({
-    title: 'ATLAS открыт в другом окне',
-    text: saved
-      ? 'Писать можно только в одном окне, чтобы правки не перезаписывали друг друга. Здесь всё сохранено.'
-      : 'Писать можно только в одном окне. Последние правки не дошли до диска, но лежат в аварийной копии — новое окно их подхватит после перезагрузки.',
-    action: { text: 'Продолжить здесь', run: () => location.reload() },
+    title: t('window.title'),
+    text: t(saved ? 'window.saved' : 'window.unsaved'),
+    action: { text: t('window.continue'), run: () => location.reload() },
   });
 }
 
@@ -329,11 +338,9 @@ function connectionLost(err) {
   setSaveState('error');
   const restarted = err.status === 403;
   showBlocker({
-    title: restarted ? 'ATLAS перезапустился' : 'Связь с ATLAS потеряна',
-    text: restarted
-      ? 'Сервер заметок начал новый сеанс. Обновите окно: несохранённый текст лежит в аварийной копии и вернётся.'
-      : 'Сервер заметок не отвечает. Несохранённый текст лежит в аварийной копии этого окна. Запустите ATLAS с ярлыка — текст вернётся.',
-    action: { text: restarted ? 'Обновить окно' : 'Попробовать снова', run: () => location.reload() },
+    title: t(restarted ? 'connection.restartedTitle' : 'connection.lostTitle'),
+    text: t(restarted ? 'connection.restartedText' : 'connection.lostText'),
+    action: { text: t(restarted ? 'connection.reload' : 'connection.retry'), run: () => location.reload() },
   });
 }
 
@@ -362,13 +369,14 @@ async function openNoteNow(id, { transition = 'reveal', origin } = {}) {
     return;
   }
   if (currentId && !(await leaveCurrent())) {
-    toast('Заметка не сохранилась, поэтому остаюсь на ней. Сохранение повторяется.');
+    toast(t('notes.stayed'));
     return;
   }
 
   currentId = id;
   note.blankAtOpen = !note.content.trim();
   editor.view.setState(editorStates.get(id) ?? editor.makeState(note.content, savedSelection(note)));
+  editor.localize(); // a kept state may still speak the language it was made in
   dirty = false;
   setSaveState('saved', note.updated, { quiet: true });
   const scroll = note.scroll || 0;
@@ -435,7 +443,7 @@ async function deleteNote(id) {
     trashing = null;
     // the file is still there: keep the note open and saving as if nothing happened
     if (wasOpen && dirty) saveTimer = setTimeout(flushSave, SAVE_DELAY);
-    toast(`Не получилось удалить: ${err.message}`);
+    toast(t('notes.deleteFailed', err.message));
     return;
   }
   trashing = null;
@@ -447,7 +455,7 @@ async function deleteNote(id) {
   if (!notes.size) await createNote();
   else if (!currentId) await openNote(newestId());
   renderIndex();
-  toast(copy().deleted(titleOf(note)), api.openNotesFolder ? { action: { text: 'Открыть папку', run: () => api.openNotesFolder() } } : {});
+  toast(copy().deleted(titleOf(note)), api.openNotesFolder ? { action: { text: t('notes.openFolder'), run: () => api.openNotesFolder() } } : {});
 }
 
 // ---------- saving ----------
@@ -544,7 +552,7 @@ function setSaveState(state, at, { quiet = false } = {}) {
   if (state === 'pending') label.textContent = c.pending;
   else if (state === 'error') label.textContent = c.failed;
   else {
-    label.textContent = lastSave.at ? `${c.saved} · ${timeFmt.format(lastSave.at)}` : c.saved;
+    label.textContent = lastSave.at ? `${c.saved} · ${formatTime(lastSave.at)}` : c.saved;
     if (!quiet) {
       el.classList.remove('stamp');
       void el.offsetWidth;
@@ -582,8 +590,8 @@ function renderPace() {
   const max = Math.max(60, ...pace);
   const perMinute = pace.slice(-6).reduce((a, b) => a + b, 0);
   el.hidden = false;
-  // about six characters per Russian word, space included
-  el.textContent = `${pace.map((v) => bars[Math.min(7, Math.round((v / max) * 7))]).join('')} ${Math.round(perMinute / 6)} сл/мин`;
+  // about six characters per word, space included, in Russian and in English alike
+  el.textContent = `${pace.map((v) => bars[Math.min(7, Math.round((v / max) * 7))]).join('')} ${t('status.pace', Math.round(perMinute / 6))}`;
 }
 
 // ---------- what the chrome shows ----------
@@ -605,10 +613,10 @@ function refreshChrome() {
   const { info } = note;
   $('#crumb').textContent = titleOf(note);
   document.title = `${titleOf(note)} — ATLAS`;
-  const comments = info.comments ? formatCount(info.comments, COMMENT_FORMS) : '';
-  const words = `${formatCount(info.words, WORD_FORMS)} · ${number.format(info.chars)} зн.`;
+  const comments = info.comments ? count(info.comments, 'comment') : '';
+  const words = `${count(info.words, 'word')} · ${count(info.chars, 'char')}`;
   $('#sb-words').textContent = !isAtlas() && comments ? `${words} · ${comments}` : words;
-  const peaks = info.headings.length ? `▲ ${formatCount(info.headings.length, PEAK_FORMS)} · 1 слово = 1 м` : copy().noHeadings;
+  const peaks = info.headings.length ? t('status.peaks', count(info.headings.length, 'peak')) : copy().noHeadings;
   $('#sb-peaks').textContent = comments ? `${peaks} · 💬 ${comments}` : peaks;
   outline.setHeadings(info.headings);
   outline.setCursorLine(editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number);
@@ -626,11 +634,11 @@ function showCursorStatus(state) {
   const selected = state.selection.ranges.reduce((n, r) => n + r.to - r.from, 0);
   const selEl = $('#sb-sel');
   selEl.hidden = !selected;
-  selEl.textContent = `Выделено ${number.format(selected)} зн.`;
+  selEl.textContent = t('status.selected', count(selected, 'char'));
   const lang = codeLanguageAt(state, sel.head);
   const langEl = $('#sb-lang');
   langEl.hidden = lang == null;
-  langEl.textContent = `⌗ ${lang || 'код'}`;
+  langEl.textContent = `⌗ ${lang || t('status.code')}`;
   outline?.setCursorLine(line.number);
 }
 
@@ -682,7 +690,7 @@ function jumpToLine(lineNumber) {
 
 function makeIndexItem(note) {
   const thumb = h('canvas', { class: 'idx-thumb', width: '72', height: '72', 'aria-hidden': 'true' });
-  const del = h('button', { type: 'button', class: 'idx-del', 'aria-label': 'Удалить заметку' }, '✕');
+  const del = h('button', { type: 'button', class: 'idx-del' }, '✕');
   const li = h(
     'li',
     { class: 'idx-item', tabindex: '0', role: 'button', 'data-id': note.id },
@@ -713,8 +721,8 @@ function makeIndexItem(note) {
   li.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     showMenu(e.clientX, e.clientY, [
-      { icon: '↗', text: 'Открыть', run: open },
-      { icon: '⇩', text: 'Сохранить копию .md', run: () => exportNote(note.id) },
+      { icon: '↗', text: t('notes.open'), run: open },
+      { icon: '⇩', text: t('notes.saveCopy'), run: () => exportNote(note.id) },
       '-',
       { icon: '✕', text: copy().deleteItem, kbd: 'Del', className: 'danger', run: () => deleteNote(note.id) },
     ]);
@@ -728,8 +736,10 @@ function updateIndexItem(note, li = indexItems.get(note.id)) {
   const title = li.querySelector('.idx-title');
   title.textContent = titleOf(note);
   title.classList.toggle('untitled', !note.info.title);
-  li.querySelector('.idx-meta').textContent = `${when(note.updated)} · ${number.format(note.info.words)} сл.`;
-  li.querySelector('.idx-del').title = copy().deleteItem;
+  li.querySelector('.idx-meta').textContent = `${when(note.updated)} · ${count(note.info.words, 'wordShort')}`;
+  const del = li.querySelector('.idx-del');
+  del.title = copy().deleteItem;
+  del.setAttribute('aria-label', t('notes.deleteNote'));
   li.classList.toggle('active', note.id === currentId);
   li.setAttribute('aria-current', note.id === currentId ? 'true' : 'false');
 }
@@ -766,25 +776,25 @@ function openEditorMenu(event, view) {
   const url = urlAt(state, sel.head);
 
   const items = [];
-  if (url) items.push({ icon: '↗', text: 'Открыть ссылку', kbd: 'Ctrl+клик', run: () => api.openExternal(url) }, '-');
+  if (url) items.push({ icon: '↗', text: t('menu.openLink'), kbd: t('menu.ctrlClick'), run: () => api.openExternal(url) }, '-');
   items.push(
     {
       icon: '❝',
-      text: 'Добавить комментарий',
+      text: t('menu.addComment'),
       kbd: 'Ctrl+Shift+M',
       disabled: inCode,
-      title: inCode ? 'Внутри блока кода комментарий сломал бы код' : undefined,
+      title: inCode ? t('comment.inCode') : undefined,
       run: () => requestComment(view, line.number),
     },
     '-',
-    { icon: '✂', text: 'Вырезать', kbd: 'Ctrl+X', disabled: sel.empty, run: () => cutSelection(view) },
-    { icon: '⧉', text: 'Копировать', kbd: 'Ctrl+C', disabled: sel.empty, run: () => copySelection(view) },
-    { icon: '⎘', text: 'Вставить', kbd: 'Ctrl+V', run: () => pasteFromClipboard(view) },
+    { icon: '✂', text: t('menu.cut'), kbd: 'Ctrl+X', disabled: sel.empty, run: () => cutSelection(view) },
+    { icon: '⧉', text: t('menu.copy'), kbd: 'Ctrl+C', disabled: sel.empty, run: () => copySelection(view) },
+    { icon: '⎘', text: t('menu.paste'), kbd: 'Ctrl+V', run: () => pasteFromClipboard(view) },
     '-',
-    { icon: '⌗', text: sel.empty ? 'Блок кода' : 'Обернуть в блок кода', kbd: 'Ctrl+E', run: () => insertCodeBlock(view) },
-    { icon: '▣', text: 'Выделить всё', kbd: 'Ctrl+A', run: () => view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }) },
-    { icon: '⇩', text: 'Сохранить копию .md', run: () => exportNote(currentId) },
-    { note: 'Shift + правая кнопка — меню браузера с орфографией' },
+    { icon: '⌗', text: t(sel.empty ? 'menu.codeBlock' : 'menu.wrapCode'), kbd: 'Ctrl+E', run: () => insertCodeBlock(view) },
+    { icon: '▣', text: t('menu.selectAll'), kbd: 'Ctrl+A', run: () => view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }) },
+    { icon: '⇩', text: t('notes.saveCopy'), run: () => exportNote(currentId) },
+    { note: t('menu.spelling') },
   );
   showMenu(event.clientX, event.clientY, items, { onClose: () => view.focus() });
 }
@@ -794,14 +804,14 @@ async function requestComment(view, lineNumber) {
   const sel = state.selection.main;
   const n = lineNumber ?? state.doc.lineAt(sel.empty ? sel.head : Math.max(sel.from, sel.to - 1)).number;
   if (codeLanguageAt(state, state.doc.line(n).from) !== null) {
-    toast('Внутри блока кода комментарий сломал бы код');
+    toast(t('comment.inCode'));
     return;
   }
   const lines = state.doc.toJSON();
   const target = commentTarget(lines, n);
   const body = await openCommentDialog({
     kicker: copy().commentKicker,
-    quote: lines[target - 1].trim() || '(пустая строка)',
+    quote: lines[target - 1].trim() || t('comment.emptyLine'),
     history: commentsUnder(lines, target),
   });
   view.focus();
@@ -814,7 +824,7 @@ async function copySelection(view) {
     await api.copy(view.state.sliceDoc(sel.from, sel.to));
     return true;
   } catch {
-    toast('Браузер не дал доступ к буферу — используйте Ctrl+C');
+    toast(t('clipboard.blocked', 'Ctrl+C'));
     return false;
   }
 }
@@ -827,12 +837,12 @@ async function pasteFromClipboard(view) {
   try {
     pasteText(view, await api.readClipboard(), onSmartPaste);
   } catch {
-    toast('Браузер не дал доступ к буферу — используйте Ctrl+V');
+    toast(t('clipboard.blocked', 'Ctrl+V'));
   }
 }
 
 function onSmartPaste(lang, undoWrap) {
-  toast(`Код обёрнут в блок${lang ? ` · ${lang}` : ''}`, { action: { text: 'Отменить', run: undoWrap } });
+  toast(t('paste.wrapped', lang), { action: { text: t('paste.undo'), run: undoWrap } });
 }
 
 function exportNote(id) {
@@ -847,25 +857,25 @@ const IMAGE_LIMIT = 15 * 1024 * 1024;
 /** A pasted or dropped picture: stored by the app, then shown in the note on a line of its own. */
 async function addImage(file, pos) {
   if (!api.saveAsset) {
-    toast('Здесь картинки не поддерживаются');
+    toast(t('image.unsupported'));
     return;
   }
   if (file.size > IMAGE_LIMIT) {
-    toast('Картинка больше 15 МБ — уменьшите её и вставьте снова');
+    toast(t('image.tooBig'));
     return;
   }
   let name;
   try {
     name = await api.saveAsset(file);
   } catch (err) {
-    toast(`Картинка не сохранилась: ${err.message}`);
+    toast(t('image.failed', err.message));
     return;
   }
   const { view } = editor;
   const line = view.state.doc.lineAt(pos ?? view.state.selection.main.head);
   // a clipboard screenshot arrives as "image.png"; a dropped file keeps its own name
   const named = file.name && !/^image\.\w+$/i.test(file.name);
-  const alt = (named ? file.name.replace(/\.[^.]+$/, '') : `Скриншот ${formatStamp(new Date())}`).replace(/[[\]\n]/g, ' ');
+  const alt = (named ? file.name.replace(/\.[^.]+$/, '') : t('image.screenshot', formatStamp(new Date()))).replace(/[[\]\n]/g, ' ');
   const blank = !line.text.trim();
   const at = blank ? line.from : line.to;
   const text = `${blank ? '' : '\n'}![${alt}](assets/${name})\n`;
@@ -891,10 +901,10 @@ async function backupFiles() {
 async function exportAll() {
   const files = await backupFiles();
   const stamp = new Date().toISOString().slice(0, 10);
-  api.download(`ATLAS-заметки-${stamp}.zip`, makeZip(files), 'application/zip');
+  api.download(t('backup.zipName', stamp), makeZip(files), 'application/zip');
   api.setState({ lastBackup: Date.now() }).catch(() => {});
-  const count = files.filter((file) => !file.bytes).length;
-  toast(`Скачано: ${formatCount(count, NOTE_FORMS)}`);
+  const texts = files.filter((file) => !file.bytes).length;
+  toast(t('backup.downloaded', count(texts, 'note')));
 }
 
 /** Brings .md / .txt files in as new notes (from a backup, another app or another computer). */
@@ -911,12 +921,36 @@ function importFiles() {
     if (!last) return;
     renderIndex();
     await openNote(last);
-    toast(`Добавлено: ${formatCount(input.files.length, NOTE_FORMS)}`);
+    toast(t('backup.imported', count(input.files.length, 'note')));
   });
   input.click();
 }
 
-// ---------- the look: skin, theme, accent ----------
+// ---------- the language and the look: skin, theme, accent ----------
+
+/**
+ * Puts the interface into prefs.lang: the page's fixed words (data-i18n="key" for the text,
+ * data-i18n-title / -label / -placeholder for attributes), the editor's, then all the look redraws.
+ */
+function applyLanguage({ persist = true } = {}) {
+  setLang(prefs.lang);
+  document.documentElement.lang = prefs.lang;
+  document.querySelectorAll('[data-i18n]').forEach((el) => (el.textContent = t(el.dataset.i18n)));
+  document.querySelectorAll('[data-i18n-title]').forEach((el) => (el.title = t(el.dataset.i18nTitle)));
+  document.querySelectorAll('[data-i18n-label]').forEach((el) => el.setAttribute('aria-label', t(el.dataset.i18nLabel)));
+  document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => (el.placeholder = t(el.dataset.i18nPlaceholder)));
+  if (persist) api.setState({ lang: prefs.lang }).catch(() => {});
+  applyLook({ persist: false });
+  if (!editor) return;
+  editor.localize();
+  renderPace();
+}
+
+function setLanguage(lang) {
+  if (!isLang(lang) || lang === prefs.lang) return;
+  prefs.lang = lang;
+  applyLanguage();
+}
 
 /** Puts the current look on the page: root attributes, the look's words, the map on or off. */
 function applyLook({ persist = true } = {}) {
@@ -935,7 +969,7 @@ function applyLook({ persist = true } = {}) {
     el.placeholder = c[el.dataset.copyPlaceholder];
   });
   try {
-    localStorage.setItem(LOOK_KEY, JSON.stringify({ skin: prefs.skin, theme: prefs.theme, accent: prefs.accent }));
+    localStorage.setItem(LOOK_KEY, JSON.stringify({ skin: prefs.skin, theme: prefs.theme, accent: prefs.accent, lang: prefs.lang }));
   } catch {
     // only a convenience
   }
@@ -997,32 +1031,35 @@ function applyFontScale(scale, { persist = true } = {}) {
   editor?.view.requestMeasure();
   if (!persist) return;
   api.setState({ fontScale: prefs.fontScale }).catch(() => {});
-  toast(`Размер текста ${Math.round(prefs.fontScale * 100)}%`, { timeout: 1400 });
+  toast(t('view.fontSize', Math.round(prefs.fontScale * 100)), { timeout: 1400 });
 }
 
 function toggleFocus(on = !focusMode) {
   focusMode = on;
   $('#app').classList.toggle('focus', on);
   requestAnimationFrame(() => terrain.render('fade'));
-  if (on) toast('Режим фокуса · Esc или Ctrl+. — выйти', { timeout: 2200 });
+  if (on) toast(t('view.focus'), { timeout: 2200 });
   editor.view.focus();
 }
 
-function showSettings() {
-  const where = inBrowser
-    ? 'Заметки хранятся в этом браузере. Если очистить его данные, они пропадут — время от времени скачивайте копию.'
-    : 'Заметки — обычные файлы .md в папке %APPDATA%\\ATLAS Notetaker\\notes. Перед каждым обновлением и раз в день их копия ложится в папку backups рядом.';
+/** Where the notes are and what to do with them, for the settings dialog (read again in a new language). */
+function storageInfo() {
   const actions = [
-    { text: 'Скачать все заметки (.zip)', run: exportAll },
-    { text: 'Импорт .md', run: importFiles },
+    { text: t('settings.exportAll'), run: exportAll },
+    { text: t('settings.import'), run: importFiles },
   ];
-  if (api.openNotesFolder) actions.push({ text: 'Открыть папку', run: () => api.openNotesFolder() });
-  if (api.openBackupsFolder) actions.push({ text: 'Папка бэкапов', run: () => api.openBackupsFolder() });
+  if (api.openNotesFolder) actions.push({ text: t('settings.openFolder'), run: () => api.openNotesFolder() });
+  if (api.openBackupsFolder) actions.push({ text: t('settings.backupsFolder'), run: () => api.openBackupsFolder() });
+  return { text: t(inBrowser ? 'settings.inBrowser' : 'settings.onDisk'), actions };
+}
+
+function showSettings() {
   openSettings({
-    data: { text: where, actions },
+    getData: storageInfo,
     getPrefs: () => ({ ...prefs }),
     onChange(patch) {
       if ('fontScale' in patch) applyFontScale(patch.fontScale);
+      else if ('lang' in patch) setLanguage(patch.lang);
       else setLook(patch);
     },
   });
@@ -1032,28 +1069,40 @@ function showSettings() {
 
 function commandList() {
   const c = copy();
+  // keywords hold both languages, so a command is found whatever the interface speaks
   const list = [
     { icon: '＋', title: c.newNote, kbd: 'Ctrl+N', keywords: 'new создать', run: () => createNote() },
-    { icon: '◐', title: effectiveTheme() === 'dark' ? 'Светлая тема' : 'Тёмная тема', kbd: 'Ctrl+Shift+L', keywords: 'theme тема', run: toggleTheme },
+    { icon: '◐', title: t(effectiveTheme() === 'dark' ? 'commands.light' : 'commands.dark'), kbd: 'Ctrl+Shift+L', keywords: 'theme тема', run: toggleTheme },
     {
       icon: '◇',
-      title: isAtlas() ? 'Оформление «Минимал»' : 'Оформление «Атлас»',
-      keywords: 'skin оформление дизайн атлас минимал',
+      title: t(isAtlas() ? 'commands.toMinimal' : 'commands.toAtlas'),
+      keywords: 'skin look оформление дизайн atlas minimal атлас минимал',
       run: () => setLook({ skin: isAtlas() ? 'minimal' : 'atlas' }),
     },
-    { icon: '⚙', title: 'Настройки', kbd: 'Ctrl+,', keywords: 'settings акцент цвет шрифт размер', run: showSettings },
-    { icon: '▤', title: 'Список заметок: показать / скрыть', kbd: 'Ctrl+B', keywords: 'sidebar панель список', run: toggleIndex },
-    { icon: '◎', title: focusMode ? 'Выйти из режима фокуса' : 'Режим фокуса', kbd: 'Ctrl+.', keywords: 'focus фокус', run: () => toggleFocus() },
-    { icon: '❝', title: 'Комментарий к строке', kbd: 'Ctrl+Shift+M', keywords: 'comment', run: () => requestComment(editor.view) },
-    { icon: '⌗', title: 'Блок кода', kbd: 'Ctrl+E', keywords: 'code код', run: () => insertCodeBlock(editor.view) },
-    { icon: '⇩', title: 'Сохранить копию .md', keywords: 'export экспорт скачать', run: () => exportNote(currentId) },
-    { icon: '⇊', title: 'Скачать все заметки (.zip)', keywords: 'backup резервная копия архив экспорт zip', run: exportAll },
-    { icon: '⇡', title: 'Импорт .md', keywords: 'import импорт загрузить файлы', run: importFiles },
+    { icon: '⚙', title: t('commands.settings'), kbd: 'Ctrl+,', keywords: 'settings настройки accent акцент цвет font шрифт size размер', run: showSettings },
+    {
+      icon: '⇄',
+      title: t('commands.otherLang'),
+      keywords: 'language язык english английский русский russian interface интерфейс',
+      run: () => setLanguage(prefs.lang === 'ru' ? 'en' : 'ru'),
+    },
+    { icon: '▤', title: t('commands.sidebar'), kbd: 'Ctrl+B', keywords: 'sidebar list панель список', run: toggleIndex },
+    { icon: '◎', title: t(focusMode ? 'commands.unfocus' : 'commands.focus'), kbd: 'Ctrl+.', keywords: 'focus фокус', run: () => toggleFocus() },
+    { icon: '❝', title: t('commands.comment'), kbd: 'Ctrl+Shift+M', keywords: 'comment комментарий', run: () => requestComment(editor.view) },
+    { icon: '⌗', title: t('commands.codeBlock'), kbd: 'Ctrl+E', keywords: 'code код', run: () => insertCodeBlock(editor.view) },
+    { icon: '⇩', title: t('commands.saveCopy'), keywords: 'export save экспорт скачать', run: () => exportNote(currentId) },
+    { icon: '⇊', title: t('commands.exportAll'), keywords: 'backup download резервная копия архив экспорт zip', run: exportAll },
+    { icon: '⇡', title: t('commands.import'), keywords: 'import upload files импорт загрузить файлы', run: importFiles },
   ];
-  if (isAtlas()) list.splice(1, 0, { icon: '▦', title: 'Атлас заметок', kbd: 'Ctrl+M', keywords: 'atlas карта архипелаг', run: toggleAtlas });
-  if (api.openNotesFolder) list.push({ icon: '▭', title: 'Открыть папку заметок', keywords: 'folder папка файлы', run: () => api.openNotesFolder() });
+  if (isAtlas()) list.splice(1, 0, { icon: '▦', title: t('commands.atlas'), kbd: 'Ctrl+M', keywords: 'atlas map archipelago карта архипелаг', run: toggleAtlas });
+  if (api.openNotesFolder) list.push({ icon: '▭', title: t('commands.notesFolder'), keywords: 'folder files папка файлы', run: () => api.openNotesFolder() });
   if (api.openBackupsFolder) {
-    list.push({ icon: '⟲', title: 'Папка бэкапов', keywords: 'backup бэкап резервная копия восстановить обновление', run: () => api.openBackupsFolder() });
+    list.push({
+      icon: '⟲',
+      title: t('commands.backupsFolder'),
+      keywords: 'backup restore update бэкап резервная копия восстановить обновление',
+      run: () => api.openBackupsFolder(),
+    });
   }
   return list;
 }
@@ -1063,7 +1112,7 @@ function openPalette(initial = '') {
     initial,
     notes: [...notes.values()]
       .sort((a, b) => b.updated - a.updated)
-      .map((n) => ({ id: n.id, title: titleOf(n), meta: `${when(n.updated)} · ${number.format(n.info.words)} сл.`, content: n.content })),
+      .map((n) => ({ id: n.id, title: titleOf(n), meta: `${when(n.updated)} · ${count(n.info.words, 'wordShort')}`, content: n.content })),
     commands: commandList(),
     onPick: (id) => openNote(id),
     onCreate: (title) => createNote(`# ${title}\n\n`),
@@ -1171,9 +1220,11 @@ window.__atlas = {
       words: note?.info.words,
       headings: note?.info.headings.map((hd) => hd.text),
       look: { skin: prefs.skin, theme: prefs.theme, accent: prefs.accent },
+      lang: prefs.lang,
       save: $('#sb-save').dataset.state,
     };
   },
+  setLanguage,
   text: () => editor.view.state.doc.toString(),
   type(text) {
     const { view } = editor;

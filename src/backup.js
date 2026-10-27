@@ -1,6 +1,8 @@
 // Backups: every note as a .md file inside one .zip (stored, not compressed: notes are small and any
 // unzip tool, Windows Explorer included, opens it), and the file names the notes get.
 
+import { t } from './i18n.js';
+
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
   for (let n = 0; n < 256; n++) {
@@ -21,7 +23,7 @@ const NOT_IN_FILE_NAMES = /[\\/:*?"<>|\u0000-\u001f]+/g;
 
 /** A safe, unique "<title>.md"; `used` collects the names already taken (case-insensitive, as on Windows). */
 export function fileNameFor(title, used) {
-  const base = String(title ?? '').replace(NOT_IN_FILE_NAMES, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Без названия';
+  const base = String(title ?? '').replace(NOT_IN_FILE_NAMES, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || t('untitled');
   let name = `${base}.md`;
   for (let n = 2; used.has(name.toLowerCase()); n++) name = `${base} (${n}).md`;
   used.add(name.toLowerCase());

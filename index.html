@@ -15,7 +15,7 @@
 
   <div class="app" id="app">
     <header class="titlebar">
-      <button class="tb-btn icon" id="btn-index" type="button" title="Список заметок (Ctrl+B)" aria-label="Список заметок" aria-controls="index">
+      <button class="tb-btn icon" id="btn-index" type="button" title="Список заметок (Ctrl+B)" aria-label="Список заметок" data-i18n-title="chrome.notesListKey" data-i18n-label="chrome.notesList" aria-controls="index">
         <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M6 2.75v10.5" stroke="currentColor" stroke-width="1.2"/></svg>
       </button>
       <div class="brand" aria-label="ATLAS Notetaker">
@@ -33,31 +33,31 @@
         <span class="brand-sub">notetaker</span>
       </div>
       <div class="crumb" id="crumb"></div>
-      <nav class="tb-actions" aria-label="Действия">
-        <button class="tb-btn tb-search" id="btn-find" type="button" title="Заметки и команды (Ctrl+K)">
+      <nav class="tb-actions" aria-label="Действия" data-i18n-label="chrome.actions">
+        <button class="tb-btn tb-search" id="btn-find" type="button" title="Заметки и команды (Ctrl+K)" data-i18n-title="chrome.findKey">
           <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="m10.4 10.4 3.6 3.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
           <span data-copy="search">Поиск и команды</span>
           <kbd class="minimal-only">Ctrl K</kbd>
         </button>
-        <button class="tb-btn atlas-only" id="btn-atlas" type="button" title="Все заметки на одной карте (Ctrl+M)">
+        <button class="tb-btn atlas-only" id="btn-atlas" type="button" title="Все заметки на одной карте (Ctrl+M)" data-i18n-title="chrome.atlasKey">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5 5.5 2l5 1.5 4-1.5v10.5l-4 1.5-5-1.5-4 1.5ZM5.5 2v10.5M10.5 3.5V14" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>
-          <span>Атлас</span>
+          <span data-i18n="chrome.atlas">Атлас</span>
         </button>
-        <button class="tb-btn icon" id="btn-theme" type="button" title="Светлая / тёмная (Ctrl+Shift+L)" aria-label="Сменить тему">☀</button>
-        <button class="tb-btn icon" id="btn-settings" type="button" title="Настройки (Ctrl+,)" aria-label="Настройки">
+        <button class="tb-btn icon" id="btn-theme" type="button" title="Светлая / тёмная (Ctrl+Shift+L)" aria-label="Сменить тему" data-i18n-title="chrome.themeKey" data-i18n-label="chrome.theme">☀</button>
+        <button class="tb-btn icon" id="btn-settings" type="button" title="Настройки (Ctrl+,)" aria-label="Настройки" data-i18n-title="chrome.settingsKey" data-i18n-label="chrome.settings">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 11.5h11" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><circle cx="6" cy="4.5" r="1.8" fill="var(--bg)" stroke="currentColor" stroke-width="1.2"/><circle cx="10.5" cy="11.5" r="1.8" fill="var(--bg)" stroke="currentColor" stroke-width="1.2"/></svg>
         </button>
-        <button class="tb-btn icon accent" id="btn-new" type="button" title="Новая заметка (Ctrl+N)" aria-label="Новая заметка">＋</button>
+        <button class="tb-btn icon accent" id="btn-new" type="button" title="Новая заметка (Ctrl+N)" aria-label="Новая заметка" data-i18n-title="chrome.newNoteKey" data-i18n-label="chrome.newNote">＋</button>
       </nav>
     </header>
 
     <div class="body">
-      <aside class="index" id="index" aria-label="Список заметок">
+      <aside class="index" id="index" aria-label="Список заметок" data-i18n-label="chrome.notesList">
         <div class="index-head">
           <span class="legend-label" data-copy="notes">Заметки</span>
           <span class="index-count" id="index-count"></span>
         </div>
-        <div class="index-search"><input class="field" id="index-filter" type="search" data-copy-placeholder="filter" placeholder="Фильтр" spellcheck="false" aria-label="Фильтр заметок"></div>
+        <div class="index-search"><input class="field" id="index-filter" type="search" data-copy-placeholder="filter" placeholder="Фильтр" spellcheck="false" aria-label="Фильтр заметок" data-i18n-label="chrome.filterNotes"></div>
         <ol class="index-list" id="index-list"></ol>
         <button class="index-new" id="btn-new-2" type="button"><span aria-hidden="true">＋</span> <span data-copy="newNote">Новая заметка</span><kbd class="minimal-only">Ctrl N</kbd></button>
       </aside>
@@ -65,7 +65,7 @@
         <div class="progress" id="progress" aria-hidden="true"></div>
         <section class="sheet" id="sheet"><div id="editor" class="editor-host"></div></section>
       </main>
-      <aside class="outline" id="outline" aria-label="Содержание заметки">
+      <aside class="outline" id="outline" aria-label="Содержание заметки" data-i18n-label="chrome.outline">
         <div class="outline-label"></div>
         <ol class="outline-list"></ol>
       </aside>
@@ -76,7 +76,7 @@
       <span class="sb-item" id="sb-sel" hidden></span>
       <span class="sb-item sb-lang" id="sb-lang" hidden></span>
       <span class="sb-spacer"></span>
-      <span class="sb-item sb-pace minimal-only" id="sb-pace" title="Темп набора за последние две минуты" hidden></span>
+      <span class="sb-item sb-pace minimal-only" id="sb-pace" title="Темп набора за последние две минуты" data-i18n-title="chrome.pace" hidden></span>
       <span class="sb-item atlas-only" id="sb-peaks"></span>
       <span class="sb-item" id="sb-words"></span>
       <span class="sb-item sb-save" id="sb-save" data-state="saved" role="status" aria-live="polite"><i aria-hidden="true"></i><b></b></span>
@@ -86,15 +86,15 @@
   <div id="atlas" class="atlas" hidden>
     <canvas class="atlas-canvas"></canvas>
     <div class="atlas-cartouche">
-      <div class="atlas-title">Архипелаг заметок</div>
+      <div class="atlas-title" data-i18n="chrome.atlasTitle">Архипелаг заметок</div>
       <div class="atlas-sub" id="atlas-sub"></div>
     </div>
-    <div class="atlas-search"><input class="field" id="atlas-filter" type="search" placeholder="Найти остров…" spellcheck="false" aria-label="Поиск по островам"></div>
+    <div class="atlas-search"><input class="field" id="atlas-filter" type="search" placeholder="Найти остров…" spellcheck="false" aria-label="Поиск по островам" data-i18n-placeholder="chrome.atlasFind" data-i18n-label="chrome.atlasSearch"></div>
     <div class="atlas-actions">
-      <button class="tb-btn" id="atlas-new" type="button">＋ <span>Новый остров</span></button>
-      <button class="tb-btn" id="atlas-close" type="button" title="Назад к заметке (Esc)">✕ <span>Закрыть</span></button>
+      <button class="tb-btn" id="atlas-new" type="button">＋ <span data-i18n="chrome.atlasNew">Новый остров</span></button>
+      <button class="tb-btn" id="atlas-close" type="button" title="Назад к заметке (Esc)" data-i18n-title="chrome.atlasBack">✕ <span data-i18n="chrome.atlasClose">Закрыть</span></button>
     </div>
-    <div class="atlas-hint">колесо — масштаб · перетаскивание — обзор · клик — высадиться · Esc — назад</div>
+    <div class="atlas-hint" data-i18n="chrome.atlasHint">колесо — масштаб · перетаскивание — обзор · клик — высадиться · Esc — назад</div>
     <svg class="atlas-compass" viewBox="-12 -16 124 128" aria-hidden="true">
       <circle cx="50" cy="50" r="46" fill="none" stroke="currentColor" stroke-width=".8"/>
       <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" stroke-width=".5" stroke-dasharray="1 3"/>

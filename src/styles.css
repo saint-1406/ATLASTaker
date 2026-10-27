@@ -1926,15 +1926,24 @@ textarea {
   margin: 8px 10px 4px;
 }
 
-/* settings */
+/* settings: on a short window only the groups scroll, the title and "Done" stay in view */
 .modal-settings {
   width: min(620px, 100%);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(86vh - 16px);
 }
 
 .set-body {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* room for focus rings at the scrolling edges */
+  margin: -3px;
+  padding: 3px;
 }
 
 .set-group {

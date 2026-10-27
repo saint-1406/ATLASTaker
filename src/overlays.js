@@ -2,6 +2,7 @@
 // User text always goes in through text nodes, never as HTML.
 
 import { ACCENTS, SKINS, THEMES } from './skins.js';
+import { LANGS, t } from './i18n.js';
 
 const layer = () => document.getElementById('overlays');
 
@@ -157,7 +158,7 @@ function openDialog(build, { onClose, dismissable = true, className = '' } = {})
 }
 
 /** Resolves to the comment text, or null when cancelled. */
-export function openCommentDialog({ quote, history = [], kicker = 'Комментарий' }) {
+export function openCommentDialog({ quote, history = [], kicker = t('comment.kicker') }) {
   return new Promise((resolve) => {
     openDialog(
       (box, close) => {
@@ -165,8 +166,8 @@ export function openCommentDialog({ quote, history = [], kicker = 'Коммен�
           class: 'field field-area',
           rows: '3',
           maxlength: '2000',
-          placeholder: 'Что нового? Например: «перенесли на четверг»',
-          'aria-label': 'Текст комментария',
+          placeholder: t('comment.placeholder'),
+          'aria-label': t('comment.label'),
           'data-autofocus': true,
         });
         const submit = () => {
@@ -188,12 +189,12 @@ export function openCommentDialog({ quote, history = [], kicker = 'Коммен�
         });
         box.append(
           h('div', { class: 'modal-kicker' }, kicker),
-          h('h2', { class: 'modal-title' }, 'Комментарий к строке'),
+          h('h2', { class: 'modal-title' }, t('comment.title')),
           h('blockquote', { class: 'modal-quote' }, quote),
           history.length
             ? h(
                 'ol',
-                { class: 'modal-history', 'aria-label': 'Предыдущие комментарии' },
+                { class: 'modal-history', 'aria-label': t('comment.history') },
                 history.map((c) => h('li', {}, h('span', { class: 'modal-stamp' }, c.stamp), h('span', {}, c.text))),
               )
             : null,
@@ -201,9 +202,9 @@ export function openCommentDialog({ quote, history = [], kicker = 'Коммен�
           h(
             'div',
             { class: 'modal-actions' },
-            h('span', { class: 'modal-hint' }, 'Enter — добавить · Esc — отмена'),
-            h('button', { type: 'button', class: 'btn', onclick: () => close(null) }, 'Отмена'),
-            h('button', { type: 'button', class: 'btn primary', onclick: submit }, 'Добавить'),
+            h('span', { class: 'modal-hint' }, t('comment.hint')),
+            h('button', { type: 'button', class: 'btn', onclick: () => close(null) }, t('dialog.cancel')),
+            h('button', { type: 'button', class: 'btn primary', onclick: submit }, t('comment.add')),
           ),
         );
       },
@@ -212,7 +213,7 @@ export function openCommentDialog({ quote, history = [], kicker = 'Коммен�
   });
 }
 
-export function confirmDialog({ kicker = '', title, text, ok = 'Да', danger = false }) {
+export function confirmDialog({ kicker = '', title, text, ok = t('dialog.yes'), danger = false }) {
   return new Promise((resolve) => {
     openDialog(
       (box, close) => {
@@ -223,7 +224,7 @@ export function confirmDialog({ kicker = '', title, text, ok = 'Да', danger = 
           h(
             'div',
             { class: 'modal-actions' },
-            h('button', { type: 'button', class: 'btn', onclick: () => close(false) }, 'Отмена'),
+            h('button', { type: 'button', class: 'btn', onclick: () => close(false) }, t('dialog.cancel')),
             h('button', { type: 'button', class: `btn ${danger ? 'danger' : 'primary'}`, onclick: () => close(true), 'data-autofocus': true }, ok),
           ),
         );
@@ -243,13 +244,9 @@ export function openRestoreDialog({ items, keptWhere }) {
       (box, close) => {
         const ticks = items.map(() => h('input', { type: 'checkbox', class: 'restore-tick', checked: true }));
         box.append(
-          h('div', { class: 'modal-kicker' }, 'Восстановление'),
-          h('h2', { class: 'modal-title' }, 'Нашлись несохранённые правки'),
-          h(
-            'p',
-            { class: 'modal-text' },
-            `ATLAS закрылся раньше, чем успел их записать — например, во время обновления. Что не вернёте, не пропадёт: копия ляжет ${keptWhere}.`,
-          ),
+          h('div', { class: 'modal-kicker' }, t('restore.kicker')),
+          h('h2', { class: 'modal-title' }, t('restore.title')),
+          h('p', { class: 'modal-text' }, t('restore.text', keptWhere)),
           h(
             'ul',
             { class: 'restore-list' },
@@ -264,8 +261,8 @@ export function openRestoreDialog({ items, keptWhere }) {
           h(
             'div',
             { class: 'modal-actions' },
-            h('button', { type: 'button', class: 'btn', onclick: () => close(items.map(() => false)) }, 'Не возвращать'),
-            h('button', { type: 'button', class: 'btn primary', 'data-autofocus': true, onclick: () => close(ticks.map((t) => t.checked)) }, 'Вернуть отмеченное'),
+            h('button', { type: 'button', class: 'btn', onclick: () => close(items.map(() => false)) }, t('restore.skip')),
+            h('button', { type: 'button', class: 'btn primary', 'data-autofocus': true, onclick: () => close(ticks.map((tick) => tick.checked)) }, t('restore.ok')),
           ),
         );
       },
@@ -298,9 +295,9 @@ export function commandPalette({ notes, commands, onPick, onCreate, initial = ''
       const input = h('input', {
         class: 'field qs-input',
         type: 'search',
-        placeholder: 'Заметка, слово из текста или > команда',
+        placeholder: t('palette.placeholder'),
         spellcheck: 'false',
-        'aria-label': 'Поиск заметок и команд',
+        'aria-label': t('palette.label'),
         'data-autofocus': true,
       });
       input.value = initial;
@@ -321,7 +318,7 @@ export function commandPalette({ notes, commands, onPick, onCreate, initial = ''
       const rowNode = (row, i, q) => {
         const li = h('li', { class: `qs-item qs-${row.kind}`, role: 'option', 'aria-selected': String(i === active) });
         if (row.kind === 'create') {
-          li.append(h('span', { class: 'qs-ico' }, '＋'), h('span', { class: 'qs-main' }, h('span', { class: 'qs-title' }, `Создать заметку «${row.title}»`)));
+          li.append(h('span', { class: 'qs-ico' }, '＋'), h('span', { class: 'qs-main' }, h('span', { class: 'qs-title' }, t('palette.create', row.title))));
         } else if (row.kind === 'command') {
           li.append(
             h('span', { class: 'qs-ico' }, row.icon ?? '›'),
@@ -363,12 +360,12 @@ export function commandPalette({ notes, commands, onPick, onCreate, initial = ''
         active = Math.min(active, Math.max(0, rows.length - 1));
         let i = 0;
         const nodes = [];
-        if (noteRows.length) nodes.push(h('li', { class: 'qs-section' }, 'Заметки'));
+        if (noteRows.length) nodes.push(h('li', { class: 'qs-section' }, t('palette.notes')));
         for (const row of [...noteRows, ...createRows]) nodes.push(rowNode(row, i++, q));
-        if (commandRows.length) nodes.push(h('li', { class: 'qs-section' }, 'Команды'));
+        if (commandRows.length) nodes.push(h('li', { class: 'qs-section' }, t('palette.commands')));
         for (const row of commandRows) nodes.push(rowNode(row, i++, q));
         list.replaceChildren(...nodes);
-        if (!rows.length) list.append(h('li', { class: 'qs-empty' }, 'Ничего не нашлось'));
+        if (!rows.length) list.append(h('li', { class: 'qs-empty' }, t('palette.nothing')));
       };
       input.addEventListener('input', () => {
         active = 0;
@@ -384,7 +381,7 @@ export function commandPalette({ notes, commands, onPick, onCreate, initial = ''
           if (rows[active]) choose(rows[active]);
         }
       });
-      box.append(input, list, h('div', { class: 'modal-hint qs-hint' }, '↑↓ выбрать · Enter открыть · > только команды · Esc закрыть'));
+      box.append(input, list, h('div', { class: 'modal-hint qs-hint' }, t('palette.hint')));
       render();
     },
     { className: 'qs' },
@@ -392,13 +389,18 @@ export function commandPalette({ notes, commands, onPick, onCreate, initial = ''
 }
 
 /**
- * Ctrl+,: the look of the app. Changes apply at once; getPrefs() is read again after each one,
- * so the dialog always shows what is on screen.
+ * Ctrl+,: the look and the language of the app. Changes apply at once; getPrefs() and getData()
+ * are read again after each one, so the dialog always shows what is on screen, in its language.
  */
-export function openSettings({ getPrefs, onChange, data }) {
+export function openSettings({ getPrefs, onChange, getData }) {
   openDialog(
     (box, close) => {
+      // the frame stays, its words and the body are redrawn: the body keeps its scroll position
+      const kicker = h('div', { class: 'modal-kicker' });
+      const title = h('h2', { class: 'modal-title' });
       const body = h('div', { class: 'set-body' });
+      const hint = h('span', { class: 'modal-hint' });
+      const done = h('button', { type: 'button', class: 'btn primary', onclick: () => close(null), 'data-autofocus': true });
       const choice = (key, value, node) => {
         node.dataset.focusKey = `${key}:${value}`;
         node.addEventListener('click', () => {
@@ -408,55 +410,60 @@ export function openSettings({ getPrefs, onChange, data }) {
         return node;
       };
       const group = (label, ...content) => h('section', { class: 'set-group' }, h('div', { class: 'set-label' }, label), ...content);
+      const radio = (checked, attrs = {}) => ({ type: 'button', class: 'seg-btn', role: 'radio', 'aria-checked': String(checked), ...attrs });
 
       function draw() {
         const prefs = getPrefs();
+        const data = getData?.();
         const focused = document.activeElement?.dataset?.focusKey;
+        const languages = h(
+          'div',
+          { class: 'seg', role: 'radiogroup', 'aria-label': t('settings.language') },
+          LANGS.map((lang) => choice('lang', lang.id, h('button', radio(prefs.lang === lang.id, { lang: lang.id }), lang.title))),
+        );
         const skins = h(
           'div',
-          { class: 'set-skins', role: 'radiogroup', 'aria-label': 'Оформление' },
+          { class: 'set-skins', role: 'radiogroup', 'aria-label': t('settings.look') },
           SKINS.map((skin) =>
             choice(
               'skin',
-              skin.id,
+              skin,
               h(
                 'button',
-                { type: 'button', class: `set-skin set-skin-${skin.id}`, role: 'radio', 'aria-checked': String(prefs.skin === skin.id) },
+                { type: 'button', class: `set-skin set-skin-${skin}`, role: 'radio', 'aria-checked': String(prefs.skin === skin) },
                 h('span', { class: 'set-skin-art', 'aria-hidden': 'true' }),
-                h('span', { class: 'set-skin-title' }, skin.title),
-                h('span', { class: 'set-skin-about' }, skin.about),
+                h('span', { class: 'set-skin-title' }, t(`look.${skin}.title`)),
+                h('span', { class: 'set-skin-about' }, t(`look.${skin}.about`)),
               ),
             ),
           ),
         );
         const themes = h(
           'div',
-          { class: 'seg', role: 'radiogroup', 'aria-label': 'Тема' },
-          THEMES.map((theme) =>
-            choice('theme', theme.id, h('button', { type: 'button', class: 'seg-btn', role: 'radio', 'aria-checked': String(prefs.theme === theme.id) }, theme.title)),
-          ),
+          { class: 'seg', role: 'radiogroup', 'aria-label': t('settings.theme') },
+          THEMES.map((theme) => choice('theme', theme, h('button', radio(prefs.theme === theme), t(`themes.${theme}`)))),
         );
         const atlas = prefs.skin === 'atlas';
         const accents = h(
           'div',
-          { class: 'set-swatches', role: 'radiogroup', 'aria-label': 'Акцент' },
+          { class: 'set-swatches', role: 'radiogroup', 'aria-label': t('settings.accent') },
           ACCENTS.map((accent) =>
             choice(
               'accent',
-              accent.id,
+              accent,
               h(
                 'button',
                 {
                   type: 'button',
                   class: 'set-swatch',
                   role: 'radio',
-                  'data-swatch': accent.id,
-                  title: accent.title,
-                  'aria-label': accent.title,
-                  'aria-checked': String(prefs.accent === accent.id),
+                  'data-swatch': accent,
+                  title: t(`accents.${accent}`),
+                  'aria-label': t(`accents.${accent}`),
+                  'aria-checked': String(prefs.accent === accent),
                   disabled: atlas || null,
                 },
-                h('span', { class: 'set-swatch-name' }, accent.title),
+                h('span', { class: 'set-swatch-name' }, t(`accents.${accent}`)),
               ),
             ),
           ),
@@ -464,14 +471,14 @@ export function openSettings({ getPrefs, onChange, data }) {
         const size = h(
           'div',
           { class: 'set-size' },
-          choice('fontScale', prefs.fontScale - 0.08, h('button', { type: 'button', class: 'seg-btn', 'aria-label': 'Мельче' }, '−')),
+          choice('fontScale', prefs.fontScale - 0.08, h('button', { type: 'button', class: 'seg-btn', 'aria-label': t('settings.smaller') }, '−')),
           h('span', { class: 'set-size-value' }, `${Math.round(prefs.fontScale * 100)}%`),
-          choice('fontScale', prefs.fontScale + 0.08, h('button', { type: 'button', class: 'seg-btn', 'aria-label': 'Крупнее' }, '+')),
-          choice('fontScale', 1, h('button', { type: 'button', class: 'seg-btn seg-reset' }, 'Сбросить')),
+          choice('fontScale', prefs.fontScale + 0.08, h('button', { type: 'button', class: 'seg-btn', 'aria-label': t('settings.larger') }, '+')),
+          choice('fontScale', 1, h('button', { type: 'button', class: 'seg-btn seg-reset' }, t('settings.reset'))),
         );
         const storage = data
           ? group(
-              'Заметки',
+              t('settings.notes'),
               h('div', { class: 'set-note' }, data.text),
               h(
                 'div',
@@ -482,28 +489,23 @@ export function openSettings({ getPrefs, onChange, data }) {
               ),
             )
           : null;
+        kicker.textContent = t('settings.kicker');
+        title.textContent = t('settings.title');
+        hint.textContent = t('settings.hint');
+        done.textContent = t('settings.done');
         body.replaceChildren(
-          group('Оформление', skins),
-          group('Тема', themes),
-          group('Акцент', accents, atlas ? h('div', { class: 'set-note' }, 'У «Атласа» своя палитра, акцент работает в «Минимале».') : null),
-          group('Размер текста', size),
+          group(t('settings.language'), languages),
+          group(t('settings.look'), skins),
+          group(t('settings.theme'), themes),
+          group(t('settings.accent'), accents, atlas ? h('div', { class: 'set-note' }, t('settings.atlasAccent')) : null),
+          group(t('settings.size'), size),
           storage,
         );
         // keep keyboard focus on the control that was just used
         if (focused) body.querySelector(`[data-focus-key="${CSS.escape(focused)}"]`)?.focus();
       }
 
-      box.append(
-        h('div', { class: 'modal-kicker' }, 'Настройки'),
-        h('h2', { class: 'modal-title' }, 'Внешний вид'),
-        body,
-        h(
-          'div',
-          { class: 'modal-actions' },
-          h('span', { class: 'modal-hint' }, 'Ctrl+, настройки · Ctrl+K команды'),
-          h('button', { type: 'button', class: 'btn primary', onclick: () => close(null), 'data-autofocus': true }, 'Готово'),
-        ),
-      );
+      box.append(kicker, title, body, h('div', { class: 'modal-actions' }, hint, done));
       draw();
     },
     { className: 'modal-settings' },

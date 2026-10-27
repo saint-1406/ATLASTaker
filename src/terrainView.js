@@ -3,11 +3,11 @@
 // old one instead of popping in.
 
 import { baseField, buildHeightField, contourLevels, hashString, mulberry32, normalizeField } from './terrain.js';
+import { count } from './i18n.js';
 
 const CELL = 7; // px per grid cell
 const LEVELS = 15;
 const SEA = 0.14;
-const number = new Intl.NumberFormat('ru-RU');
 
 function readPalette() {
   const cs = getComputedStyle(document.documentElement);
@@ -251,7 +251,7 @@ function drawPeaks(ctx, peaks, pal) {
     });
 
     ctx.font = '500 9.5px "JetBrains Mono Variable", Consolas, monospace';
-    const elevation = `▲ ${number.format(p.words)} м`;
+    const elevation = `▲ ${count(p.words, 'metre')}`;
     const ey = ly + lines.length * lineHeight + 3;
     ctx.lineWidth = 4;
     ctx.strokeText(elevation, lx, ey);

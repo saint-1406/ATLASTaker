@@ -1,8 +1,8 @@
 // CodeMirror setup: markdown with highlighted code fences (copy button, line count, "/#" to open and
-// close one), comment lines, task lines, smart paste of code, Ctrl+click on links and Russian strings
-// for the search panel.
+// close one), comment lines, task lines, smart paste of code, Ctrl+click on links and the search
+// panel in the interface's language.
 
-import { EditorState, StateField } from '@codemirror/state';
+import { Compartment, EditorState, StateField } from '@codemirror/state';
 import {
   EditorView,
   keymap,
@@ -27,26 +27,24 @@ import { classifyPaste, detectLanguage } from './codeDetect.js';
 import { planComment } from './comments.js';
 import { planSlashFence } from './fence.js';
 import { IMAGE_RE } from './markdown.js';
+import { count, currentLang, t as say, ui } from './i18n.js';
 
-const PHRASES = {
-  Find: 'Найти',
-  Replace: 'Заменить',
-  next: 'далее',
-  previous: 'назад',
-  all: 'все',
-  'match case': 'регистр',
-  'by word': 'слово целиком',
-  regexp: 'рег. выражение',
-  replace: 'заменить',
-  'replace all': 'заменить все',
-  close: 'закрыть',
-  'current match': 'текущее совпадение',
-  'replaced $ matches': 'заменено: $',
-  'replaced match on line $': 'заменено в строке $',
-  'on line': 'в строке',
-  'Go to line': 'Перейти к строке',
-  go: 'перейти',
-};
+// The editor's own words (search panel, placeholder, the label screen readers hear), one set per
+// language; the compartment swaps them when the language changes.
+const language = new Compartment();
+const languageSets = new Map();
+
+function languageExtensions() {
+  const lang = currentLang();
+  if (!languageSets.has(lang)) {
+    languageSets.set(lang, [
+      EditorState.phrases.of(ui().editor.phrases),
+      placeholder(say('editor.placeholder')),
+      EditorView.contentAttributes.of({ 'aria-label': say('editor.label') }),
+    ]);
+  }
+  return languageSets.get(lang);
+}
 
 const atlasHighlight = HighlightStyle.define([
   { tag: t.heading1, class: 'tk-h tk-h1' },
@@ -79,8 +77,6 @@ const atlasHighlight = HighlightStyle.define([
 
 const STAMP_RE = /^(\s*)(💬 \d{2}\.\d{2}\.\d{4} \d{2}:\d{2} ·)/u;
 const CLOSE_FENCE_RE = /^\s{0,3}(`{3,}|~{3,})\s*$/;
-const LINE_FORMS = { one: 'строка', few: 'строки', many: 'строк', other: 'строки' };
-const plural = new Intl.PluralRules('ru-RU');
 
 function enclosing(state, pos, names, side = -1) {
   for (let node = syntaxTree(state).resolveInner(pos, side); node; node = node.parent) {
@@ -116,21 +112,22 @@ class CodeHeadWidget extends WidgetType {
     super();
     this.lines = lines;
     this.copy = copy;
+    this.lang = currentLang();
   }
 
   eq(other) {
-    return other.lines === this.lines;
+    return other.lines === this.lines && other.lang === this.lang;
   }
 
   toDOM(view) {
     const wrap = document.createElement('span');
     wrap.className = 'cm-code-head';
-    const count = document.createElement('span');
-    count.textContent = `${this.lines} ${LINE_FORMS[plural.select(this.lines)]}`;
+    const size = document.createElement('span');
+    size.textContent = count(this.lines, 'line');
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'cm-code-copy';
-    button.textContent = 'Копировать';
+    button.textContent = say('editor.copy');
     button.addEventListener('mousedown', (e) => e.preventDefault());
     button.addEventListener('click', async (e) => {
       e.preventDefault();
@@ -138,17 +135,17 @@ class CodeHeadWidget extends WidgetType {
       if (code == null) return;
       try {
         await this.copy(code);
-        button.textContent = 'Скопировано ✓';
+        button.textContent = say('editor.copied');
         button.classList.add('done');
       } catch {
-        button.textContent = 'Нет доступа к буферу';
+        button.textContent = say('editor.noClipboard');
       }
       setTimeout(() => {
-        button.textContent = 'Копировать';
+        button.textContent = say('editor.copy');
         button.classList.remove('done');
       }, 1500);
     });
-    wrap.append(count, button);
+    wrap.append(size, button);
     return wrap;
   }
 
@@ -179,7 +176,7 @@ class ImageWidget extends WidgetType {
     img.draggable = false;
     const missing = () => {
       wrap.classList.add('missing');
-      wrap.textContent = `Картинка не найдена: ${this.name}`;
+      wrap.textContent = say('image.missing', this.name);
       view.requestMeasure();
     };
     img.addEventListener('load', () => view.requestMeasure()); // the real height is known only now
@@ -314,7 +311,8 @@ function structurePlugin(copy) {
       }
 
       update(u) {
-        if (u.docChanged || u.viewportChanged || syntaxTree(u.startState) !== syntaxTree(u.state)) {
+        // a reconfiguration is a language change: the code blocks' heads get the new words
+        if (u.docChanged || u.viewportChanged || syntaxTree(u.startState) !== syntaxTree(u.state) || u.transactions.some((tr) => tr.reconfigured)) {
           this.decorations = buildDecorations(u.view, copy);
         }
       }
@@ -463,14 +461,12 @@ export function createEditor({
     search({ top: true }),
     EditorView.lineWrapping,
     EditorState.allowMultipleSelections.of(true),
-    EditorState.phrases.of(PHRASES),
     markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true }),
     syntaxHighlighting(atlasHighlight),
-    placeholder('Начните писать. Первая строка станет названием, «# » в начале строки — разделом.'),
     structurePlugin(onCopy),
     imagesField(resolveImage, openImage),
     slashFence,
-    EditorView.contentAttributes.of({ spellcheck: 'true', autocapitalize: 'sentences', 'aria-label': 'Текст заметки' }),
+    EditorView.contentAttributes.of({ spellcheck: 'true', autocapitalize: 'sentences' }),
     keymap.of([{ key: 'Mod-e', run: insertCodeBlock }, ...searchKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]),
     EditorView.domEventHandlers({
       paste(event, view) {
@@ -517,9 +513,15 @@ export function createEditor({
     }),
   ];
 
-  const view = new EditorView({ parent, state: EditorState.create({ doc: '', extensions }) });
+  const withLanguage = () => [...extensions, language.of(languageExtensions())];
+  const view = new EditorView({ parent, state: EditorState.create({ doc: '', extensions: withLanguage() }) });
   return {
     view,
-    makeState: (doc, selection) => EditorState.create({ doc, selection, extensions }),
+    makeState: (doc, selection) => EditorState.create({ doc, selection, extensions: withLanguage() }),
+    /** Puts the open note's editor into the current language (a kept state may carry the previous one). */
+    localize() {
+      const wanted = languageExtensions();
+      if (language.get(view.state) !== wanted) view.dispatch({ effects: language.reconfigure(wanted) });
+    },
   };
 }

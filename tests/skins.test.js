@@ -1,16 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { COPY, DEFAULT_LOOK, normalizeLook } from '../src/skins.js';
+import { DEFAULT_LOOK, normalizeLook, SKINS } from '../src/skins.js';
+import { STRINGS } from '../src/i18n.js';
 import { activeHeading } from '../src/outline.js';
 
-test('both looks name every piece of the interface', () => {
-  const keys = (copy) => Object.keys(copy).sort();
-  assert.deepEqual(keys(COPY.atlas), keys(COPY.minimal));
-  for (const [key, value] of Object.entries(COPY.minimal)) {
-    assert.equal(typeof COPY.atlas[key], typeof value, `${key} differs in kind`);
+test('both looks name every piece of the interface, in every language', () => {
+  for (const [lang, { look }] of Object.entries(STRINGS)) {
+    assert.deepEqual(Object.keys(look).sort(), [...SKINS].sort(), `${lang}: one set of words per look`);
+    const keys = (copy) => Object.keys(copy).sort();
+    assert.deepEqual(keys(look.atlas), keys(look.minimal), lang);
+    for (const [key, value] of Object.entries(look.minimal)) {
+      assert.equal(typeof look.atlas[key], typeof value, `${lang}: ${key} differs in kind`);
+    }
   }
-  assert.equal(COPY.minimal.coords(12, 4), 'Стр 12, кол 4');
-  assert.equal(COPY.atlas.coords(12, 4), 'N 12° · E 4′');
+  assert.equal(STRINGS.ru.look.minimal.coords(12, 4), 'Стр 12, кол 4');
+  assert.equal(STRINGS.en.look.minimal.coords(12, 4), 'Ln 12, Col 4');
+  assert.equal(STRINGS.ru.look.atlas.coords(12, 4), 'N 12° · E 4′');
 });
 
 test('unknown or missing preferences fall back to the minimal look', () => {

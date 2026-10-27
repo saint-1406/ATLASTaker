@@ -3,13 +3,9 @@
 
 import { drawPin, islandRings, layoutIslands, traceSmooth } from './archipelago.js';
 import { hashString, mulberry32 } from './terrain.js';
-import { formatCount, WORD_FORMS } from './markdown.js';
+import { count, formatDate, formatDay, t } from './i18n.js';
 import { h } from './overlays.js';
 
-const ISLAND_FORMS = { one: 'остров', few: 'острова', many: 'островов', other: 'острова' };
-const number = new Intl.NumberFormat('ru-RU');
-const longDate = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
-const shortDate = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' });
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 export function readAtlasPalette() {
@@ -68,14 +64,13 @@ export class AtlasView {
         created: n.created,
         updated: n.updated,
         words: n.info.words,
-        title: n.info.title || 'Без названия',
+        title: n.info.title || t('untitled'),
         excerpt: n.info.excerpt,
         hay: `${n.info.title}\n${n.content}`.toLowerCase(),
       }));
     const placed = layoutIslands(items);
     this.nodes = items.map((it, i) => ({ ...it, ...placed[i], ...islandRings(it.id, placed[i].r) }));
-    const land = items.reduce((sum, n) => sum + n.words, 0);
-    this.sub.textContent = `${formatCount(items.length, ISLAND_FORMS)} · ${formatCount(land, WORD_FORMS)} суши`;
+    this.land = items.reduce((sum, n) => sum + n.words, 0);
 
     this.root.hidden = false;
     this.isOpen = true;
@@ -106,6 +101,7 @@ export class AtlasView {
     if (!this.isOpen) return;
     const { ctx } = this;
     const pal = readAtlasPalette();
+    this.sub.textContent = t('atlas.summary', count(this.nodes.length, 'island'), count(this.land, 'word'));
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.fillStyle = pal.ocean;
     ctx.fillRect(0, 0, this.w, this.h);
@@ -281,7 +277,7 @@ export class AtlasView {
     ctx.fillStyle = isCurrent || hot ? pal.accent : pal.ink;
     ctx.fillText(title, sx, ly);
     ctx.font = `500 ${clamp(9 * Math.sqrt(this.view.k), 8.5, 11)}px "JetBrains Mono Variable", Consolas, monospace`;
-    const meta = `${number.format(n.words)} сл. · ${shortDate.format(n.updated).replace('.', '')}`;
+    const meta = `${count(n.words, 'wordShort')} · ${formatDay(n.updated)}`;
     ctx.lineWidth = 3;
     ctx.strokeText(meta, sx, ly + fs + 2);
     ctx.fillStyle = pal.dim;
@@ -325,7 +321,7 @@ export class AtlasView {
       this.tipFor = n;
       this.tip.replaceChildren(
         h('div', { class: 'tip-title' }, n.title),
-        h('div', { class: 'tip-meta' }, `${formatCount(n.words, WORD_FORMS)} · открыт ${longDate.format(n.created)}`),
+        h('div', { class: 'tip-meta' }, t('atlas.found', count(n.words, 'word'), formatDate(n.created))),
         n.excerpt ? h('div', { class: 'tip-text' }, n.excerpt) : null,
       );
     }

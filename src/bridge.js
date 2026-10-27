@@ -2,6 +2,8 @@
 // notes are .md files on disk. Opened any other way (the single-file browser build) the same
 // interface is backed by the browser's IndexedDB, or localStorage where that is missing.
 
+import { t } from './i18n.js';
+
 const token = document.querySelector('meta[name="atlas-token"]')?.content ?? '';
 const onServer = location.protocol.startsWith('http') && token !== '' && !token.startsWith('__');
 
@@ -18,7 +20,7 @@ async function call(method, route, body, { keepalive = false } = {}) {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch (err) {
-    throw Object.assign(new Error('Сервер ATLAS не отвечает'), { offline: true, cause: err });
+    throw Object.assign(new Error(t('errors.offline')), { offline: true, cause: err });
   }
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
@@ -36,7 +38,7 @@ async function fetchOk(url, init) {
   try {
     res = await fetch(url, init);
   } catch (err) {
-    throw Object.assign(new Error('Сервер ATLAS не отвечает'), { offline: true, cause: err });
+    throw Object.assign(new Error(t('errors.offline')), { offline: true, cause: err });
   }
   if (!res.ok) throw Object.assign(new Error(`${url} → ${res.status}`), { status: res.status });
   return res;
@@ -59,7 +61,7 @@ function serverApi() {
     keepDraft: (draft) => call('POST', 'drafts', draft),
     /** Stores a picture next to the notes (notes/assets) and returns its file name. */
     async saveAsset(blob) {
-      if (!IMAGE_TYPES[blob.type]) throw new Error('нужна картинка PNG, JPEG, GIF или WebP');
+      if (!IMAGE_TYPES[blob.type]) throw new Error(t('image.wrongType'));
       const res = await fetchOk('/api/assets', { method: 'POST', headers: { 'Content-Type': blob.type, 'X-Atlas-Token': token }, body: blob });
       return (await res.json()).name;
     },
@@ -116,7 +118,7 @@ function browserApi() {
   return {
     kind: 'browser',
     async saveAsset(blob) {
-      if (!IMAGE_TYPES[blob.type]) throw new Error('нужна картинка PNG, JPEG, GIF или WebP');
+      if (!IMAGE_TYPES[blob.type]) throw new Error(t('image.wrongType'));
       const name = newAssetName(blob.type);
       await request((await store('assets', 'readwrite')).put(blob, name));
       return name;
@@ -145,7 +147,7 @@ function browserApi() {
     async write(id, content) {
       const notes = await store('notes', 'readwrite');
       const note = await request(notes.get(id));
-      if (!note) throw Object.assign(new Error(`нет заметки ${id}`), { status: 404 });
+      if (!note) throw Object.assign(new Error(t('errors.noNote', id)), { status: 404 });
       note.content = content;
       note.updated = Date.now();
       await request(notes.put(note));
@@ -203,7 +205,7 @@ function localApi() {
   const newId = () => `n-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   const note = (id) => {
     const n = db.notes[id];
-    if (!n) throw new Error(`нет заметки ${id}`);
+    if (!n) throw new Error(t('errors.noNote', id));
     return n;
   };
   const applyMeta = (n, meta) => {

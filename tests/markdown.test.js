@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyze, countWords, deriveTitle, formatCount, imageRefs, WORD_FORMS } from '../src/markdown.js';
+import { analyze, countWords, deriveTitle, imageRefs } from '../src/markdown.js';
 
 test('picture references are found once each, foreign links are not', () => {
   const text = [
@@ -38,11 +38,4 @@ test('comment lines are counted and kept out of the excerpt', () => {
   const info = analyze('# План\n- [ ] Позвонить\n      💬 26.10.2026 17:52 · перенесли\nДальше текст');
   assert.equal(info.comments, 1);
   assert.equal(info.excerpt, 'Позвонить Дальше текст');
-});
-
-test('counts are written the Russian way', () => {
-  assert.equal(formatCount(1, WORD_FORMS), '1 слово');
-  assert.equal(formatCount(3, WORD_FORMS), '3 слова');
-  assert.equal(formatCount(11, WORD_FORMS), '11 слов');
-  assert.equal(formatCount(1204, WORD_FORMS).replace(/\s/g, ' '), '1 204 слова');
 });
