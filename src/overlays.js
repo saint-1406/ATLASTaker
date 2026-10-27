@@ -233,6 +233,47 @@ export function confirmDialog({ kicker = '', title, text, ok = 'Да', danger = 
   });
 }
 
+/**
+ * Unsaved text found at start, one ticked line per note. It has to be answered (no Esc): resolves
+ * to one flag per item, true for "put it back".
+ */
+export function openRestoreDialog({ items, keptWhere }) {
+  return new Promise((resolve) => {
+    openDialog(
+      (box, close) => {
+        const ticks = items.map(() => h('input', { type: 'checkbox', class: 'restore-tick', checked: true }));
+        box.append(
+          h('div', { class: 'modal-kicker' }, 'Восстановление'),
+          h('h2', { class: 'modal-title' }, 'Нашлись несохранённые правки'),
+          h(
+            'p',
+            { class: 'modal-text' },
+            `ATLAS закрылся раньше, чем успел их записать — например, во время обновления. Что не вернёте, не пропадёт: копия ляжет ${keptWhere}.`,
+          ),
+          h(
+            'ul',
+            { class: 'restore-list' },
+            items.map((item, i) =>
+              h(
+                'li',
+                {},
+                h('label', { class: 'restore-item' }, ticks[i], h('span', { class: 'restore-title' }, item.title), h('span', { class: 'restore-meta' }, item.meta)),
+              ),
+            ),
+          ),
+          h(
+            'div',
+            { class: 'modal-actions' },
+            h('button', { type: 'button', class: 'btn', onclick: () => close(items.map(() => false)) }, 'Не возвращать'),
+            h('button', { type: 'button', class: 'btn primary', 'data-autofocus': true, onclick: () => close(ticks.map((t) => t.checked)) }, 'Вернуть отмеченное'),
+          ),
+        );
+      },
+      { onClose: (value) => resolve(value ?? items.map(() => false)), dismissable: false, className: 'modal-restore' },
+    );
+  });
+}
+
 function highlight(text, q) {
   const i = q ? text.toLowerCase().indexOf(q) : -1;
   if (i < 0) return [text];

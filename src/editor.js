@@ -1,5 +1,6 @@
-// CodeMirror setup: markdown with highlighted code fences (copy button, line count), comment lines,
-// task lines, smart paste of code, Ctrl+click on links and Russian strings for the search panel.
+// CodeMirror setup: markdown with highlighted code fences (copy button, line count, "/#" to open and
+// close one), comment lines, task lines, smart paste of code, Ctrl+click on links and Russian strings
+// for the search panel.
 
 import { EditorState, StateField } from '@codemirror/state';
 import {
@@ -24,6 +25,7 @@ import { syntaxHighlighting, HighlightStyle, syntaxTree, bracketMatching, indent
 import { tags as t } from '@lezer/highlight';
 import { classifyPaste, detectLanguage } from './codeDetect.js';
 import { planComment } from './comments.js';
+import { planSlashFence } from './fence.js';
 import { IMAGE_RE } from './markdown.js';
 
 const PHRASES = {
@@ -355,6 +357,26 @@ export function insertCodeBlock(view) {
   return true;
 }
 
+// "/#" alone on a line opens a code block, and inside one closes it (see fence.js). The "#" lands
+// first and the fences follow as their own history step, so Ctrl+Z gives back the typed "/#".
+const slashFence = EditorView.inputHandler.of((view, from, to, text) => {
+  if (text !== '#' || view.composing || view.state.selection.ranges.length > 1) return false;
+  const line = view.state.doc.lineAt(from);
+  if (!/^\s*\/$/.test(line.text.slice(0, from - line.from)) || line.text.slice(to - line.from).trim()) return false;
+  view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + 1 }, userEvent: 'input.type' });
+  const plan = planSlashFence(view.state.doc.toString(), from + 1);
+  if (plan) {
+    view.dispatch({
+      changes: { from: plan.from, to: plan.to, insert: plan.insert },
+      selection: { anchor: plan.cursor },
+      annotations: isolateHistory.of('before'),
+      userEvent: 'input.codeblock',
+      scrollIntoView: true,
+    });
+  }
+  return true;
+});
+
 /**
  * Pastes text; when it looks like code (outside an existing code block) the paste is followed by a
  * separate history step that wraps it in a fence, so Ctrl+Z undoes only the wrapping.
@@ -447,6 +469,7 @@ export function createEditor({
     placeholder('Начните писать. Первая строка станет названием, «# » в начале строки — разделом.'),
     structurePlugin(onCopy),
     imagesField(resolveImage, openImage),
+    slashFence,
     EditorView.contentAttributes.of({ spellcheck: 'true', autocapitalize: 'sentences', 'aria-label': 'Текст заметки' }),
     keymap.of([{ key: 'Mod-e', run: insertCodeBlock }, ...searchKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]),
     EditorView.domEventHandlers({

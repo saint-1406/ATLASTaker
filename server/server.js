@@ -13,14 +13,24 @@ import fsp from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createStore } from './store.js';
+import { createBackups } from './backups.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
-// Fingerprint of the code this process runs. The launcher compares it with the files on disk, so a
-// server left over from before an update is replaced even when the version number did not change.
+const CODE_FILES = ['server/server.js', 'server/store.js', 'server/backups.js', 'dist/app.js'];
+const readOrEmpty = (file) => {
+  try {
+    return fs.readFileSync(path.join(ROOT, file));
+  } catch {
+    return Buffer.alloc(0); // dist/ before the first build
+  }
+};
+// Fingerprint of the code this process runs (server and page). The launcher compares it with the
+// files on disk, so a server left over from before an update is replaced even when the version number
+// did not change; a new fingerprint is also what makes the "before the update" copy of the notes.
 export const BUILD = crypto
   .createHash('sha256')
-  .update(Buffer.concat(['server.js', 'store.js'].map((file) => fs.readFileSync(path.join(ROOT, 'server', file)))))
+  .update(Buffer.concat(CODE_FILES.map(readOrEmpty)))
   .update(VERSION)
   .digest('hex')
   .slice(0, 12);
@@ -113,6 +123,11 @@ function openFolder(dir) {
 export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEFAULT_PORT, portTries = 20, idleExitMs = 0, onIdle } = {}) {
   const notesDir = path.join(dataDir, 'notes');
   const store = createStore(notesDir);
+  const backups = createBackups(dataDir, { version: VERSION, build: BUILD });
+  // before the page can change anything: the notes as the previous version left them
+  await backups.atStart().catch((err) => console.error('Резервная копия не сделана:', err.message));
+  const dailyTimer = setInterval(() => backups.daily().catch((err) => console.error('Резервная копия не сделана:', err.message)), 60 * 60 * 1000);
+  dailyTimer.unref();
   const token = crypto.randomBytes(24).toString('base64url');
   const tokenBytes = Buffer.from(token);
   const distDir = path.join(ROOT, 'dist') + path.sep;
@@ -215,9 +230,18 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
       const type = String(req.headers['content-type'] ?? '').split(';')[0].trim();
       return send(res, 201, { name: await store.saveAsset(await readBody(req), type) });
     }
+    if (route === 'drafts' && req.method === 'POST') {
+      // unsaved text the page found at start and the user did not put back
+      return send(res, 201, { name: await backups.keepDraft(await readJson(req)) });
+    }
     if (route === 'ping' && req.method === 'POST') return send(res, 204);
     if (route === 'open-folder' && req.method === 'POST') {
       openFolder(notesDir);
+      return send(res, 204);
+    }
+    if (route === 'open-backups' && req.method === 'POST') {
+      await fsp.mkdir(backups.dir, { recursive: true });
+      openFolder(backups.dir);
       return send(res, 204);
     }
     throw new HttpError(404, 'not found');
@@ -273,6 +297,7 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
 
   async function close() {
     clearInterval(idleTimer);
+    clearInterval(dailyTimer);
     const closed = new Promise((resolve) => server.close(resolve));
     server.closeAllConnections?.();
     await closed;
@@ -280,7 +305,7 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
     store.flush();
   }
 
-  return { server, store, token, notesDir, port: actualPort, url: `http://127.0.0.1:${actualPort}/`, close };
+  return { server, store, backups, token, notesDir, port: actualPort, url: `http://127.0.0.1:${actualPort}/`, close };
 }
 
 function pidAlive(pid) {

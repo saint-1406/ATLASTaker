@@ -118,6 +118,33 @@ test('a picture is stored, served back and kept to safe names', async (t) => {
   assert.equal(notImage.status, 415);
 });
 
+test('unsaved text the page did not put back lands in the backups folder', async (t) => {
+  const { app, call } = await start(t);
+  const res = await call('POST', 'drafts', { title: 'План', content: 'черновик', at: Date.now(), label: 'не восстановлено' });
+  assert.equal(res.status, 201);
+  const { name } = await res.json();
+  assert.deepEqual(readdirSync(app.backups.draftsDir), [name]);
+  const bare = await fetch(`${app.url}api/drafts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"content":"x"}' });
+  assert.equal(bare.status, 403);
+  assert.equal((await call('POST', 'drafts', { title: 'без текста' })).status, 400);
+});
+
+test('a server started on existing notes copies them first', async (t) => {
+  const dataDir = mkdtempSync(path.join(tmpdir(), 'atlas-server-'));
+  const first = await createAtlasServer({ dataDir, port: 0 });
+  await first.store.create('# Было до обновления');
+  await first.close();
+  writeFileSync(path.join(dataDir, 'backups', 'last.json'), JSON.stringify({ version: '0.0.1', build: 'old', at: Date.now() }));
+  const second = await createAtlasServer({ dataDir, port: 0 });
+  t.after(async () => {
+    await second.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+  const [copy] = readdirSync(second.backups.dir).filter((name) => name.endsWith('до обновления'));
+  assert.ok(copy, 'a copy before the update');
+  assert.equal(readdirSync(path.join(second.backups.dir, copy)).filter((name) => name.endsWith('.md')).length, 1);
+});
+
 test('only one server may own a notes folder; a dead owner\'s lock is taken over', async (t) => {
   const dir = mkdtempSync(path.join(tmpdir(), 'atlas-lock-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

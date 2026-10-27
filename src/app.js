@@ -20,6 +20,7 @@ import {
   confirmDialog,
   commandPalette,
   openSettings,
+  openRestoreDialog,
   showImage,
   toast,
   isOverlayOpen,
@@ -118,7 +119,7 @@ async function boot() {
     api.setState({ welcomed: true }).catch(() => {});
   }
   for (const note of list) notes.set(note.id, { ...note, info: analyze(note.content) });
-  const restored = restoreRescued();
+  const drafts = unsavedDrafts();
 
   editor = createEditor({
     parent: $('#editor'),
@@ -154,9 +155,9 @@ async function boot() {
 
   const fonts = ['500 16px "Inter Variable"', '500 10px "JetBrains Mono Variable"', 'italic 600 16px "Cormorant Garamond"'];
   await Promise.all([...fonts.map((f) => document.fonts.load(f)), document.fonts.ready].map((p) => p.catch(() => {})));
-  await openNote(notes.has(saved.lastOpen) ? saved.lastOpen : newestId());
-  if (restored) toast(`Вернул несохранённый текст: ${formatCount(restored, NOTE_FORMS)}`, { timeout: 6000 });
-  else if (inBrowser && !firstRun && Date.now() - (saved.lastBackup ?? 0) > BACKUP_EVERY) remindBackup(saved.lastBackup);
+  const restoredId = drafts.length ? await offerRestore(drafts) : null;
+  await openNote(restoredId ?? (notes.has(saved.lastOpen) ? saved.lastOpen : newestId()));
+  if (inBrowser && !firstRun && !drafts.length && Date.now() - (saved.lastBackup ?? 0) > BACKUP_EVERY) remindBackup(saved.lastBackup);
   if (api.ping) setInterval(ping, 20_000);
   setInterval(tickPace, 10_000);
   markReady();
@@ -178,25 +179,90 @@ function ping() {
   });
 }
 
-/** Text that never reached the disk (server died, save failed) is put back from the rescue copy. */
-function restoreRescued() {
-  let count = 0;
+// ---------- unsaved text from the last run ----------
+
+/**
+ * Text that never reached the disk (the server died, or an update replaced it, before a save landed)
+ * waits in the rescue copy. Copies older than what the disk holds are put aside without asking; the
+ * rest are offered back at start. Nothing is dropped unless the disk has exactly that text.
+ */
+function unsavedDrafts() {
+  const offer = [];
   for (const [id, saved] of Object.entries(rescue.all())) {
     const note = notes.get(id);
-    if (!note || saved.content === note.content || saved.at <= note.updated) {
-      rescue.drop(id);
+    if (typeof saved?.content !== 'string' || (note && saved.content === note.content)) rescue.drop(id);
+    else if (note && saved.at <= note.updated) putAside(id, saved, 'старее сохранённой');
+    else offer.push({ id, content: saved.content, at: saved.at, note });
+  }
+  return offer.sort((a, b) => b.at - a.at);
+}
+
+/** Keeps the text in the backups folder (the browser's trash in the browser build), then forgets the copy. */
+async function putAside(id, saved, label) {
+  try {
+    await api.keepDraft?.({ title: analyze(saved.content).title || UNTITLED, content: saved.content, at: saved.at, label });
+    rescue.drop(id, saved.content);
+    return true;
+  } catch (err) {
+    console.error(err); // the copy stays and is offered again next time
+    return false;
+  }
+}
+
+const changeSize = (before, after) => {
+  const diff = after.length - before.length;
+  return diff ? `${diff > 0 ? '+' : '−'}${number.format(Math.abs(diff))} зн.` : 'правки той же длины';
+};
+
+/** Asks which texts to put back; returns the note to open when one came back. */
+async function offerRestore(drafts) {
+  const keptWhere = api.openBackupsFolder ? 'в папку бэкапов' : 'в корзину браузера';
+  const items = drafts.map((d) => ({
+    title: analyze(d.content).title || UNTITLED,
+    meta: `${dayFmt.format(d.at).replace('.', '')}, ${timeFmt.format(d.at)} · ${d.note ? changeSize(d.note.content, d.content) : 'заметки уже нет — вернётся новой'}`,
+  }));
+  const answers = await openRestoreDialog({ items, keptWhere });
+  let back = 0;
+  let aside = 0;
+  let openId = null;
+  for (const [i, d] of drafts.entries()) {
+    if (!answers[i]) {
+      if (await putAside(d.id, d, 'не возвращено')) aside++;
       continue;
     }
-    note.content = saved.content;
-    note.info = analyze(saved.content);
-    api.write(id, saved.content).then(({ updated }) => {
-      note.updated = updated;
-      rescue.drop(id, saved.content);
-      renderIndex();
-    }, () => {});
-    count++;
+    const id = await restoreDraft(d);
+    if (id) {
+      back++;
+      openId ??= id;
+    }
   }
-  return count;
+  if (back) toast(`Вернул несохранённый текст: ${formatCount(back, NOTE_FORMS)}`, { timeout: 6000 });
+  else if (aside) {
+    const action = api.openBackupsFolder ? { text: 'Открыть', run: () => api.openBackupsFolder() } : undefined;
+    toast(`Отложено ${keptWhere}: ${formatCount(aside, NOTE_FORMS)}`, { action, timeout: 8000 });
+  }
+  return openId;
+}
+
+/** Puts a rescued text back; the version it replaces goes to the backups first. */
+async function restoreDraft(d) {
+  try {
+    if (!d.note) {
+      const note = await api.create(d.content);
+      notes.set(note.id, { ...note, info: analyze(note.content) });
+      rescue.drop(d.id, d.content);
+      return note.id;
+    }
+    await api.keepDraft?.({ title: titleOf(d.note), content: d.note.content, at: d.note.updated, label: 'было на диске' }).catch((err) => console.error(err));
+    const { updated } = await api.write(d.id, d.content);
+    Object.assign(d.note, { content: d.content, info: analyze(d.content), updated });
+    rescue.drop(d.id, d.content);
+    return d.id;
+  } catch (err) {
+    console.error(err);
+    toast(`Не получилось вернуть «${analyze(d.content).title || UNTITLED}»: ${err.message}. Копия подождёт следующего запуска.`);
+    return null;
+  }
 }
 
 // ---------- one window at a time ----------
@@ -387,7 +453,12 @@ async function deleteNote(id) {
 // ---------- saving ----------
 
 function onDocChange(update) {
-  if (suspended || lost) return;
+  if (suspended) return;
+  if (lost) {
+    // no server to save to: the text goes straight into the rescue copy
+    if (currentId) rescue.put(currentId, update.state.doc.toString());
+    return;
+  }
   notePace(update);
   dirty = true;
   setSaveState('pending');
@@ -406,12 +477,14 @@ function flushSave() {
 
 async function saveNow() {
   if (!currentId || currentId === trashing || !dirty) return true;
-  if (suspended || lost) return false;
   const id = currentId;
   const content = editor.view.state.doc.toString();
+  // first of all, whatever happens next: a server that is gone (or was just replaced by an update)
+  // must not take the text with it
+  rescue.put(id, content);
+  if (suspended || lost) return false;
   dirty = false;
   setSaveState('pending');
-  rescue.put(id, content);
   try {
     const { updated } = await api.write(id, content);
     rescue.drop(id, content);
@@ -938,12 +1011,13 @@ function toggleFocus(on = !focusMode) {
 function showSettings() {
   const where = inBrowser
     ? 'Заметки хранятся в этом браузере. Если очистить его данные, они пропадут — время от времени скачивайте копию.'
-    : 'Заметки — обычные файлы .md в папке %APPDATA%\\ATLAS Notetaker\\notes.';
+    : 'Заметки — обычные файлы .md в папке %APPDATA%\\ATLAS Notetaker\\notes. Перед каждым обновлением и раз в день их копия ложится в папку backups рядом.';
   const actions = [
     { text: 'Скачать все заметки (.zip)', run: exportAll },
     { text: 'Импорт .md', run: importFiles },
   ];
   if (api.openNotesFolder) actions.push({ text: 'Открыть папку', run: () => api.openNotesFolder() });
+  if (api.openBackupsFolder) actions.push({ text: 'Папка бэкапов', run: () => api.openBackupsFolder() });
   openSettings({
     data: { text: where, actions },
     getPrefs: () => ({ ...prefs }),
@@ -978,6 +1052,9 @@ function commandList() {
   ];
   if (isAtlas()) list.splice(1, 0, { icon: '▦', title: 'Атлас заметок', kbd: 'Ctrl+M', keywords: 'atlas карта архипелаг', run: toggleAtlas });
   if (api.openNotesFolder) list.push({ icon: '▭', title: 'Открыть папку заметок', keywords: 'folder папка файлы', run: () => api.openNotesFolder() });
+  if (api.openBackupsFolder) {
+    list.push({ icon: '⟲', title: 'Папка бэкапов', keywords: 'backup бэкап резервная копия восстановить обновление', run: () => api.openBackupsFolder() });
+  }
   return list;
 }
 

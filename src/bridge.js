@@ -54,6 +54,9 @@ function serverApi() {
     setState: (patch) => call('PATCH', 'state', patch),
     ping: () => call('POST', 'ping'),
     openNotesFolder: () => call('POST', 'open-folder'),
+    openBackupsFolder: () => call('POST', 'open-backups'),
+    /** Puts text aside as a file in backups/несохранённое: { title, content, at, label }. */
+    keepDraft: (draft) => call('POST', 'drafts', draft),
     /** Stores a picture next to the notes (notes/assets) and returns its file name. */
     async saveAsset(blob) {
       if (!IMAGE_TYPES[blob.type]) throw new Error('нужна картинка PNG, JPEG, GIF или WebP');
@@ -165,6 +168,10 @@ function browserApi() {
       }
       await finished(t);
     },
+    // text put aside instead of restored goes to the trash store too, so it is never simply gone
+    async keepDraft({ title, content, at, label }) {
+      await request((await store('trash', 'readwrite')).add({ title, content, updated: at, label, draft: true, deletedAt: Date.now() }));
+    },
     async getState() {
       return (await request((await store('state')).get('state'))) ?? {};
     },
@@ -230,6 +237,10 @@ function localApi() {
       delete db.notes[id];
       persist();
     },
+    async keepDraft(draft) {
+      (db.drafts ??= []).push({ ...draft, keptAt: Date.now() });
+      persist();
+    },
     async getState() {
       return { ...db.state };
     },
@@ -253,7 +264,7 @@ function localApi() {
 
 /**
  * A copy of text that has not reached the disk yet, kept in this browser until a save confirms it.
- * If the server dies or a save fails, the next start of ATLAS finds the copy and puts the text back.
+ * If the server dies or a save fails, the next start of ATLAS finds the copy and offers it back.
  */
 export const rescue = (() => {
   const KEY = 'atlas-notetaker:rescue:v1';

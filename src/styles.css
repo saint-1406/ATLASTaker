@@ -1703,6 +1703,43 @@ textarea {
   color: var(--accent-2);
 }
 
+.restore-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.restore-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: baseline;
+  padding: 8px 4px;
+  border-bottom: 1px dashed var(--hairline);
+  cursor: pointer;
+}
+
+.restore-tick {
+  grid-row: span 2;
+  accent-color: var(--accent);
+}
+
+.restore-title {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 14.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.restore-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
 .field-area {
   height: auto;
   min-height: 92px;
