@@ -1,0 +1,7 @@
+# LF everywhere, also on the Windows build machine: the welcome notes and the tests read text line by
+# line, and a CRLF checkout left a "\r" on every line (the sample comment stopped being a comment).
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.woff binary
+*.woff2 binary
