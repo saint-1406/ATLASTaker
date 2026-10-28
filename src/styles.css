@@ -138,6 +138,114 @@
 :root[data-theme="light"][data-accent="orange"] { --accent-text: #c2410c; }
 :root[data-theme="light"][data-accent="violet"] { --accent-text: #5b4bd6; }
 
+/* ---------- palettes over the tone (minimal look): data-palette on <html> ---------- */
+
+/* sepia: warm paper for long reading */
+:root[data-skin="minimal"][data-palette="sepia"] {
+  --bg: #f3ead8;
+  --bg-raised: #faf4e6;
+  --bg-hover: rgba(91, 62, 26, 0.06);
+  --ink: #33281c;
+  --ink-soft: #54452f;
+  --ink-dim: #86735a;
+  --ink-faint: #c2b193;
+  --hairline: rgba(91, 62, 26, 0.13);
+  --sheet-edge: rgba(91, 62, 26, 0.17);
+  --active-line: rgba(91, 62, 26, 0.04);
+  --danger: #b3261e;
+  --shadow: 0 24px 64px rgba(74, 52, 24, 0.16), 0 0 0 1px rgba(91, 62, 26, 0.08);
+  --code-bg: #ece1c9;
+  --code-edge: rgba(91, 62, 26, 0.12);
+  --tk-kw: #74603f;
+  --tk-str: #4b7a23;
+  --tk-num: #9a6100;
+  --tk-com: #a39276;
+  --tk-fn: #9a6100;
+  --tk-type: #33281c;
+  --tk-prop: #54452f;
+  --tk-op: #86735a;
+  --tk-punct: #a39276;
+  --tk-tag: #a8361f;
+  --tk-meta: #74603f;
+}
+
+/* dusk: a soft blue-grey dark for the evening */
+:root[data-skin="minimal"][data-palette="dusk"] {
+  --bg: #181c25;
+  --bg-raised: #20252f;
+  --bg-hover: rgba(200, 210, 235, 0.05);
+  --ink: #dde1ea;
+  --ink-soft: #b2b8c6;
+  --ink-dim: #808799;
+  --ink-faint: #4b5162;
+  --hairline: rgba(200, 210, 235, 0.09);
+  --sheet-edge: rgba(200, 210, 235, 0.13);
+  --active-line: rgba(200, 210, 235, 0.03);
+  --shadow: 0 24px 64px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(200, 210, 235, 0.07);
+  --code-bg: #141821;
+  --code-edge: rgba(200, 210, 235, 0.08);
+  --tk-com: #677089;
+}
+
+/* night: true black for OLED screens, warm and dim text, no harsh blue */
+:root[data-skin="minimal"][data-palette="night"] {
+  --bg: #000000;
+  --bg-raised: #0b0b0a;
+  --bg-hover: rgba(255, 214, 170, 0.05);
+  --ink: #d6cdbf;
+  --ink-soft: #b0a696;
+  --ink-dim: #7c7468;
+  --ink-faint: #3f3a33;
+  --hairline: rgba(255, 214, 170, 0.09);
+  --sheet-edge: rgba(255, 214, 170, 0.13);
+  --active-line: rgba(255, 214, 170, 0.03);
+  --shadow: 0 0 0 1px rgba(255, 214, 170, 0.12);
+  --code-bg: #080807;
+  --code-edge: rgba(255, 214, 170, 0.08);
+  --accent: #e6a55a;
+  --accent-text: #e6a55a;
+  --accent-ink: #1a0f02;
+  --sel: rgba(230, 165, 90, 0.22);
+}
+
+/* contrast: white on black, strong lines, a bright yellow mark */
+:root[data-skin="minimal"][data-palette="contrast"] {
+  --bg: #000000;
+  --bg-raised: #000000;
+  --bg-hover: rgba(255, 255, 255, 0.14);
+  --ink: #ffffff;
+  --ink-soft: #ffffff;
+  --ink-dim: #e2e2e2;
+  --ink-faint: #a6a6a6;
+  --hairline: rgba(255, 255, 255, 0.5);
+  --sheet-edge: rgba(255, 255, 255, 0.7);
+  --active-line: rgba(255, 255, 255, 0.08);
+  --shadow: 0 0 0 2px #ffffff;
+  --code-bg: #0e0e0e;
+  --code-edge: rgba(255, 255, 255, 0.6);
+  --accent: #ffe14d;
+  --accent-text: #ffe14d;
+  --accent-ink: #000000;
+  --sel: rgba(255, 225, 77, 0.4);
+  --tk-kw: #ff9e64;
+  --tk-str: #a5ff90;
+  --tk-num: #ffd76b;
+  --tk-com: #c8c8c8;
+  --tk-fn: #7fdbff;
+  --tk-type: #ffffff;
+  --tk-prop: #b8f0e6;
+  --tk-op: #ffffff;
+  --tk-punct: #dddddd;
+  --tk-tag: #ff9e64;
+  --tk-meta: #ffd76b;
+}
+
+/* a clear ring on the button or field in focus; the text being written keeps just its caret */
+:root[data-palette="contrast"] :focus-visible:not(.cm-content, .rd-scroll) {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+
 /* ---------- tokens: atlas (night survey / parchment) ---------- */
 
 :root[data-skin="atlas"] {
@@ -2021,6 +2129,7 @@ textarea {
 
 .seg {
   display: inline-flex;
+  flex-wrap: wrap;
   align-self: flex-start;
   gap: 2px;
   padding: 3px;
@@ -2991,6 +3100,373 @@ textarea {
 .textLayer.selecting .endOfContent {
   top: 0;
 }
+
+/* ---------- the reader's view: font, spacing ---------- */
+
+.reader[data-font="sans"] .reader-book {
+  font-family: var(--font-ui);
+}
+
+.reader[data-leading="tight"] .reader-book {
+  line-height: 1.5;
+}
+
+.reader[data-leading="loose"] .reader-book {
+  line-height: 1.95;
+}
+
+.reader[data-leading="loose"] .reader-book p {
+  margin-bottom: 1em;
+}
+
+/* ---------- reading by pages: the book is a row of columns behind the sheet ---------- */
+
+.rd-scroll.paged {
+  overflow: hidden;
+  touch-action: none;
+  overscroll-behavior: none;
+}
+
+.rd-scroll.paged .rd-sheet {
+  position: relative;
+  height: 100%;
+  max-width: 46rem;
+  margin: 0 auto;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.rd-scroll.paged .reader-book {
+  height: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 34px 30px 38px;
+  columns: 1;
+  column-gap: 60px;
+  column-fill: auto;
+  will-change: transform;
+}
+
+.rd-scroll.paged .reader-book :is(h1, h2, h3, h4, h5, h6) {
+  break-after: avoid;
+}
+
+.rd-scroll.paged .reader-book :is(figure, img, pre, tr, .rd-stanza) {
+  break-inside: avoid;
+}
+
+.rd-scroll.paged .reader-book img {
+  max-height: 72vh;
+  object-fit: contain;
+}
+
+/* on a wide screen the page is a sheet of paper on the desk */
+@media (min-width: 760px) {
+  .reader:not([data-format="pdf"]) .rd-scroll.paged {
+    padding: 18px 0 22px;
+  }
+
+  .rd-scroll.paged .rd-sheet {
+    border-radius: 6px;
+    background: var(--bg-raised);
+    box-shadow: var(--shadow);
+  }
+}
+
+.reader-pdf.paged {
+  width: max-content;
+  min-width: 0;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0;
+  padding: 0;
+  will-change: transform;
+}
+
+.reader-pdf.paged .pdf-page {
+  flex: none;
+}
+
+/* the arrows at the edges, for a mouse; a finger taps the edge of the page instead */
+.rd-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 3;
+  display: none;
+  place-items: center;
+  width: 40px;
+  height: 64px;
+  margin-top: -32px;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-raised) 85%, transparent);
+  color: var(--ink-soft);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.35;
+  transition: opacity 0.15s;
+}
+
+.rd-nav-prev {
+  left: 10px;
+}
+
+.rd-nav-next {
+  right: 10px;
+}
+
+.reader.is-paged .rd-nav {
+  display: grid;
+}
+
+.reader.is-paged:hover .rd-nav:not(:disabled),
+.rd-nav:focus-visible {
+  opacity: 1;
+}
+
+.rd-nav:disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (hover: none) {
+  .reader.is-paged .rd-nav {
+    display: none;
+  }
+}
+
+/* ---------- page turns (pager.js marks <html> with the kind and the direction) ---------- */
+
+::view-transition-group(rd-page) {
+  animation-duration: 0s;
+}
+
+::view-transition-old(rd-page),
+::view-transition-new(rd-page) {
+  mix-blend-mode: normal;
+  backface-visibility: hidden;
+}
+
+/* nothing else on screen moves while a page turns */
+:root[data-turn]::view-transition-old(root),
+:root[data-turn]::view-transition-new(root) {
+  animation: none;
+}
+
+/* the book: the page lifts at its outer edge and turns over the spine on the left */
+:root[data-turn="flip"][data-turn-dir="next"]::view-transition-old(rd-page) {
+  z-index: 2;
+  transform-origin: 0 50%;
+  animation: rd-flip-away 560ms cubic-bezier(0.45, 0.05, 0.4, 1) both;
+}
+
+:root[data-turn="flip"][data-turn-dir="next"]::view-transition-new(rd-page) {
+  animation: rd-uncover 560ms ease-out both;
+}
+
+:root[data-turn="flip"][data-turn-dir="prev"]::view-transition-new(rd-page) {
+  z-index: 2;
+  transform-origin: 0 50%;
+  animation: rd-flip-back 560ms cubic-bezier(0.45, 0.05, 0.4, 1) both;
+}
+
+:root[data-turn="flip"][data-turn-dir="prev"]::view-transition-old(rd-page) {
+  animation: rd-cover 560ms ease-in both;
+}
+
+@keyframes rd-flip-away {
+  0% {
+    transform: perspective(2600px) rotateY(0deg);
+    filter: brightness(1);
+    box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  }
+  60% {
+    box-shadow: -30px 0 60px rgba(0, 0, 0, 0.35);
+  }
+  100% {
+    transform: perspective(2600px) rotateY(-96deg);
+    filter: brightness(0.55);
+    box-shadow: -40px 0 80px rgba(0, 0, 0, 0);
+  }
+}
+
+@keyframes rd-flip-back {
+  0% {
+    transform: perspective(2600px) rotateY(-96deg);
+    filter: brightness(0.55);
+  }
+  100% {
+    transform: perspective(2600px) rotateY(0deg);
+    filter: brightness(1);
+  }
+}
+
+/* the page underneath is in the turning page's shadow until it is uncovered */
+@keyframes rd-uncover {
+  from {
+    filter: brightness(0.78);
+  }
+  to {
+    filter: brightness(1);
+  }
+}
+
+@keyframes rd-cover {
+  from {
+    filter: brightness(1);
+  }
+  to {
+    filter: brightness(0.78);
+  }
+}
+
+/* the stack: the next page slides in over the one before, which sinks a little */
+:root[data-turn="stack"][data-turn-dir="next"]::view-transition-new(rd-page) {
+  z-index: 2;
+  animation: rd-slide-in 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  box-shadow: -18px 0 40px rgba(0, 0, 0, 0.3);
+}
+
+:root[data-turn="stack"][data-turn-dir="next"]::view-transition-old(rd-page) {
+  animation: rd-sink 420ms ease-out both;
+}
+
+:root[data-turn="stack"][data-turn-dir="prev"]::view-transition-old(rd-page) {
+  z-index: 2;
+  animation: rd-slide-out 420ms cubic-bezier(0.4, 0, 0.6, 1) both;
+  box-shadow: -18px 0 40px rgba(0, 0, 0, 0.3);
+}
+
+:root[data-turn="stack"][data-turn-dir="prev"]::view-transition-new(rd-page) {
+  animation: rd-rise 420ms ease-out both;
+}
+
+@keyframes rd-slide-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes rd-slide-out {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes rd-sink {
+  to {
+    transform: scale(0.93);
+    filter: brightness(0.6);
+  }
+}
+
+@keyframes rd-rise {
+  from {
+    transform: scale(0.93);
+    filter: brightness(0.6);
+  }
+}
+
+/* the fade: one page dissolves into the next */
+:root[data-turn="fade"]::view-transition-old(rd-page) {
+  animation: rd-fade-out 320ms ease both;
+}
+
+:root[data-turn="fade"]::view-transition-new(rd-page) {
+  animation: rd-fade-in 320ms ease both;
+}
+
+@keyframes rd-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes rd-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ---------- the view panel ---------- */
+
+.rd-view {
+  position: absolute;
+  top: calc(var(--titlebar-h) + 6px);
+  right: 8px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(360px, calc(100vw - 16px));
+  max-height: calc(100% - var(--titlebar-h) - 16px);
+  overflow: auto;
+  padding: 6px 16px 18px;
+  border: 1px solid var(--sheet-edge);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow);
+}
+
+.rd-view[hidden] {
+  display: none;
+}
+
+.rd-view .rd-toc-head {
+  padding: 8px 0 0;
+}
+
+.rdv-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rdv-themes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+.rdv-theme {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 4px 7px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink-dim);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.rdv-theme[aria-checked="true"] {
+  border-color: var(--accent-text);
+  color: var(--ink);
+}
+
+.rdv-theme-chip {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 34px;
+  border-radius: calc(var(--radius) - 2px);
+  font: 600 15px "Literata Variable", Georgia, serif;
+  box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.25);
+}
+
+/* each theme's own colours, whatever theme is on now */
+.rdv-theme[data-swatch="dark"] .rdv-theme-chip { background: #09090b; color: #ededef; }
+.rdv-theme[data-swatch="light"] .rdv-theme-chip { background: #fbfbfa; color: #18181b; }
+.rdv-theme[data-swatch="sepia"] .rdv-theme-chip { background: #f3ead8; color: #33281c; }
+.rdv-theme[data-swatch="dusk"] .rdv-theme-chip { background: #181c25; color: #dde1ea; }
+.rdv-theme[data-swatch="night"] .rdv-theme-chip { background: #000000; color: #d6cdbf; }
+.rdv-theme[data-swatch="contrast"] .rdv-theme-chip { background: #000000; color: #ffe14d; box-shadow: inset 0 0 0 2px #ffffff; }
+.rdv-theme[data-swatch="system"] .rdv-theme-chip { background: linear-gradient(135deg, #fbfbfa 50%, #09090b 50%); color: #7d7d86; }
 
 /* ---------- touch screens ---------- */
 

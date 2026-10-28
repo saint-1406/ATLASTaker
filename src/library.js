@@ -5,10 +5,13 @@
 
 import { h, toast, confirmDialog, showMenu, isOverlayOpen } from './overlays.js';
 import { count, t } from './i18n.js';
+import { LEADINGS, READ_FONTS, READ_MODES, THEMES, TURNS } from './skins.js';
 
 const ACCEPT = '.pdf,.epub,.fb2,.zip,.docx,.doc,.md,.markdown,.txt,.text,.html,.htm,.xhtml,.rtf,.odt';
 const MAX_SIZE = 300 * 1024 * 1024;
 const BOOK_SCALE = { min: 0.7, max: 2.2, step: 0.1 };
+// keys that turn a page in page mode: forward, back, or (space) forward unless Shift is held
+const PAGE_KEYS = { ArrowRight: 1, ArrowDown: 1, PageDown: 1, ArrowLeft: -1, ArrowUp: -1, PageUp: -1, ' ': 'shift-aware' };
 const PDF_SCALE = { min: 0.5, max: 4, step: 0.25 };
 
 let readerCode = null;
@@ -31,11 +34,13 @@ function loadReader() {
 }
 
 /**
- * api: the bridge (api.library holds the documents). onQuote(doc, text, where) → { id, title } of
- * the note the quote went to; onOpenNote(id) shows a note; onLink(url) opens a web link; onClose()
- * runs when the shelf goes away.
+ * api: the bridge (api.library holds the documents). getReading() / onReading(patch): how books are
+ * shown (skins.js: readMode, readTurn, readFont, readLeading), kept by the app; getTheme() /
+ * onTheme(theme): the app's theme, which the reader's view panel can change too. onQuote(doc, text,
+ * where) → { id, title } of the note the quote went to; onOpenNote(id) shows a note; onLink(url)
+ * opens a web link; onClose() runs when the shelf goes away.
  */
-export function createLibrary({ api, phone = false, onQuote, onOpenNote, onLink, onClose }) {
+export function createLibrary({ api, phone = false, getReading, onReading, getTheme, onTheme, onQuote, onOpenNote, onLink, onClose }) {
   const lib = api.library;
   let docs = [];
   let reading = null; // { doc, controller, closed }
@@ -68,9 +73,11 @@ export function createLibrary({ api, phone = false, onQuote, onOpenNote, onLink,
   const subtitle = h('span', { class: 'rd-sub' });
   const percent = h('span', { class: 'rd-pct' });
   const readerBack = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => closeReader() }, '←');
-  const smaller = h('button', { type: 'button', class: 'tb-btn icon rd-size', onclick: () => zoom(-1) }, 'A−');
-  const larger = h('button', { type: 'button', class: 'tb-btn icon rd-size', onclick: () => zoom(1) }, 'A+');
+  const viewButton = h('button', { type: 'button', class: 'tb-btn icon rd-size', onclick: () => toggleView() }, 'Aa');
   const tocButton = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => toggleToc() }, '☰');
+  const prevButton = h('button', { type: 'button', class: 'rd-nav rd-nav-prev', onclick: () => reading?.controller?.prev() }, '‹');
+  const nextButton = h('button', { type: 'button', class: 'rd-nav rd-nav-next', onclick: () => reading?.controller?.next() }, '›');
+  const viewPanel = h('aside', { class: 'rd-view', hidden: true });
   const status = h('div', { class: 'rd-status', role: 'status' });
   const line = h('div', { class: 'rd-line', 'aria-hidden': 'true' }, h('i'));
   const quoteText = h('span');
@@ -81,12 +88,15 @@ export function createLibrary({ api, phone = false, onQuote, onOpenNote, onLink,
   const reader = h(
     'section',
     { class: 'reader', hidden: true },
-    h('header', { class: 'rd-head' }, readerBack, h('div', { class: 'rd-titles' }, title, subtitle), percent, smaller, larger, tocButton),
+    h('header', { class: 'rd-head' }, readerBack, h('div', { class: 'rd-titles' }, title, subtitle), percent, viewButton, tocButton),
     scroll,
     status,
     line,
+    prevButton,
+    nextButton,
     quoteButton,
     tocPanel,
+    viewPanel,
   );
 
   document.body.append(shelf, reader);
@@ -100,9 +110,10 @@ export function createLibrary({ api, phone = false, onQuote, onOpenNote, onLink,
     for (const [button, key] of [
       [shelfBack, 'library.back'],
       [readerBack, 'reader.back'],
-      [smaller, 'reader.smaller'],
-      [larger, 'reader.larger'],
+      [viewButton, 'reader.viewTitle'],
       [tocButton, 'reader.toc'],
+      [prevButton, 'reader.prevPage'],
+      [nextButton, 'reader.nextPage'],
     ]) {
       button.title = t(key);
       button.setAttribute('aria-label', t(key));
@@ -279,10 +290,14 @@ export function createLibrary({ api, phone = false, onQuote, onOpenNote, onLink,
 
   // ---------- reading ----------
 
+  /** How far into the book: the page number in page mode, a percentage when scrolling. */
   function showProgress(value) {
     const pct = Math.round(Math.min(1, Math.max(0, value)) * 100);
-    percent.textContent = t('library.progress', pct);
+    const pages = reading?.controller?.pages?.();
+    percent.textContent = pages ? t('reader.pageOf', pages.index + 1, pages.count) : t('library.progress', pct);
     line.firstChild.style.transform = `scaleX(${pct / 100})`;
+    prevButton.disabled = !pages || pages.index === 0;
+    nextButton.disabled = !pages || pages.index >= pages.count - 1;
   }
 
   /** The place is kept a moment after the scrolling stops, and right away when the reader closes. */
@@ -315,7 +330,13 @@ export function createLibrary({ api, phone = false, onQuote, onOpenNote, onLink,
     }
     reader.hidden = false;
     tocPanel.hidden = true;
+    viewPanel.hidden = true;
     quoteButton.hidden = true;
+    const look = getReading();
+    reader.dataset.font = look.readFont;
+    reader.dataset.leading = look.readLeading;
+    reader.dataset.format = doc.format;
+    reader.classList.remove('is-paged');
     title.textContent = nameOf(doc);
     subtitle.textContent = doc.author || '';
     showProgress(doc.progress || 0);
@@ -335,6 +356,8 @@ export function createLibrary({ api, phone = false, onQuote, onOpenNote, onLink,
         format: doc.format,
         position: doc.position,
         scale: doc.scale || 1,
+        mode: look.readMode,
+        turn: look.readTurn,
         onPosition: (position, progress) => remember(session, position, progress),
         onLink,
       });
@@ -343,6 +366,7 @@ export function createLibrary({ api, phone = false, onQuote, onOpenNote, onLink,
         return;
       }
       session.controller = controller;
+      reader.classList.toggle('is-paged', controller.paged);
       status.hidden = true;
       showProgress(controller.progress());
       fillToc(controller.toc);
@@ -364,17 +388,119 @@ export function createLibrary({ api, phone = false, onQuote, onOpenNote, onLink,
     reader.hidden = true;
     quoteButton.hidden = true;
     tocPanel.hidden = true;
+    viewPanel.hidden = true;
+    reader.classList.remove('is-paged');
     render();
     grid.querySelector('.lib-card')?.focus({ preventScroll: true });
   }
 
+  // a PDF page in page mode always fits the screen: no zoom there
+  const canZoom = () => Boolean(reading?.controller) && !(reading.controller.kind === 'pdf' && reading.controller.paged);
+
   function zoom(direction) {
-    if (!reading?.controller) return;
+    if (!canZoom()) return;
     const range = reading.controller.kind === 'pdf' ? PDF_SCALE : BOOK_SCALE;
     const next = direction === 0 ? 1 : (reading.doc.scale || 1) + direction * range.step;
     reading.doc.scale = Math.round(Math.min(range.max, Math.max(range.min, next)) * 100) / 100;
     reading.controller.setScale(reading.doc.scale);
     remember(reading, reading.controller.position(), reading.controller.progress());
+    if (!viewPanel.hidden) drawView();
+  }
+
+  // ---------- the view panel: size, pages or scroll, page turn, font, spacing, theme ----------
+
+  function choices(label, options, current, words, pick) {
+    return h(
+      'section',
+      { class: 'rdv-group' },
+      h('div', { class: 'set-label' }, label),
+      h(
+        'div',
+        { class: 'seg', role: 'radiogroup', 'aria-label': label },
+        options.map((option) =>
+          h('button', { type: 'button', class: 'seg-btn', role: 'radio', 'aria-checked': String(option === current), onclick: () => pick(option) }, words(option)),
+        ),
+      ),
+    );
+  }
+
+  function drawView() {
+    const look = getReading();
+    const controller = reading?.controller;
+    const pdf = controller?.kind === 'pdf';
+    const sizeNote = !canZoom() && pdf ? h('div', { class: 'set-note' }, t('reader.pdfFit')) : null;
+    const size = h(
+      'section',
+      { class: 'rdv-group' },
+      h('div', { class: 'set-label' }, t('reader.size')),
+      h(
+        'div',
+        { class: 'set-size' },
+        h('button', { type: 'button', class: 'seg-btn', disabled: !canZoom() || null, 'aria-label': t('reader.smaller'), onclick: () => zoom(-1) }, 'A−'),
+        h('span', { class: 'set-size-value' }, `${Math.round((reading?.doc.scale || 1) * 100)}%`),
+        h('button', { type: 'button', class: 'seg-btn', disabled: !canZoom() || null, 'aria-label': t('reader.larger'), onclick: () => zoom(1) }, 'A+'),
+        h('button', { type: 'button', class: 'seg-btn seg-reset', disabled: !canZoom() || null, onclick: () => zoom(0) }, t('settings.reset')),
+      ),
+      sizeNote,
+    );
+    const themes = h(
+      'section',
+      { class: 'rdv-group' },
+      h('div', { class: 'set-label' }, t('reader.theme')),
+      h(
+        'div',
+        { class: 'rdv-themes', role: 'radiogroup', 'aria-label': t('reader.theme') },
+        THEMES.map((theme) =>
+          h(
+            'button',
+            { type: 'button', class: 'rdv-theme', role: 'radio', 'data-swatch': theme, 'aria-checked': String(getTheme() === theme), onclick: () => pickTheme(theme) },
+            h('span', { class: 'rdv-theme-chip', 'aria-hidden': 'true' }, 'Aa'),
+            h('span', { class: 'rdv-theme-name' }, t(`themes.${theme}`)),
+          ),
+        ),
+      ),
+    );
+    viewPanel.replaceChildren(
+      h('div', { class: 'rd-toc-head' }, t('reader.view')),
+      size,
+      choices(t('reader.mode'), READ_MODES, look.readMode, (m) => t(`reader.modes.${m}`), (readMode) => setReading({ readMode })),
+      look.readMode === 'pages' ? choices(t('reader.turn'), TURNS, look.readTurn, (k) => t(`reader.turns.${k}`), (readTurn) => setReading({ readTurn })) : null,
+      pdf ? null : choices(t('reader.font'), READ_FONTS, look.readFont, (f) => t(`reader.fonts.${f}`), (readFont) => setReading({ readFont })),
+      pdf ? null : choices(t('reader.leading'), LEADINGS, look.readLeading, (l) => t(`reader.leadings.${l}`), (readLeading) => setReading({ readLeading })),
+      themes,
+    );
+  }
+
+  /** A reading preference changed: the app keeps it, the open book shows it at once. */
+  function setReading(patch) {
+    onReading(patch);
+    const controller = reading?.controller;
+    if ('readFont' in patch) reader.dataset.font = patch.readFont;
+    if ('readLeading' in patch) reader.dataset.leading = patch.readLeading;
+    if (controller) {
+      if ('readMode' in patch) {
+        controller.setMode(patch.readMode);
+        reader.classList.toggle('is-paged', controller.paged);
+      }
+      if ('readTurn' in patch) controller.setTurn(patch.readTurn);
+      if ('readFont' in patch || 'readLeading' in patch) controller.relayout();
+      showProgress(controller.progress());
+    }
+    drawView();
+  }
+
+  function pickTheme(theme) {
+    onTheme(theme);
+    drawView();
+  }
+
+  function toggleView(show = viewPanel.hidden) {
+    tocPanel.hidden = true;
+    viewPanel.hidden = !show;
+    if (show) {
+      drawView();
+      viewPanel.querySelector('[aria-checked="true"]')?.focus({ preventScroll: true });
+    }
   }
 
   function fillToc(entries) {
@@ -403,6 +529,7 @@ export function createLibrary({ api, phone = false, onQuote, onOpenNote, onLink,
   }
 
   function toggleToc(show = tocPanel.hidden) {
+    viewPanel.hidden = true;
     tocPanel.hidden = !show;
     if (show) tocPanel.querySelector('button')?.focus({ preventScroll: true });
   }
@@ -453,6 +580,14 @@ export function createLibrary({ api, phone = false, onQuote, onOpenNote, onLink,
     }
   }
 
+  // the contents and view panels close on a press anywhere else in the reader
+  reader.addEventListener('pointerdown', (e) => {
+    if (!e.target.closest('.rd-view, .rd-toc, .rd-head')) {
+      viewPanel.hidden = true;
+      tocPanel.hidden = true;
+    }
+  });
+
   // ---------- dropping files ----------
 
   const hasFiles = (e) => [...(e.dataTransfer?.types ?? [])].includes('Files');
@@ -474,8 +609,9 @@ export function createLibrary({ api, phone = false, onQuote, onOpenNote, onLink,
 
   /** One step back: the contents list, then the reader, then the shelf. False when nothing was open. */
   function back() {
-    if (!tocPanel.hidden) {
+    if (!tocPanel.hidden || !viewPanel.hidden) {
       tocPanel.hidden = true;
+      viewPanel.hidden = true;
       return true;
     }
     if (reading) {
@@ -500,7 +636,11 @@ export function createLibrary({ api, phone = false, onQuote, onOpenNote, onLink,
         render();
       } else back();
     } else if (mod && e.code === 'KeyO') close();
-    else if (reading && mod && (e.code === 'Equal' || e.code === 'NumpadAdd')) zoom(1);
+    else if (reading?.controller?.paged && !mod && !e.altKey && !e.target.closest?.('input, .rd-view, .rd-toc') && PAGE_KEYS[e.key] !== undefined) {
+      if (PAGE_KEYS[e.key] === 'shift-aware') (e.shiftKey ? reading.controller.prev : reading.controller.next)();
+      else if (PAGE_KEYS[e.key] > 0) reading.controller.next();
+      else reading.controller.prev();
+    } else if (reading && mod && (e.code === 'Equal' || e.code === 'NumpadAdd')) zoom(1);
     else if (reading && mod && (e.code === 'Minus' || e.code === 'NumpadSubtract')) zoom(-1);
     else if (reading && mod && (e.code === 'Digit0' || e.code === 'Numpad0')) zoom(0);
     else if (!reading && mod && e.code === 'KeyF') filter.focus();

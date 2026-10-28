@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_LOOK, normalizeLook, SKINS } from '../src/skins.js';
+import { DEFAULT_LOOK, DEFAULT_READING, normalizeLook, normalizeReading, SKINS, THEMES, toneOf, TURNS } from '../src/skins.js';
 import { STRINGS } from '../src/i18n.js';
 import { activeHeading } from '../src/outline.js';
 
@@ -21,7 +21,32 @@ test('both looks name every piece of the interface, in every language', () => {
 test('unknown or missing preferences fall back to the minimal look', () => {
   assert.deepEqual(normalizeLook(), DEFAULT_LOOK);
   assert.deepEqual(normalizeLook({ skin: 'atlas', theme: 'system', accent: 'violet' }), { skin: 'atlas', theme: 'system', accent: 'violet' });
-  assert.deepEqual(normalizeLook({ skin: 'neon', theme: 'sepia', accent: 'pink' }), DEFAULT_LOOK);
+  assert.deepEqual(normalizeLook({ skin: 'neon', theme: 'mauve', accent: 'pink' }), DEFAULT_LOOK);
+  assert.equal(normalizeLook({ theme: 'sepia' }).theme, 'sepia');
+});
+
+test('every theme has a tone, and the palettes sit on the right one', () => {
+  for (const theme of THEMES) assert.ok(['light', 'dark'].includes(toneOf(theme)), theme);
+  assert.equal(toneOf('sepia'), 'light');
+  assert.equal(toneOf('night'), 'dark');
+  assert.equal(toneOf('contrast'), 'dark');
+  assert.equal(toneOf('system', false), 'light');
+  assert.equal(toneOf('system', true), 'dark');
+  for (const [lang, strings] of Object.entries(STRINGS)) {
+    for (const theme of THEMES) assert.equal(typeof strings.themes[theme], 'string', `${lang}: themes.${theme}`);
+  }
+});
+
+test('reading preferences keep only what the reader knows', () => {
+  assert.deepEqual(normalizeReading(), DEFAULT_READING);
+  assert.deepEqual(normalizeReading({ readMode: 'pages', readTurn: 'stack', readFont: 'sans', readLeading: 'loose' }), {
+    readMode: 'pages',
+    readTurn: 'stack',
+    readFont: 'sans',
+    readLeading: 'loose',
+  });
+  assert.equal(normalizeReading({ readTurn: 'explode' }).readTurn, 'flip');
+  for (const turn of TURNS) assert.equal(typeof STRINGS.en.reader.turns[turn], 'string', turn);
 });
 
 test('the outline marks the section that holds the cursor', () => {

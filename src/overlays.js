@@ -496,7 +496,7 @@ export function openSettings({ getPrefs, onChange, getData }) {
         body.replaceChildren(
           group(t('settings.language'), languages),
           group(t('settings.look'), skins),
-          group(t('settings.theme'), themes),
+          group(t('settings.theme'), themes, h('div', { class: 'set-note' }, t(atlas ? 'settings.atlasThemes' : 'settings.themeHint'))),
           group(t('settings.accent'), accents, atlas ? h('div', { class: 'set-note' }, t('settings.atlasAccent')) : null),
           group(t('settings.size'), size),
           storage,

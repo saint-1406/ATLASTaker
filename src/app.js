@@ -8,7 +8,7 @@ import { createLibrary } from './library.js';
 import { createEditor, insertComment, insertCodeBlock, pasteText, codeLanguageAt, urlAt } from './editor.js';
 import { analyze, imageRefs } from './markdown.js';
 import { commentTarget, commentsUnder, formatStamp } from './comments.js';
-import { normalizeLook } from './skins.js';
+import { normalizeLook, normalizeReading, PALETTES, toneOf } from './skins.js';
 import { browserLanguages, count, formatDay, formatTime, isLang, pickLang, setLang, t, ui } from './i18n.js';
 import { Outline } from './outline.js';
 import { hashString } from './terrain.js';
@@ -58,6 +58,7 @@ const prefs = {
   lang: pickLang({ saved: cached.lang, existing: Boolean(cached.skin), preferred: browserLanguages() }),
   sidebar: true,
   fontScale: 1,
+  ...normalizeReading(),
 };
 let currentId = null;
 let dirty = false;
@@ -89,7 +90,8 @@ const isAtlas = () => prefs.skin === 'atlas';
 const when = (ms) => (new Date(ms).toDateString() === new Date().toDateString() ? formatTime(ms) : formatDay(ms));
 const titleOf = (note) => note?.info.title || t('untitled');
 const newestId = () => [...notes.values()].sort((a, b) => b.updated - a.updated)[0]?.id ?? null;
-const effectiveTheme = () => (prefs.theme === 'system' ? (systemDark.matches ? 'dark' : 'light') : prefs.theme);
+/** "light" or "dark": the tone the chosen theme sits on (sepia is a light one, night a dark one). */
+const effectiveTheme = () => toneOf(prefs.theme, systemDark.matches);
 
 // The look is remembered in this browser too, so the window opens in it before the server answers.
 function cachedLook() {
@@ -117,6 +119,7 @@ async function boot() {
   Object.assign(prefs, normalizeLook({ ...prefs, ...pickDefined(saved, ['skin', 'theme', 'accent']) }));
   if (typeof saved.sidebar === 'boolean') prefs.sidebar = saved.sidebar;
   if (typeof saved.fontScale === 'number') prefs.fontScale = saved.fontScale;
+  Object.assign(prefs, normalizeReading(saved));
   // the language is settled once and stored, so it no longer follows the browser's afterwards
   const lang = pickLang({ saved: saved.lang, existing: Boolean(saved.welcomed), preferred: browserLanguages() });
   if (saved.lang !== lang) api.setState({ lang }).catch(() => {});
@@ -169,6 +172,13 @@ async function boot() {
     library = createLibrary({
       api,
       phone: Boolean(android) || matchMedia('(pointer: coarse)').matches,
+      getReading: () => normalizeReading(prefs),
+      onReading(patch) {
+        Object.assign(prefs, normalizeReading({ ...prefs, ...patch }));
+        api.setState(normalizeReading(prefs)).catch(() => {});
+      },
+      getTheme: () => prefs.theme,
+      onTheme: (theme) => setLook({ theme }),
       onQuote: quoteToNote,
       onOpenNote: (id) => openNote(id),
       onLink: (url) => api.openExternal(url),
@@ -1037,6 +1047,9 @@ function applyLook({ persist = true } = {}) {
   const theme = effectiveTheme();
   root.dataset.skin = prefs.skin;
   root.dataset.theme = theme;
+  // a palette (sepia, dusk, night, contrast) is laid over the tone; the atlas look keeps its own colours
+  if (PALETTES[prefs.theme]) root.dataset.palette = prefs.theme;
+  else delete root.dataset.palette;
   root.dataset.accent = prefs.accent;
   $('#btn-theme').textContent = theme === 'dark' ? '☀' : '☾';
   const c = copy();

@@ -5,6 +5,7 @@
 
 import { AnnotationMode, getDocument, PDFWorker, TextLayer } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import workerSource from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs';
+import { createPager } from './pager.js';
 
 let worker = null;
 
@@ -56,9 +57,15 @@ export async function pdfInfo(bytes, coverWidth = 240) {
   }
 }
 
-export async function openPdf(host, bytes, { position, scale = 1, onPosition } = {}) {
+/**
+ * Two ways to read: one column of pages to scroll, or one page at a time, fitted to the screen and
+ * turned left to right (pager.js). The frames stay the same elements in both; only their size and
+ * the strip they sit in change.
+ */
+export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll', turn = 'flip', onPosition } = {}) {
   const doc = await loadPdf(bytes);
   const first = (await doc.getPage(1)).getViewport({ scale: 1 });
+  const firstRatio = first.width / first.height;
   const wrap = document.createElement('div');
   wrap.className = 'reader-pdf';
   wrap.style.setProperty('--pdf-zoom', String(scale));
@@ -75,6 +82,19 @@ export async function openPdf(host, bytes, { position, scale = 1, onPosition } =
 
   const drawn = new Map(); // page number → { width, canvas, text, task, layer, cancelled }
   const near = new Set();
+  let pager = null;
+  let currentTurn = turn;
+
+  /** In page mode a frame fills the screen as far as its shape allows, centred in a slot one screen wide. */
+  function fit(frame) {
+    const ratio = Number(frame.dataset.ratio) || firstRatio;
+    const room = { w: host.clientWidth - 16, h: host.clientHeight - 16 };
+    const w = Math.max(40, Math.min(room.w, room.h * ratio));
+    const h = w / ratio;
+    frame.style.width = `${w}px`;
+    frame.style.height = `${h}px`;
+    frame.style.margin = `${(host.clientHeight - h) / 2}px ${(host.clientWidth - w) / 2}px`;
+  }
 
   function release(n) {
     const entry = drawn.get(n);
@@ -93,16 +113,19 @@ export async function openPdf(host, bytes, { position, scale = 1, onPosition } =
 
   async function draw(n) {
     const frame = pages[n - 1];
-    const width = frame.clientWidth;
-    if (!width || Math.abs((drawn.get(n)?.width ?? -10) - width) < 2) return;
+    if (!frame.clientWidth || Math.abs((drawn.get(n)?.width ?? -10) - frame.clientWidth) < 2) return;
     release(n);
-    const entry = { width, cancelled: false };
+    const entry = { width: frame.clientWidth, cancelled: false };
     drawn.set(n, entry);
     try {
       const page = await doc.getPage(n);
       if (entry.cancelled) return;
       const base = page.getViewport({ scale: 1 });
+      frame.dataset.ratio = String(base.width / base.height);
       frame.style.aspectRatio = `${base.width} / ${base.height}`;
+      if (pager) fit(frame);
+      const width = frame.clientWidth;
+      entry.width = width;
       const cssScale = width / base.width;
       const ratio = Math.min(window.devicePixelRatio || 1, innerWidth < 700 ? 1.75 : 2);
       const viewport = page.getViewport({ scale: cssScale * ratio });
@@ -127,6 +150,7 @@ export async function openPdf(host, bytes, { position, scale = 1, onPosition } =
     }
   }
 
+  // pages near the view (above, below, or beside it in page mode) are drawn; the rest give their memory back
   const observer = new IntersectionObserver(
     (entries) => {
       for (const e of entries) {
@@ -140,12 +164,13 @@ export async function openPdf(host, bytes, { position, scale = 1, onPosition } =
         }
       }
     },
-    { root: host, rootMargin: '120% 0px' },
+    { root: host, rootMargin: '120% 120%' },
   );
   pages.forEach((frame) => observer.observe(frame));
 
   const viewTop = () => host.getBoundingClientRect().top;
   function current() {
+    if (pager) return { page: pager.index + 1, frac: 0 };
     const top = viewTop() + 1;
     let lo = 0;
     let hi = pages.length - 1;
@@ -161,27 +186,86 @@ export async function openPdf(host, bytes, { position, scale = 1, onPosition } =
     return { page: found + 1, frac: Math.round(Math.max(0, Math.min(1, (viewTop() - r.top) / r.height)) * 1000) / 1000 };
   }
   function restore(pos) {
-    const frame = pos && pages[pos.page - 1];
-    if (!frame) return;
-    const r = frame.getBoundingClientRect();
+    const index = Math.max(0, Math.min(pages.length - 1, (pos?.page ?? 1) - 1));
+    if (pager) {
+      pager.go(index, { animate: false });
+      return;
+    }
+    if (!pos) return;
+    const r = pages[index].getBoundingClientRect();
     host.scrollTop += r.top - viewTop() + (pos.frac || 0) * r.height;
   }
   const progress = () => {
     const { page, frac } = current();
-    return Math.min(1, (page - 1 + frac) / pages.length);
+    return pages.length > 1 ? Math.min(1, (page - 1 + frac) / (pages.length - 1)) : 1;
   };
   const goToPage = (index) => {
-    const frame = pages[index];
-    if (frame) host.scrollTop += frame.getBoundingClientRect().top - viewTop();
+    if (pager) pager.go(index);
+    else if (pages[index]) host.scrollTop += pages[index].getBoundingClientRect().top - viewTop();
   };
+  const report = () => onPosition?.(current(), progress());
 
-  restore(position);
+  function setMode(next, pos = current()) {
+    if ((next === 'pages') === Boolean(pager)) return;
+    if (next === 'pages') {
+      host.classList.add('paged');
+      wrap.classList.add('paged');
+      host.scrollTop = 0;
+      pager = createPager({
+        host,
+        strip: wrap,
+        frameFor: (i) => pages[i],
+        layout: () => {
+          pages.forEach(fit);
+          return { step: host.clientWidth, count: pages.length };
+        },
+        onTurn: report,
+      });
+      pager.setTurn(currentTurn);
+    } else {
+      pager.destroy();
+      pager = null;
+      host.classList.remove('paged');
+      wrap.classList.remove('paged');
+      for (const frame of pages) {
+        frame.style.width = '';
+        frame.style.height = '';
+        frame.style.margin = '';
+      }
+    }
+    restore(pos);
+    requestAnimationFrame(() => near.forEach(draw));
+    report();
+  }
+
+  function relayout() {
+    const pos = current();
+    pager?.relayout();
+    restore(pos);
+    near.forEach(draw);
+  }
+
+  if (mode === 'pages') setMode('pages', position);
+  else restore(position);
+
   let timer = 0;
   const onScroll = () => {
+    if (pager) return;
     clearTimeout(timer);
-    timer = setTimeout(() => onPosition?.(current(), progress()), 300);
+    timer = setTimeout(report, 300);
   };
   host.addEventListener('scroll', onScroll, { passive: true });
+
+  let resizeTimer = 0;
+  let lastSize = `${host.clientWidth}x${host.clientHeight}`;
+  const resized = new ResizeObserver(() => {
+    const size = `${host.clientWidth}x${host.clientHeight}`;
+    if (size === lastSize) return;
+    lastSize = size;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(relayout, 150);
+  });
+  resized.observe(host);
 
   const toc = [];
   try {
@@ -213,13 +297,26 @@ export async function openPdf(host, bytes, { position, scale = 1, onPosition } =
   let rezoom = 0;
   return {
     kind: 'pdf',
-    pages: pages.length,
     toc,
     position: current,
     progress,
+    get paged() {
+      return Boolean(pager);
+    },
+    pages: () => (pager ? { index: pager.index, count: pages.length } : null),
+    setMode: (next) => setMode(next),
+    setTurn(value) {
+      currentTurn = value;
+      pager?.setTurn(value);
+    },
+    relayout,
+    next: () => (pager ? pager.next() : host.scrollBy({ top: host.clientHeight - 48, behavior: 'smooth' })),
+    prev: () => (pager ? pager.prev() : host.scrollBy({ top: -(host.clientHeight - 48), behavior: 'smooth' })),
+    /** Zoom, in the scrolling column; a page in page mode always fits the screen. */
     setScale(value) {
-      const pos = current();
       wrap.style.setProperty('--pdf-zoom', String(value));
+      if (pager) return;
+      const pos = current();
       restore(pos);
       clearTimeout(rezoom);
       rezoom = setTimeout(() => near.forEach(draw), 180);
@@ -230,9 +327,13 @@ export async function openPdf(host, bytes, { position, scale = 1, onPosition } =
     },
     close() {
       observer.disconnect();
+      resized.disconnect();
+      pager?.destroy();
+      host.classList.remove('paged');
       host.removeEventListener('scroll', onScroll);
       clearTimeout(timer);
       clearTimeout(rezoom);
+      clearTimeout(resizeTimer);
       [...drawn.keys()].forEach(release);
       closeDoc(doc);
       host.replaceChildren();

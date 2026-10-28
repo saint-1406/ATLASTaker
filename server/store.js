@@ -14,7 +14,7 @@ const META_FILE = 'atlas.json';
 const RETRYABLE = new Set(['EPERM', 'EBUSY', 'EACCES']);
 const STATE_RULES = {
   skin: (v) => v === 'minimal' || v === 'atlas',
-  theme: (v) => v === 'dark' || v === 'light' || v === 'system',
+  theme: (v) => ['dark', 'light', 'sepia', 'dusk', 'night', 'contrast', 'system'].includes(v),
   accent: (v) => ['lime', 'cyan', 'orange', 'violet'].includes(v),
   lang: (v) => v === 'ru' || v === 'en',
   sidebar: (v) => typeof v === 'boolean',
@@ -22,6 +22,11 @@ const STATE_RULES = {
   lastOpen: (v) => v === null || (typeof v === 'string' && ID_RE.test(v)),
   welcomed: (v) => typeof v === 'boolean',
   lastBackup: (v) => Number.isFinite(v) && v > 0,
+  // how the reader shows a book (src/skins.js)
+  readMode: (v) => v === 'scroll' || v === 'pages',
+  readTurn: (v) => ['flip', 'slide', 'stack', 'fade', 'none'].includes(v),
+  readFont: (v) => v === 'serif' || v === 'sans',
+  readLeading: (v) => ['tight', 'normal', 'loose'].includes(v),
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
