@@ -27,6 +27,18 @@ const trimFonts = {
   },
 };
 
+// pdf.js parses in a worker; its code goes into the reader as text and starts from a blob: URL, as a
+// classic script: a page opened from a file may not start a module worker (build.mjs does the same)
+const workerAsText = {
+  name: 'pdf-worker-as-text',
+  setup(build) {
+    build.onLoad({ filter: /pdf\.worker(\.min)?\.mjs$/ }, async (args) => {
+      const worker = await esbuild.build({ entryPoints: [args.path], bundle: true, format: 'iife', minify: true, write: false, target: ['chrome120'], legalComments: 'none', logLevel: 'error' });
+      return { contents: worker.outputFiles[0].text, loader: 'text' };
+    });
+  },
+};
+
 const common = {
   bundle: true,
   write: false,
@@ -35,21 +47,26 @@ const common = {
   target: ['chrome120'],
   outdir: path.join(ROOT, 'out', 'browser', 'parts'),
 };
-const [js, css] = await Promise.all([
+const [js, readerJs, css] = await Promise.all([
   esbuild.build({ ...common, entryPoints: [path.join(ROOT, 'src', 'app.js')], format: 'iife', loader: { '.md': 'text' } }),
+  esbuild.build({ ...common, entryPoints: [path.join(ROOT, 'src', 'reader', 'index.js')], format: 'iife', plugins: [workerAsText] }),
   esbuild.build({ ...common, entryPoints: [path.join(ROOT, 'src', 'styles.css')], plugins: [trimFonts] }),
 ]);
 
 // An inline script must not contain "</script", or the HTML parser would end it early.
-const script = js.outputFiles[0].text.replace(/<\/script/gi, '<\\/script');
+const inline = (text) => text.replace(/<\/script/gi, '<\\/script');
+const script = inline(js.outputFiles[0].text);
+const reader = inline(readerJs.outputFiles[0].text);
 const style = css.outputFiles[0].text.replace(/<\/style/gi, '<\\/style');
-const scriptHash = crypto.createHash('sha256').update(script, 'utf8').digest('base64');
+const hash = (text) => `'sha256-${crypto.createHash('sha256').update(text, 'utf8').digest('base64')}'`;
 const icon = fs.readFileSync(path.join(ROOT, 'assets', 'icon.png')).toString('base64');
 
-// Only this exact script may run, and the page may not talk to the network at all.
+// Only these exact scripts may run (and pdf.js's worker, made from the reader's own code), and the
+// page may not talk to the network at all.
 const csp = [
   "default-src 'none'",
-  `script-src 'sha256-${scriptHash}'`,
+  `script-src ${hash(script)} ${hash(reader)}`,
+  'worker-src blob:',
   "style-src 'unsafe-inline'",
   'font-src data:',
   'img-src data: blob:',
@@ -66,7 +83,8 @@ const swap = (pattern, replacement) => {
 swap(/<meta http-equiv="Content-Security-Policy"[^>]*>/, `<meta http-equiv="Content-Security-Policy" content="${csp}">`);
 swap(/<link rel="icon"[^>]*>/, `<link rel="icon" href="data:image/png;base64,${icon}">`);
 swap(/<link rel="stylesheet" href="dist\/styles\.css">/, `<style>${style}</style>`);
-swap(/<script src="dist\/app\.js"><\/script>/, `<script>${script}</script>`);
+// the reader first, so window.AtlasReader is there before the app looks for it
+swap(/<script src="dist\/app\.js"><\/script>/, `<script>${reader}</script>\n  <script>${script}</script>`);
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, html);

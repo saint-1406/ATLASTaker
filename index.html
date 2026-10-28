@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
   <meta name="atlas-token" content="__ATLAS_TOKEN__">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src blob:; object-src 'none'; base-uri 'none'">
   <title>ATLAS Notetaker</title>
   <link rel="icon" href="assets/icon.png">
   <link rel="stylesheet" href="dist/styles.css">
@@ -38,6 +38,9 @@
           <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="m10.4 10.4 3.6 3.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
           <span data-copy="search">Поиск и команды</span>
           <kbd class="minimal-only">Ctrl K</kbd>
+        </button>
+        <button class="tb-btn icon" id="btn-library" type="button" title="Библиотека (Ctrl+O)" aria-label="Библиотека" data-i18n-title="chrome.libraryKey" data-i18n-label="chrome.library" hidden>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.25 2.75h2.9v10.5h-2.9zM6.35 2.75h2.9v10.5h-2.9zM10.35 3.55l2.75-.75 2.55 10.1-2.75.75z" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/></svg>
         </button>
         <button class="tb-btn atlas-only" id="btn-atlas" type="button" title="Все заметки на одной карте (Ctrl+M)" data-i18n-title="chrome.atlasKey">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5 5.5 2l5 1.5 4-1.5v10.5l-4 1.5-5-1.5-4 1.5ZM5.5 2v10.5M10.5 3.5V14" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>

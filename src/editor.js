@@ -493,6 +493,8 @@ export function createEditor({
       },
       contextmenu(event, view) {
         if (event.shiftKey) return false; // Shift+right click keeps the browser menu (spelling suggestions)
+        // a long press on a touch screen selects a word and shows the phone's own copy/paste bar
+        if (event.pointerType === 'touch' || event.sourceCapabilities?.firesTouchEvents) return false;
         event.preventDefault();
         onContextMenu(event, view);
         return true;

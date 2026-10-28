@@ -155,6 +155,7 @@ test('the English welcome notes say what the Russian ones say', () => {
   for (const [ru, en] of [
     ['welcome.md', 'welcome-en.md'],
     ['welcome-browser.md', 'welcome-browser-en.md'],
+    ['welcome-android.md', 'welcome-android-en.md'],
   ]) {
     const a = analyze(read(path.join('src', ru)));
     const b = analyze(read(path.join('src', en)));

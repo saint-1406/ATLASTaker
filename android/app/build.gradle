@@ -1,0 +1,61 @@
+import groovy.json.JsonSlurper
+
+plugins {
+    id 'com.android.application'
+}
+
+// The version comes from package.json, like the Windows installer's: 0.6.0 → versionCode 600.
+def pkg = new JsonSlurper().parse(file('../../package.json'))
+def parts = pkg.version.tokenize('.').collect { it.replaceAll(/\D.*/, '') as int }
+
+// The release key lives outside the repository: CI writes it from a secret and names it here.
+// Without it (a fork, a local try) the APK is signed with the debug key and cannot update a release.
+def keystore = System.getenv('ATLAS_KEYSTORE')
+
+android {
+    namespace 'io.github.saint1406.atlastaker'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'io.github.saint1406.atlastaker'
+        minSdk 26
+        targetSdk 34
+        versionCode parts[0] * 10000 + parts[1] * 100 + parts[2]
+        versionName pkg.version
+    }
+
+    signingConfigs {
+        release {
+            if (keystore) {
+                storeFile file(keystore)
+                storeType 'pkcs12'
+                storePassword System.getenv('ATLAS_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ATLAS_KEY_ALIAS') ?: 'atlastaker'
+                keyPassword System.getenv('ATLAS_KEYSTORE_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig keystore ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // sideloaded from the GitHub release, not the Play Store: Play's target-level rules do not apply
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+}
+
+dependencies {
+    implementation 'androidx.activity:activity:1.9.3'
+    implementation 'androidx.webkit:webkit:1.12.1'
+}

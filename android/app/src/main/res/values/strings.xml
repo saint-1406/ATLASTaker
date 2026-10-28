@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ATLAS</string>
+    <string name="open_with">Read in ATLAS</string>
+    <string name="saved">Saved</string>
+    <string name="not_saved">The file was not saved</string>
+    <string name="not_received">ATLAS could not read that file</string>
+</resources>

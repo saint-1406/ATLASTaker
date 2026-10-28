@@ -11,13 +11,15 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { createStore } from './store.js';
 import { createBackups } from './backups.js';
+import { createLibrary, MAX_DOC } from './library.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
-const CODE_FILES = ['server/server.js', 'server/store.js', 'server/backups.js', 'dist/app.js'];
+const CODE_FILES = ['server/server.js', 'server/store.js', 'server/backups.js', 'server/library.js', 'dist/app.js', 'dist/reader.js'];
 const readOrEmpty = (file) => {
   try {
     return fs.readFileSync(path.join(ROOT, file));
@@ -55,6 +57,7 @@ const CSP = [
   "font-src 'self'",
   "img-src 'self' data: blob:",
   "connect-src 'self'",
+  "worker-src blob:", // pdf.js parses PDFs in a worker started from its own code
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
@@ -73,15 +76,17 @@ class HttpError extends Error {
   }
 }
 
+const baseHeaders = (extra = {}) => ({
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'no-referrer',
+  'Content-Security-Policy': CSP,
+  'Cross-Origin-Resource-Policy': 'same-origin',
+  'Cache-Control': 'no-store',
+  ...extra,
+});
+
 function send(res, status, body, type = 'application/json; charset=utf-8', extra = {}) {
-  const headers = {
-    'X-Content-Type-Options': 'nosniff',
-    'Referrer-Policy': 'no-referrer',
-    'Content-Security-Policy': CSP,
-    'Cross-Origin-Resource-Policy': 'same-origin',
-    'Cache-Control': 'no-store',
-    ...extra,
-  };
+  const headers = baseHeaders(extra);
   if (status === 204 || body === undefined) {
     res.writeHead(status, headers);
     res.end();
@@ -92,12 +97,13 @@ function send(res, status, body, type = 'application/json; charset=utf-8', extra
   res.end(payload);
 }
 
-async function readBody(req) {
+async function readBody(req, limit = MAX_BODY) {
+  if (Number(req.headers['content-length']) > limit) throw new HttpError(413, 'body too large');
   const chunks = [];
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > MAX_BODY) throw new HttpError(413, 'body too large');
+    if (size > limit) throw new HttpError(413, 'body too large');
     chunks.push(chunk);
   }
   return Buffer.concat(chunks);
@@ -124,6 +130,7 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
   const notesDir = path.join(dataDir, 'notes');
   const store = createStore(notesDir);
   const backups = createBackups(dataDir, { version: VERSION, build: BUILD });
+  const library = createLibrary(dataDir);
   // before the page can change anything: the notes as the previous version left them
   await backups.atStart().catch((err) => console.error('Резервная копия не сделана:', err.message));
   const dailyTimer = setInterval(() => backups.daily().catch((err) => console.error('Резервная копия не сделана:', err.message)), 60 * 60 * 1000);
@@ -230,6 +237,30 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
       const type = String(req.headers['content-type'] ?? '').split(';')[0].trim();
       return send(res, 201, { name: await store.saveAsset(await readBody(req), type) });
     }
+    const libraryRoute = /^library(?:\/([^/]+)(?:\/(file|trash))?)?$/.exec(route);
+    if (libraryRoute) {
+      const [, id, action] = libraryRoute;
+      if (!id && req.method === 'GET') return send(res, 200, library.list());
+      if (!id && req.method === 'POST') {
+        // the document itself as the body; its name and format in the query
+        const meta = { name: url.searchParams.get('name') ?? '', format: url.searchParams.get('format') ?? '' };
+        return send(res, 201, await library.add(await readBody(req, MAX_DOC), meta));
+      }
+      if (id && !action && req.method === 'PATCH') return send(res, 200, library.update(id, await readJson(req)));
+      if (id && action === 'file' && req.method === 'GET') {
+        const file = library.file(id);
+        const stat = await fsp.stat(file).catch(() => null);
+        if (!stat) throw new HttpError(404, 'not found');
+        res.writeHead(200, baseHeaders({ 'Content-Type': 'application/octet-stream', 'Content-Length': stat.size }));
+        await pipeline(fs.createReadStream(file), res);
+        return;
+      }
+      if (id && action === 'trash' && req.method === 'POST') {
+        await library.remove(id);
+        return send(res, 204);
+      }
+      throw new HttpError(405, 'method not allowed');
+    }
     if (route === 'drafts' && req.method === 'POST') {
       // unsaved text the page found at start and the user did not put back
       return send(res, 201, { name: await backups.keepDraft(await readJson(req)) });
@@ -303,9 +334,10 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
     await closed;
     await store.idle();
     store.flush();
+    await library.flush();
   }
 
-  return { server, store, backups, token, notesDir, port: actualPort, url: `http://127.0.0.1:${actualPort}/`, close };
+  return { server, store, backups, library, token, notesDir, port: actualPort, url: `http://127.0.0.1:${actualPort}/`, close };
 }
 
 function pidAlive(pid) {

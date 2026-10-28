@@ -3,7 +3,8 @@
 
 import { EditorSelection } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { api, rescue } from './bridge.js';
+import { android, api, rescue } from './bridge.js';
+import { createLibrary } from './library.js';
 import { createEditor, insertComment, insertCodeBlock, pasteText, codeLanguageAt, urlAt } from './editor.js';
 import { analyze, imageRefs } from './markdown.js';
 import { commentTarget, commentsUnder, formatStamp } from './comments.js';
@@ -30,13 +31,15 @@ import {
 import { fileNameFor, makeZip } from './backup.js';
 import welcomeText from './welcome.md';
 import welcomeBrowserText from './welcome-browser.md';
+import welcomeAndroidText from './welcome-android.md';
 import welcomeTextEn from './welcome-en.md';
 import welcomeBrowserTextEn from './welcome-browser-en.md';
+import welcomeAndroidTextEn from './welcome-android-en.md';
 
 const $ = (sel) => document.querySelector(sel);
 const WELCOME = {
-  ru: { server: welcomeText, browser: welcomeBrowserText },
-  en: { server: welcomeTextEn, browser: welcomeBrowserTextEn },
+  ru: { server: welcomeText, browser: welcomeBrowserText, android: welcomeAndroidText },
+  en: { server: welcomeTextEn, browser: welcomeBrowserTextEn, android: welcomeAndroidTextEn },
 };
 const SAVE_DELAY = 400;
 const LOOK_KEY = 'atlas-notetaker:look';
@@ -74,6 +77,7 @@ let editor;
 let terrain;
 let atlas;
 let outline;
+let library = null; // the shelf and the reader, where this build has a place for documents
 
 let markReady;
 const ready = new Promise((resolve) => {
@@ -126,7 +130,7 @@ async function boot() {
   let list = await api.list();
   const firstRun = !list.length && !saved.welcomed;
   if (!list.length) {
-    list = [await api.create(saved.welcomed ? '' : WELCOME[prefs.lang][inBrowser ? 'browser' : 'server'])];
+    list = [await api.create(saved.welcomed ? '' : WELCOME[prefs.lang][android ? 'android' : inBrowser ? 'browser' : 'server'])];
     api.setState({ welcomed: true }).catch(() => {});
   }
   for (const note of list) notes.set(note.id, { ...note, info: analyze(note.content) });
@@ -161,6 +165,17 @@ async function boot() {
     onCreate: () => createNote(),
     onClose: () => editor.view.focus(),
   });
+  if (api.library) {
+    library = createLibrary({
+      api,
+      phone: Boolean(android) || matchMedia('(pointer: coarse)').matches,
+      onQuote: quoteToNote,
+      onOpenNote: (id) => openNote(id),
+      onLink: (url) => api.openExternal(url),
+      onClose: () => editor.view.focus(),
+    });
+    $('#btn-library').hidden = false;
+  }
   bindChrome();
   applyLook({ persist: false });
 
@@ -172,6 +187,31 @@ async function boot() {
   if (api.ping) setInterval(ping, 20_000);
   setInterval(tickPace, 10_000);
   markReady();
+  if (android) receiveIncoming();
+}
+
+/** Files another Android app handed over ("Open with" / "Share"): onto the shelf, the last one opened. */
+async function receiveIncoming() {
+  await ready;
+  let list = [];
+  try {
+    list = JSON.parse(android.takeIncoming() || '[]');
+  } catch {
+    return;
+  }
+  const files = [];
+  for (const { file, name, type } of list) {
+    try {
+      // the app put the file where the page can fetch it: /incoming/<file>
+      const res = await fetch(`/incoming/${encodeURIComponent(file)}`, { cache: 'no-store' });
+      if (res.ok) files.push(new File([await res.blob()], name || file, { type: type || '' }));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      android.release(file);
+    }
+  }
+  if (files.length && library) await library.receive(files);
 }
 
 // In the browser build clearing the browser's data would take the notes with it, hence the nudge.
@@ -456,6 +496,44 @@ async function deleteNote(id) {
   else if (!currentId) await openNote(newestId());
   renderIndex();
   toast(copy().deleted(titleOf(note)), api.openNotesFolder ? { action: { text: t('notes.openFolder'), run: () => api.openNotesFolder() } } : {});
+}
+
+/** Adds text at the end of a note, whether it is open in the editor or not. */
+async function appendToNote(id, addition) {
+  const note = notes.get(id);
+  if (!note) return false;
+  const gap = (text) => (!text.trim() ? '' : text.endsWith('\n\n') ? '' : text.endsWith('\n') ? '\n' : '\n\n');
+  if (id === currentId) {
+    const { view } = editor;
+    const text = view.state.doc.toString();
+    view.dispatch({ changes: { from: text.length, insert: gap(text) + addition }, userEvent: 'input.quote' });
+    return flushSave();
+  }
+  const content = note.content + gap(note.content) + addition;
+  const { updated } = await api.write(id, content);
+  // a note kept open in memory (for its undo history) gets the same lines
+  const kept = editorStates.get(id);
+  if (kept) editorStates.set(id, kept.update({ changes: { from: kept.doc.length, insert: content.slice(kept.doc.length) } }).state);
+  Object.assign(note, { content, updated, info: analyze(content) });
+  renderIndex();
+  return true;
+}
+
+/** A passage from the reader, as a quote in the document's own note (made on the first quote). */
+async function quoteToNote(doc, text, where) {
+  if (suspended || lost) throw new Error(t('errors.offline'));
+  const quote = `${text.split('\n').map((line) => `> ${line}`).join('\n')}\n${where ? `>\n> — ${where}\n` : ''}`;
+  let id = doc.notesId && notes.has(doc.notesId) ? doc.notesId : null;
+  if (id) {
+    if (!(await appendToNote(id, quote))) throw new Error(t('notes.stayed'));
+  } else {
+    const head = `# ${t('reader.notesTitle', doc.title || doc.name)}\n\n${doc.author ? `*${doc.author}*\n\n` : ''}`;
+    const note = await api.create(head + quote);
+    notes.set(note.id, { ...note, info: analyze(note.content) });
+    renderIndex();
+    id = note.id;
+  }
+  return { id, title: titleOf(notes.get(id)) };
 }
 
 // ---------- saving ----------
@@ -974,6 +1052,8 @@ function applyLook({ persist = true } = {}) {
     // only a convenience
   }
   if (persist) api.setState({ skin: prefs.skin, theme: prefs.theme, accent: prefs.accent }).catch(() => {});
+  // the phone's status and navigation bars take the page's colour
+  android?.setBars(getComputedStyle(root).getPropertyValue('--bg').trim(), theme === 'light');
   if (!editor) return;
 
   outline.setCopy(c);
@@ -1050,7 +1130,7 @@ function storageInfo() {
   ];
   if (api.openNotesFolder) actions.push({ text: t('settings.openFolder'), run: () => api.openNotesFolder() });
   if (api.openBackupsFolder) actions.push({ text: t('settings.backupsFolder'), run: () => api.openBackupsFolder() });
-  return { text: t(inBrowser ? 'settings.inBrowser' : 'settings.onDisk'), actions };
+  return { text: t(android ? 'settings.onPhone' : inBrowser ? 'settings.inBrowser' : 'settings.onDisk'), actions };
 }
 
 function showSettings() {
@@ -1095,6 +1175,19 @@ function commandList() {
     { icon: '⇡', title: t('commands.import'), keywords: 'import upload files импорт загрузить файлы', run: importFiles },
   ];
   if (isAtlas()) list.splice(1, 0, { icon: '▦', title: t('commands.atlas'), kbd: 'Ctrl+M', keywords: 'atlas map archipelago карта архипелаг', run: toggleAtlas });
+  if (library) {
+    list.splice(
+      1,
+      0,
+      { icon: '▥', title: t('commands.library'), kbd: 'Ctrl+O', keywords: 'library books read pdf библиотека книги читать документы', run: () => library.open() },
+      {
+        icon: '⇡',
+        title: t('commands.addDocument'),
+        keywords: 'add book document pdf epub fb2 docx word добавить книгу документ',
+        run: () => library.pickFiles(),
+      },
+    );
+  }
   if (api.openNotesFolder) list.push({ icon: '▭', title: t('commands.notesFolder'), keywords: 'folder files папка файлы', run: () => api.openNotesFolder() });
   if (api.openBackupsFolder) {
     list.push({
@@ -1131,6 +1224,10 @@ function toggleAtlas() {
 }
 
 function onGlobalKey(e) {
+  if (library?.isOpen()) {
+    library.onKey(e);
+    return;
+  }
   if (e.key === 'Escape' && $('#app').classList.contains('index-open') && !isOverlayOpen()) {
     closeIndexPanel();
     editor.view.focus();
@@ -1150,6 +1247,10 @@ function onGlobalKey(e) {
   else if (code === 'KeyM' && shiftKey) requestComment(editor.view);
   else if (code === 'KeyM' && isAtlas()) toggleAtlas();
   else if (code === 'KeyB' && !shiftKey) toggleIndex();
+  else if (code === 'KeyO' && !shiftKey && library) {
+    flushSave();
+    library.open();
+  }
   else if (code === 'KeyL' && shiftKey) toggleTheme();
   else if (code === 'Comma') showSettings();
   else if (code === 'Period') toggleFocus();
@@ -1179,6 +1280,11 @@ function bindChrome() {
   });
   narrow.addEventListener('change', closeIndexPanel);
   $('#btn-atlas').addEventListener('click', toggleAtlas);
+  $('#btn-library').addEventListener('click', () => {
+    closeIndexPanel();
+    flushSave();
+    library?.open();
+  });
   $('#btn-find').addEventListener('click', () => openPalette());
   $('#btn-theme').addEventListener('click', toggleTheme);
   $('#btn-settings').addEventListener('click', showSettings);
@@ -1196,11 +1302,15 @@ function bindChrome() {
     if (prefs.theme === 'system') applyLook({ persist: false });
   });
   window.addEventListener('keydown', onGlobalKey, true);
-  window.addEventListener('pagehide', flushOnExit);
+  window.addEventListener('pagehide', () => {
+    flushOnExit();
+    library?.flush();
+  });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       flushSave();
       rememberPosition();
+      library?.flush();
     } else {
       ping(); // back from a hidden or sleeping state: tell the server at once
     }
@@ -1248,5 +1358,32 @@ window.__atlas = {
   setLook,
   toggleAtlas,
   toggleFocus,
-  flush: () => flushSave(),
+  flush: () => {
+    library?.flush();
+    return flushSave();
+  },
+  library: () => library,
+  /** The Android back button: closes the topmost thing that is open; false when nothing was. */
+  back() {
+    if (isOverlayOpen()) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      return true;
+    }
+    if (library?.back()) return true;
+    if ($('#app').classList.contains('index-open')) {
+      closeIndexPanel();
+      return true;
+    }
+    if (atlas?.isOpen) {
+      atlas.hide();
+      return true;
+    }
+    if (focusMode) {
+      toggleFocus(false);
+      return true;
+    }
+    return false;
+  },
+  /** Android: another app handed files over while ATLAS was running. */
+  incoming: () => receiveIncoming(),
 };

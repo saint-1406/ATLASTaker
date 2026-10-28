@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- the page's dark background, until the page sets the bars to its own theme -->
+    <color name="bg">#FF09090B</color>
+    <!-- behind the launcher icon's rings (scripts/make-icon.mjs, ICON_BG) -->
+    <color name="icon_bg">#FF0E1E2C</color>
+</resources>

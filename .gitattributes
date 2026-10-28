@@ -5,3 +5,5 @@
 *.ico binary
 *.woff binary
 *.woff2 binary
+# batch files run by cmd.exe want Windows line ends
+*.cmd text eol=crlf

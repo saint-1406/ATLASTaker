@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="open_with">Читать в ATLAS</string>
+    <string name="saved">Сохранено</string>
+    <string name="not_saved">Файл не сохранился</string>
+    <string name="not_received">ATLAS не смог прочитать этот файл</string>
+</resources>

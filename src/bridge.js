@@ -1,11 +1,33 @@
 // How the page reaches its notes. Served by server/server.js, it talks to that server's API and the
-// notes are .md files on disk. Opened any other way (the single-file browser build) the same
-// interface is backed by the browser's IndexedDB, or localStorage where that is missing.
+// notes are .md files on disk. Opened any other way (the single-file browser build, the Android app)
+// the same interface is backed by the browser's IndexedDB, or localStorage where that is missing.
+// The library (documents to read) has the same two homes: library/ on disk, or IndexedDB.
 
 import { t } from './i18n.js';
 
 const token = document.querySelector('meta[name="atlas-token"]')?.content ?? '';
 const onServer = location.protocol.startsWith('http') && token !== '' && !token.startsWith('__');
+
+/** The Android app's native side (android/…/MainActivity.java), when the page runs inside it. */
+export const android = typeof window.AtlasAndroid === 'object' && window.AtlasAndroid ? window.AtlasAndroid : null;
+
+/** The fields of a library card the page may change. */
+const DOC_FIELDS = ['title', 'author', 'cover', 'position', 'progress', 'opened', 'notesId', 'scale'];
+const newDoc = (blob, { name, format }) => ({
+  id: `d-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`,
+  name: String(name ?? '').slice(0, 200) || 'document',
+  format,
+  title: '',
+  author: '',
+  cover: null,
+  size: blob.size,
+  added: Date.now(),
+  opened: 0,
+  progress: 0,
+  position: null,
+  notesId: null,
+  scale: 1,
+});
 
 // Errors say what went wrong: `offline` — the server is gone; `status` — it answered with an error
 // (403 after a restart, since every run has a new token).
@@ -69,6 +91,23 @@ function serverApi() {
     async readAsset(name) {
       return new Uint8Array(await (await fetchOk(`/note-assets/${enc(name)}`)).arrayBuffer());
     },
+    library: {
+      list: () => call('GET', 'library'),
+      async add(blob, { name, format }) {
+        const res = await fetchOk(`/api/library?name=${enc(name)}&format=${enc(format)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream', 'X-Atlas-Token': token },
+          body: blob,
+        });
+        return res.json();
+      },
+      update: (id, patch) => call('PATCH', `library/${enc(id)}`, patch),
+      async bytes(id) {
+        const res = await fetchOk(`/api/library/${enc(id)}/file`, { headers: { 'X-Atlas-Token': token }, cache: 'no-store' });
+        return new Uint8Array(await res.arrayBuffer());
+      },
+      remove: (id) => call('POST', `library/${enc(id)}/trash`),
+    },
     // The window is closing. keepalive lets a request outlive the page but caps its body at 64 KB
     // (bytes, and Cyrillic takes two per letter); a longer note goes out as a plain request, which the
     // local server usually receives before the page is gone. The rescue copy covers the rest.
@@ -97,8 +136,8 @@ const finished = (t) =>
 // to a trash store instead of disappearing.
 function browserApi() {
   const opened = new Promise((resolve, reject) => {
-    // v2 added pictures; each store is created only if missing, so existing notes stay put
-    const r = indexedDB.open('atlas-notetaker', 2);
+    // v2 added pictures, v3 the library; each store is created only if missing, so existing notes stay put
+    const r = indexedDB.open('atlas-notetaker', 3);
     r.onupgradeneeded = () => {
       const db = r.result;
       const has = (name) => db.objectStoreNames.contains(name);
@@ -106,8 +145,14 @@ function browserApi() {
       if (!has('trash')) db.createObjectStore('trash', { autoIncrement: true });
       if (!has('state')) db.createObjectStore('state');
       if (!has('assets')) db.createObjectStore('assets');
+      if (!has('docs')) db.createObjectStore('docs', { keyPath: 'id' });
+      if (!has('docFiles')) db.createObjectStore('docFiles');
     };
-    r.onsuccess = () => resolve(r.result);
+    r.onsuccess = () => {
+      // a newer ATLAS opening the same storage must not wait for this window
+      r.result.onversionchange = () => r.result.close();
+      resolve(r.result);
+    };
     r.onerror = () => reject(r.error);
   });
   navigator.storage?.persist?.().catch(() => {}); // ask the browser not to evict us under storage pressure
@@ -134,6 +179,38 @@ function browserApi() {
     async readAsset(name) {
       const blob = await request((await store('assets')).get(name));
       return blob ? new Uint8Array(await blob.arrayBuffer()) : null;
+    },
+    library: {
+      async list() {
+        return request((await store('docs')).getAll());
+      },
+      async add(blob, meta) {
+        const doc = newDoc(blob, meta);
+        const t = (await opened).transaction(['docs', 'docFiles'], 'readwrite');
+        t.objectStore('docFiles').put(blob, doc.id);
+        t.objectStore('docs').put(doc);
+        await finished(t);
+        return doc;
+      },
+      async update(id, patch) {
+        const docs = await store('docs', 'readwrite');
+        const doc = await request(docs.get(id));
+        if (!doc) throw Object.assign(new Error(`no document ${id}`), { status: 404 });
+        for (const key of DOC_FIELDS) if (patch && key in patch) doc[key] = patch[key];
+        await request(docs.put(doc));
+        return doc;
+      },
+      async bytes(id) {
+        const blob = await request((await store('docFiles')).get(id));
+        if (!blob) throw Object.assign(new Error(`no document ${id}`), { status: 404 });
+        return new Uint8Array(await blob.arrayBuffer());
+      },
+      async remove(id) {
+        const t = (await opened).transaction(['docs', 'docFiles'], 'readwrite');
+        t.objectStore('docs').delete(id);
+        t.objectStore('docFiles').delete(id);
+        await finished(t);
+      },
     },
     async list() {
       return request((await store('notes')).getAll());
@@ -305,13 +382,26 @@ function pickApi() {
   return typeof indexedDB === 'object' && indexedDB ? browserApi() : localApi();
 }
 
+function base64(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
 export const api = {
   ...pickApi(),
-  copy: (text) => navigator.clipboard.writeText(text),
-  readClipboard: () => navigator.clipboard.readText(),
-  openExternal: (url) => window.open(url, '_blank', 'noopener,noreferrer'),
+  // a WebView has no clipboard permission of its own: on Android the app's native side does it
+  copy: async (text) => (android ? android.copy(text) : navigator.clipboard.writeText(text)),
+  readClipboard: async () => (android ? android.paste() : navigator.clipboard.readText()),
+  openExternal: (url) => (android ? android.openExternal(url) : window.open(url, '_blank', 'noopener,noreferrer')),
   /** Hands the user a file: `data` is text (saved as Markdown) or bytes with their own `type`. */
   download(filename, data, type = 'text/markdown;charset=utf-8') {
+    if (android) {
+      // a WebView cannot download a blob: the app asks where to save it (Android's own file dialog)
+      const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+      android.saveFile(filename, type.split(';')[0], base64(bytes));
+      return;
+    }
     const url = URL.createObjectURL(new Blob([data], { type }));
     const link = document.createElement('a');
     link.href = url;

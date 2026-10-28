@@ -1,0 +1,20 @@
+// ATLAS for Android: a WebView around the same page as the desktop app. Built in CI
+// (.github/workflows/release.yml): npm run build, node scripts/android-assets.mjs, gradle assembleRelease.
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'ATLASTaker'
+include ':app'

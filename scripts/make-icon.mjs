@@ -105,7 +105,27 @@ function shade(u, v) {
   return col;
 }
 
-function render(size) {
+// The Android adaptive icon: the launcher cuts its own shape (circle, squircle…) out of a plain
+// background, so the foreground is the rings and the summit alone, shrunk into the 66 dp safe zone.
+const ICON_BG = mix(TOP, BOTTOM, 0.5).map(Math.round); // the background colour in android/…/colors.xml
+function foreground(u, v) {
+  const x = 0.5 + (u - 0.5) * 1.2;
+  const y = 0.5 + (v - 0.5) * 1.2;
+  if (inTriangle(x, y, [0.5, 0.485], [0.455, 0.565], [0.545, 0.565])) return AMBER;
+  const cx = 0.5;
+  const cy = 0.53;
+  const ang = Math.atan2(y - cy, x - cx);
+  const d = Math.hypot(x - cx, y - cy);
+  for (let k = 0; k < 5; k++) {
+    const base = 0.07 + k * 0.058;
+    const rr = base * (1 + 0.13 * Math.sin(3 * ang + k * 0.9) + 0.07 * Math.sin(5 * ang + 1.7 * k));
+    const width = k === 2 ? 0.009 : 0.0055;
+    if (Math.abs(d - rr) < width) return mix(ICON_BG, TEAL, k === 2 ? 0.95 : 0.7);
+  }
+  return null;
+}
+
+function render(size, colorAt = shade) {
   const ss = 4;
   const rgba = Buffer.alloc(size * size * 4);
   for (let y = 0; y < size; y++) {
@@ -116,7 +136,7 @@ function render(size) {
       let hits = 0;
       for (let sy = 0; sy < ss; sy++) {
         for (let sx = 0; sx < ss; sx++) {
-          const col = shade((x + (sx + 0.5) / ss) / size, (y + (sy + 0.5) / ss) / size);
+          const col = colorAt((x + (sx + 0.5) / ss) / size, (y + (sy + 0.5) / ss) / size);
           if (!col) continue;
           r += col[0];
           g += col[1];
@@ -136,8 +156,22 @@ function render(size) {
   return png(size, rgba);
 }
 
-mkdirSync(OUT, { recursive: true });
-const images = [256, 64, 48, 32, 16].map((size) => ({ size, data: render(size) }));
-writeFileSync(path.join(OUT, 'icon.png'), images[0].data);
-writeFileSync(path.join(OUT, 'icon.ico'), ico(images));
-console.log(`icon.png и icon.ico записаны в ${OUT}`);
+// node scripts/make-icon.mjs --android android/app/src/main/res → the launcher icons for every density
+const androidAt = process.argv.indexOf('--android');
+if (androidAt > 0) {
+  const res = path.resolve(process.argv[androidAt + 1]);
+  const densities = { mdpi: 1, hdpi: 1.5, xhdpi: 2, xxhdpi: 3, xxxhdpi: 4 };
+  for (const [name, scale] of Object.entries(densities)) {
+    const dir = path.join(res, `mipmap-${name}`);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'ic_launcher.png'), render(Math.round(48 * scale)));
+    writeFileSync(path.join(dir, 'ic_launcher_foreground.png'), render(Math.round(108 * scale), foreground));
+  }
+  console.log(`иконки Android записаны в ${res} (фон #${ICON_BG.map((c) => c.toString(16).padStart(2, '0')).join('')})`);
+} else {
+  mkdirSync(OUT, { recursive: true });
+  const images = [256, 64, 48, 32, 16].map((size) => ({ size, data: render(size) }));
+  writeFileSync(path.join(OUT, 'icon.png'), images[0].data);
+  writeFileSync(path.join(OUT, 'icon.ico'), ico(images));
+  console.log(`icon.png и icon.ico записаны в ${OUT}`);
+}

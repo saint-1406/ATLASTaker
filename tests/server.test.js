@@ -156,3 +156,67 @@ test('only one server may own a notes folder; a dead owner\'s lock is taken over
   release();
   assert.equal(existsSync(file), false);
 });
+
+test('the library keeps a document, its card and the reader\'s place', async (t) => {
+  const { app, call, dataDir } = await start(t);
+  const bytes = Buffer.from('%PDF-1.7 not really a book');
+  const upload = (query, body = bytes, headers = {}) =>
+    fetch(`${app.url}api/library?${query}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-Atlas-Token': app.token, ...headers }, body });
+
+  assert.equal((await upload('name=a.pdf&format=pdf', bytes, { 'X-Atlas-Token': 'wrong' })).status, 403);
+  assert.equal((await upload('name=a.exe&format=exe')).status, 415);
+  const res = await upload(`name=${encodeURIComponent('Книга: том/1.pdf')}&format=pdf`);
+  assert.equal(res.status, 201);
+  const doc = await res.json();
+  assert.match(doc.id, /^d-[a-z0-9]+$/);
+  assert.equal(doc.name, 'Книга том 1.pdf');
+  assert.equal(doc.size, bytes.length);
+  assert.ok(existsSync(path.join(dataDir, 'library', `${doc.id}.pdf`)));
+
+  const cover = 'data:image/jpeg;base64,/9j/4AAQ';
+  const patched = await (await call('PATCH', `library/${doc.id}`, { title: 'Книга', cover, position: { page: 3, frac: 0.5 }, progress: 0.25, notesId: 'n-abc123', evil: 1, cover2: 'x' })).json();
+  assert.equal(patched.title, 'Книга');
+  assert.equal(patched.cover, cover);
+  assert.deepEqual(patched.position, { page: 3, frac: 0.5 });
+  assert.equal(patched.evil, undefined);
+  const refused = await (await call('PATCH', `library/${doc.id}`, { cover: 'javascript:alert(1)', progress: 7, notesId: '../x' })).json();
+  assert.equal(refused.cover, cover, 'a cover that is not a picture is ignored');
+  assert.equal(refused.progress, 0.25);
+  assert.equal(refused.notesId, 'n-abc123');
+
+  const list = await (await call('GET', 'library')).json();
+  assert.deepEqual(list.map((d) => d.id), [doc.id]);
+  const file = await fetch(`${app.url}api/library/${doc.id}/file`, { headers: { 'X-Atlas-Token': app.token } });
+  assert.equal(file.status, 200);
+  assert.deepEqual(Buffer.from(await file.arrayBuffer()), bytes);
+  assert.equal((await fetch(`${app.url}api/library/${doc.id}/file`)).status, 403, 'the file needs the token too');
+  assert.equal((await call('GET', 'library/d-nosuch1/file')).status, 404);
+  assert.equal((await call('GET', 'library/..%2F..%2Fatlas.json/file')).status, 404);
+
+  assert.equal((await call('POST', `library/${doc.id}/trash`)).status, 204);
+  assert.deepEqual(await (await call('GET', 'library')).json(), []);
+  assert.equal(readdirSync(path.join(dataDir, 'library', '.trash')).length, 1, 'a removed document waits in .trash');
+});
+
+test('the library\'s cards survive a restart', async (t) => {
+  const dataDir = mkdtempSync(path.join(tmpdir(), 'atlas-server-'));
+  const first = await createAtlasServer({ dataDir, port: 0 });
+  const doc = await first.library.add(Buffer.from('# hi'), { name: 'hi.md', format: 'md' });
+  first.library.update(doc.id, { title: 'Привет', position: { at: 4, frac: 0 } });
+  await first.close();
+  const second = await createAtlasServer({ dataDir, port: 0 });
+  t.after(async () => {
+    await second.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+  const [card] = second.library.list();
+  assert.equal(card.title, 'Привет');
+  assert.deepEqual(card.position, { at: 4, frac: 0 });
+});
+
+test('the page may start the pdf.js worker from a blob: URL, and nothing else changes', async (t) => {
+  const { app } = await start(t);
+  const csp = (await fetch(app.url)).headers.get('content-security-policy');
+  assert.match(csp, /worker-src blob:/);
+  assert.match(csp, /script-src 'self'(;|$)/);
+});

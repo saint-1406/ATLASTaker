@@ -45,7 +45,7 @@ async function renameRetrying(from, to) {
   }
 }
 
-async function atomicWrite(file, data, stillWanted = () => true) {
+export async function atomicWrite(file, data, stillWanted = () => true) {
   const tmp = tmpName(file);
   await fsp.writeFile(tmp, data, 'utf8');
   if (!stillWanted()) {

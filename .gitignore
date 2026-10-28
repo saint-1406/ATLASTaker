@@ -3,3 +3,12 @@ dist/
 out/
 .dev-data/
 *.log
+.dev-lib/
+# the signing key of the Android app: never in git (CI has it as a secret)
+.signing/
+# Android build output and the page copied into the app (scripts/android-assets.mjs)
+android/.gradle/
+android/build/
+android/app/build/
+android/app/src/main/assets/www/
+android/local.properties
