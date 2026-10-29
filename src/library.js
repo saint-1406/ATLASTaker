@@ -296,8 +296,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     const pages = reading?.controller?.pages?.();
     percent.textContent = pages ? t('reader.pageOf', pages.index + 1, pages.count) : t('library.progress', pct);
     line.firstChild.style.transform = `scaleX(${pct / 100})`;
-    prevButton.disabled = !pages || pages.index === 0;
-    nextButton.disabled = !pages || pages.index >= pages.count - 1;
+    prevButton.disabled = !pages || pages.first;
+    nextButton.disabled = !pages || pages.last;
   }
 
   /** The place is kept a moment after the scrolling stops, and right away when the reader closes. */

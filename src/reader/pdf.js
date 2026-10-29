@@ -85,15 +85,18 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
   let pager = null;
   let currentTurn = turn;
 
+  // the screen is measured once for all the pages: reading it between two pages' new sizes would make
+  // the browser lay all the pages out again for every one of them (minutes, for a thousand pages)
+  const roomNow = () => ({ width: host.clientWidth, height: host.clientHeight });
+
   /** In page mode a frame fills the screen as far as its shape allows, centred in a slot one screen wide. */
-  function fit(frame) {
+  function fit(frame, room = roomNow()) {
     const ratio = Number(frame.dataset.ratio) || firstRatio;
-    const room = { w: host.clientWidth - 16, h: host.clientHeight - 16 };
-    const w = Math.max(40, Math.min(room.w, room.h * ratio));
+    const w = Math.max(40, Math.min(room.width - 16, (room.height - 16) * ratio));
     const h = w / ratio;
     frame.style.width = `${w}px`;
     frame.style.height = `${h}px`;
-    frame.style.margin = `${(host.clientHeight - h) / 2}px ${(host.clientWidth - w) / 2}px`;
+    frame.style.margin = `${(room.height - h) / 2}px ${(room.width - w) / 2}px`;
   }
 
   function release(n) {
@@ -216,8 +219,9 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
         strip: wrap,
         frameFor: (i) => pages[i],
         layout: () => {
-          pages.forEach(fit);
-          return { step: host.clientWidth, count: pages.length };
+          const room = roomNow();
+          for (const frame of pages) fit(frame, room);
+          return { step: room.width, count: pages.length };
         },
         onTurn: report,
       });
@@ -303,7 +307,7 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
     get paged() {
       return Boolean(pager);
     },
-    pages: () => (pager ? { index: pager.index, count: pages.length } : null),
+    pages: () => (pager ? { index: pager.index, count: pages.length, first: pager.index === 0, last: pager.index >= pages.length - 1 } : null),
     setMode: (next) => setMode(next),
     setTurn(value) {
       currentTurn = value;

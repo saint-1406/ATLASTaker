@@ -3147,6 +3147,11 @@ textarea {
   will-change: transform;
 }
 
+/* the parts of a long book not on screen (view.js): not laid out at all */
+.rd-scroll.paged .rd-off {
+  display: none !important;
+}
+
 .rd-scroll.paged .reader-book :is(h1, h2, h3, h4, h5, h6) {
   break-after: avoid;
 }
