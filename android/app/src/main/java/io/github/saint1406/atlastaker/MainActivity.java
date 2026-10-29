@@ -1,5 +1,6 @@
 package io.github.saint1406.atlastaker;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
@@ -7,11 +8,16 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
 import android.util.Base64;
 import android.view.Window;
 import android.webkit.JavascriptInterface;
@@ -67,6 +73,11 @@ public class MainActivity extends ComponentActivity {
     private byte[] pendingSave;
     private ActivityResultLauncher<Intent> chooser;
     private ActivityResultLauncher<Intent> saver;
+    private ActivityResultLauncher<String> microphone;
+    private SpeechRecognizer recognizer;
+    private boolean dictating;
+    private String dictationLanguage = "ru-RU";
+    private int silentRounds; // listening rounds in a row that heard nothing: after a few, dictation ends
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -114,6 +125,11 @@ public class MainActivity extends ComponentActivity {
                 final boolean saved = ok;
                 runOnUiThread(() -> Toast.makeText(this, saved ? R.string.saved : R.string.not_saved, Toast.LENGTH_SHORT).show());
             });
+        });
+
+        microphone = registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
+            if (granted) listen();
+            else stopDictation("error", "not-allowed");
         });
 
         WebViewAssetLoader loader = new WebViewAssetLoader.Builder()
@@ -193,14 +209,143 @@ public class MainActivity extends ComponentActivity {
     protected void onPause() {
         // Android may stop the app in the background at any time: everything goes to storage now
         if (web != null) web.evaluateJavascript("window.__atlas && window.__atlas.flush && window.__atlas.flush()", null);
+        // and the microphone is not left listening behind the reader's back
+        if (dictating) stopDictation("end", null);
         super.onPause();
     }
 
     @Override
     protected void onDestroy() {
         io.shutdown();
+        if (recognizer != null) recognizer.destroy();
         if (web != null) web.destroy();
         super.onDestroy();
+    }
+
+    // ---------- dictation: the phone's speech recognition, one phrase at a time, again and again ----------
+
+    private final RecognitionListener listener = new RecognitionListener() {
+        @Override
+        public void onReadyForSpeech(Bundle params) {}
+
+        @Override
+        public void onBeginningOfSpeech() {}
+
+        @Override
+        public void onRmsChanged(float rmsdB) {}
+
+        @Override
+        public void onBufferReceived(byte[] buffer) {}
+
+        @Override
+        public void onEndOfSpeech() {}
+
+        @Override
+        public void onEvent(int eventType, Bundle params) {}
+
+        @Override
+        public void onPartialResults(Bundle partial) {
+            String text = firstResult(partial);
+            if (text != null) sendDictation("partial", text, null);
+        }
+
+        @Override
+        public void onResults(Bundle results) {
+            String text = firstResult(results);
+            if (text != null && !text.isEmpty()) {
+                silentRounds = 0;
+                sendDictation("final", text, null);
+            }
+            // the recognizer stops after each phrase; while dictation is on, it listens again
+            if (dictating) listen();
+        }
+
+        @Override
+        public void onError(int error) {
+            if (!dictating) return;
+            boolean quiet = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT;
+            if (quiet && ++silentRounds < 3) {
+                listen();
+                return;
+            }
+            if (quiet) stopDictation("end", null);
+            else stopDictation("error", errorCode(error));
+        }
+    };
+
+    private static String firstResult(Bundle bundle) {
+        ArrayList<String> found = bundle == null ? null : bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+        return found == null || found.isEmpty() ? null : found.get(0);
+    }
+
+    private static String errorCode(int error) {
+        switch (error) {
+            case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS:
+                return "not-allowed";
+            case SpeechRecognizer.ERROR_NETWORK:
+            case SpeechRecognizer.ERROR_NETWORK_TIMEOUT:
+            case SpeechRecognizer.ERROR_SERVER:
+                return "network";
+            case SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED:
+            case SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE:
+                return "language";
+            case SpeechRecognizer.ERROR_RECOGNIZER_BUSY:
+                return "busy";
+            default:
+                return "failed";
+        }
+    }
+
+    private void startDictation(String language) {
+        dictationLanguage = language == null || language.isEmpty() ? "ru-RU" : language;
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            stopDictation("error", "no-service");
+            return;
+        }
+        dictating = true;
+        silentRounds = 0;
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) listen();
+        else microphone.launch(Manifest.permission.RECORD_AUDIO);
+    }
+
+    private void listen() {
+        if (!dictating) return;
+        if (recognizer == null) {
+            recognizer = SpeechRecognizer.createSpeechRecognizer(this);
+            recognizer.setRecognitionListener(listener);
+        }
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, dictationLanguage);
+        intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getPackageName());
+        // Android 13+: punctuation and capitals from the recognizer itself
+        if (Build.VERSION.SDK_INT >= 33) intent.putExtra(RecognizerIntent.EXTRA_ENABLE_FORMATTING, RecognizerIntent.FORMATTING_OPTIMIZE_QUALITY);
+        try {
+            recognizer.startListening(intent);
+        } catch (RuntimeException e) {
+            stopDictation("error", "failed");
+        }
+    }
+
+    /** Dictation ends: the recognizer stops, the page hears why ("end", or "error" with a code). */
+    private void stopDictation(String type, String code) {
+        dictating = false;
+        if (recognizer != null) recognizer.cancel();
+        sendDictation(type, "", code);
+    }
+
+    private void sendDictation(String type, String text, String code) {
+        try {
+            JSONObject event = new JSONObject();
+            event.put("type", type);
+            event.put("text", text == null ? "" : text);
+            if (code != null) event.put("code", code);
+            web.evaluateJavascript("window.__atlas && window.__atlas.dictation && window.__atlas.dictation(" + event + ")", null);
+        } catch (JSONException ignored) {
+            // nothing to say to the page
+        }
     }
 
     /** Copies the files of a "view" or "share" intent where the page can fetch them: /incoming/<file>. */
@@ -344,6 +489,25 @@ public class MainActivity extends ComponentActivity {
         @JavascriptInterface
         public void openExternal(String url) {
             runOnUiThread(() -> openOutside(url));
+        }
+
+        /** Whether the phone has a speech recognition service at all (usually the Google app). */
+        @JavascriptInterface
+        public boolean canDictate() {
+            return SpeechRecognizer.isRecognitionAvailable(MainActivity.this);
+        }
+
+        /** language: "ru-RU", "en-US"… Results come back through window.__atlas.dictation(event). */
+        @JavascriptInterface
+        public void startDictation(String language) {
+            runOnUiThread(() -> MainActivity.this.startDictation(language));
+        }
+
+        @JavascriptInterface
+        public void stopDictation() {
+            runOnUiThread(() -> {
+                if (dictating) MainActivity.this.stopDictation("end", null);
+            });
         }
 
         @JavascriptInterface

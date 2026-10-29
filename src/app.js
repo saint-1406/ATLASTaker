@@ -5,7 +5,8 @@ import { EditorSelection } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { android, api, rescue } from './bridge.js';
 import { createLibrary } from './library.js';
-import { createEditor, insertComment, insertCodeBlock, pasteText, codeLanguageAt, urlAt } from './editor.js';
+import { createEditor, insertComment, insertCodeBlock, insertDictation, pasteText, codeLanguageAt, showDictationPreview, urlAt } from './editor.js';
+import { createDictation } from './dictation.js';
 import { analyze, imageRefs } from './markdown.js';
 import { commentTarget, commentsUnder, formatStamp } from './comments.js';
 import { normalizeLook, normalizeReading, PALETTES, toneOf } from './skins.js';
@@ -79,6 +80,7 @@ let terrain;
 let atlas;
 let outline;
 let library = null; // the shelf and the reader, where this build has a place for documents
+let dictation = null; // speech to text at the cursor (dictation.js)
 
 let markReady;
 const ready = new Promise((resolve) => {
@@ -168,6 +170,16 @@ async function boot() {
     onCreate: () => createNote(),
     onClose: () => editor.view.focus(),
   });
+  dictation = createDictation({
+    android,
+    handlers: {
+      partial: (text) => showDictationPreview(editor.view, text),
+      final: (text) => insertDictation(editor.view, text),
+      state: showDictating,
+      error: (code) => toast(t(DICTATION_ERRORS[code] ?? 'dictation.failed'), { timeout: 7000 }),
+    },
+  });
+  $('#btn-dictate').hidden = false;
   if (api.library) {
     library = createLibrary({
       api,
@@ -222,6 +234,15 @@ async function receiveIncoming() {
     }
   }
   if (files.length && library) await library.receive(files);
+}
+
+/** The shelf over the notes (with `pick`, the file picker too): dictation stops, the text is saved. */
+function openLibrary({ pick = false } = {}) {
+  if (!library) return;
+  if (dictation?.listening) dictation.stop();
+  flushSave();
+  if (pick) library.pickFiles();
+  else library.open();
 }
 
 // In the browser build clearing the browser's data would take the notes with it, hence the nudge.
@@ -418,6 +439,7 @@ async function openNoteNow(id, { transition = 'reveal', origin } = {}) {
     editor.view.focus();
     return;
   }
+  if (dictation?.listening) dictation.stop(); // the words would land in another note
   if (currentId && !(await leaveCurrent())) {
     toast(t('notes.stayed'));
     return;
@@ -506,6 +528,49 @@ async function deleteNote(id) {
   else if (!currentId) await openNote(newestId());
   renderIndex();
   toast(copy().deleted(titleOf(note)), api.openNotesFolder ? { action: { text: t('notes.openFolder'), run: () => api.openNotesFolder() } } : {});
+}
+
+// ---------- dictation ----------
+
+const DICTATION_ERRORS = {
+  'not-allowed': 'dictation.notAllowed',
+  network: 'dictation.network',
+  language: 'dictation.language',
+  busy: 'dictation.busy',
+  'no-service': 'dictation.noService',
+};
+const CLOUD_NOTICE_KEY = 'atlas-notetaker:dictation-cloud-told';
+
+/** The microphone button: on, off, or a word on why dictation cannot work here. */
+function toggleDictation() {
+  if (!dictation) return;
+  if (dictation.listening) {
+    dictation.stop();
+    return;
+  }
+  if (!dictation.supported || suspended || lost) {
+    toast(t('dictation.unsupported'), { timeout: 8000 });
+    return;
+  }
+  // in a browser the speech goes to the browser maker's cloud: said once, on the first use
+  let told = true;
+  try {
+    told = Boolean(android) || localStorage.getItem(CLOUD_NOTICE_KEY) === '1';
+    if (!told) localStorage.setItem(CLOUD_NOTICE_KEY, '1');
+  } catch {
+    told = true;
+  }
+  editor.view.focus();
+  dictation.start(prefs.lang);
+  toast(t(told ? 'dictation.listening' : 'dictation.cloud'), { timeout: told ? 3000 : 9000 });
+}
+
+function showDictating(on) {
+  const button = $('#btn-dictate');
+  button.classList.toggle('listening', on);
+  button.setAttribute('aria-pressed', String(on));
+  button.title = t(on ? 'dictation.stop' : 'chrome.dictateKey');
+  if (!on) showDictationPreview(editor.view, '');
 }
 
 /** Adds text at the end of a note, whether it is open in the editor or not. */
@@ -1186,18 +1251,19 @@ function commandList() {
     { icon: '⇩', title: t('commands.saveCopy'), keywords: 'export save экспорт скачать', run: () => exportNote(currentId) },
     { icon: '⇊', title: t('commands.exportAll'), keywords: 'backup download резервная копия архив экспорт zip', run: exportAll },
     { icon: '⇡', title: t('commands.import'), keywords: 'import upload files импорт загрузить файлы', run: importFiles },
+    { icon: '◉', title: t('commands.dictate'), kbd: 'Ctrl+Shift+D', keywords: 'dictate voice speech microphone диктовка голос речь микрофон', run: toggleDictation },
   ];
   if (isAtlas()) list.splice(1, 0, { icon: '▦', title: t('commands.atlas'), kbd: 'Ctrl+M', keywords: 'atlas map archipelago карта архипелаг', run: toggleAtlas });
   if (library) {
     list.splice(
       1,
       0,
-      { icon: '▥', title: t('commands.library'), kbd: 'Ctrl+O', keywords: 'library books read pdf библиотека книги читать документы', run: () => library.open() },
+      { icon: '▥', title: t('commands.library'), kbd: 'Ctrl+O', keywords: 'library books read pdf библиотека книги читать документы', run: () => openLibrary() },
       {
         icon: '⇡',
         title: t('commands.addDocument'),
         keywords: 'add book document pdf epub fb2 docx word добавить книгу документ',
-        run: () => library.pickFiles(),
+        run: () => openLibrary({ pick: true }),
       },
     );
   }
@@ -1241,6 +1307,11 @@ function onGlobalKey(e) {
     library.onKey(e);
     return;
   }
+  if (e.key === 'Escape' && dictation?.listening && !isOverlayOpen()) {
+    e.preventDefault();
+    dictation.stop();
+    return;
+  }
   if (e.key === 'Escape' && $('#app').classList.contains('index-open') && !isOverlayOpen()) {
     closeIndexPanel();
     editor.view.focus();
@@ -1260,9 +1331,10 @@ function onGlobalKey(e) {
   else if (code === 'KeyM' && shiftKey) requestComment(editor.view);
   else if (code === 'KeyM' && isAtlas()) toggleAtlas();
   else if (code === 'KeyB' && !shiftKey) toggleIndex();
+  else if (code === 'KeyD' && shiftKey) toggleDictation();
   else if (code === 'KeyO' && !shiftKey && library) {
     flushSave();
-    library.open();
+    openLibrary();
   }
   else if (code === 'KeyL' && shiftKey) toggleTheme();
   else if (code === 'Comma') showSettings();
@@ -1293,10 +1365,13 @@ function bindChrome() {
   });
   narrow.addEventListener('change', closeIndexPanel);
   $('#btn-atlas').addEventListener('click', toggleAtlas);
+  // the button must not take the focus (and the cursor) away from the text
+  $('#btn-dictate').addEventListener('pointerdown', (e) => e.preventDefault());
+  $('#btn-dictate').addEventListener('click', toggleDictation);
   $('#btn-library').addEventListener('click', () => {
     closeIndexPanel();
     flushSave();
-    library?.open();
+    openLibrary();
   });
   $('#btn-find').addEventListener('click', () => openPalette());
   $('#btn-theme').addEventListener('click', toggleTheme);
@@ -1378,6 +1453,10 @@ window.__atlas = {
   library: () => library,
   /** The Android back button: closes the topmost thing that is open; false when nothing was. */
   back() {
+    if (dictation?.listening) {
+      dictation.stop();
+      return true;
+    }
     if (isOverlayOpen()) {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       return true;
@@ -1399,4 +1478,7 @@ window.__atlas = {
   },
   /** Android: another app handed files over while ATLAS was running. */
   incoming: () => receiveIncoming(),
+  /** Android: what the phone's speech recognition heard (see dictation.js). */
+  dictation: (event) => dictation?.receive(event),
+  toggleDictation: () => toggleDictation(),
 };

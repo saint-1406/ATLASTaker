@@ -2,7 +2,7 @@
 // close one), comment lines, task lines, smart paste of code, Ctrl+click on links and the search
 // panel in the interface's language.
 
-import { Compartment, EditorState, StateField } from '@codemirror/state';
+import { Compartment, EditorState, StateEffect, StateField } from '@codemirror/state';
 import {
   EditorView,
   keymap,
@@ -26,6 +26,7 @@ import { tags as t } from '@lezer/highlight';
 import { classifyPaste, detectLanguage } from './codeDetect.js';
 import { planComment } from './comments.js';
 import { planSlashFence } from './fence.js';
+import { joinDictated } from './dictation.js';
 import { IMAGE_RE } from './markdown.js';
 import { count, currentLang, t as say, ui } from './i18n.js';
 
@@ -355,6 +356,63 @@ export function insertCodeBlock(view) {
   return true;
 }
 
+// ---------- dictation: the words heard so far, greyed at the cursor, until the phrase is done ----------
+
+const setDictationPreview = StateEffect.define();
+
+class DictationPreview extends WidgetType {
+  constructor(text) {
+    super();
+    this.text = text;
+  }
+  eq(other) {
+    return other.text === this.text;
+  }
+  toDOM() {
+    const span = document.createElement('span');
+    span.className = 'cm-dictation';
+    span.textContent = this.text;
+    return span;
+  }
+  ignoreEvent() {
+    return true;
+  }
+}
+
+const dictationField = StateField.define({
+  create: () => Decoration.none,
+  update(decorations, tr) {
+    let next = decorations.map(tr.changes);
+    for (const effect of tr.effects) {
+      if (effect.is(setDictationPreview)) {
+        next = effect.value ? Decoration.set([Decoration.widget({ widget: new DictationPreview(effect.value.text), side: 1 }).range(effect.value.pos)]) : Decoration.none;
+      }
+    }
+    return next;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+/** Shows (or, with an empty text, clears) the words being heard at the cursor; the note itself is untouched. */
+export function showDictationPreview(view, text) {
+  const pos = view.state.selection.main.head;
+  view.dispatch({ effects: setDictationPreview.of(text ? { pos, text: joinDictated(view.state.sliceDoc(Math.max(0, pos - 3), pos), text) } : null) });
+}
+
+/** Puts a finished phrase in at the cursor (over the selection), spaced and capitalised to fit. */
+export function insertDictation(view, text) {
+  const { from, to } = view.state.selection.main;
+  const insert = joinDictated(view.state.sliceDoc(Math.max(0, from - 3), from), text);
+  if (!insert) return;
+  view.dispatch({
+    changes: { from, to, insert },
+    selection: { anchor: from + insert.length },
+    effects: setDictationPreview.of(null),
+    scrollIntoView: true,
+    userEvent: 'input.dictate',
+  });
+}
+
 // "/#" alone on a line opens a code block, and inside one closes it (see fence.js). The "#" lands
 // first and the fences follow as their own history step, so Ctrl+Z gives back the typed "/#".
 const slashFence = EditorView.inputHandler.of((view, from, to, text) => {
@@ -465,6 +523,7 @@ export function createEditor({
     syntaxHighlighting(atlasHighlight),
     structurePlugin(onCopy),
     imagesField(resolveImage, openImage),
+    dictationField,
     slashFence,
     EditorView.contentAttributes.of({ spellcheck: 'true', autocapitalize: 'sentences' }),
     keymap.of([{ key: 'Mod-e', run: insertCodeBlock }, ...searchKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]),

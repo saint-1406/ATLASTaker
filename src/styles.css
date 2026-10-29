@@ -3101,6 +3101,69 @@ textarea {
   top: 0;
 }
 
+/* ---------- dictation: the microphone button, the words being heard ---------- */
+
+.dictate {
+  position: fixed;
+  right: 22px;
+  bottom: calc(var(--status-h) + 18px + env(safe-area-inset-bottom, 0px));
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 1px solid var(--sheet-edge);
+  border-radius: 50%;
+  background: var(--bg-raised);
+  color: var(--ink-soft);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+}
+
+.dictate[hidden] {
+  display: none;
+}
+
+.dictate svg {
+  width: 20px;
+  height: 20px;
+}
+
+.dictate:hover {
+  border-color: var(--accent-text);
+  color: var(--accent-text);
+}
+
+.dictate.listening {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+  animation: dictate-pulse 1.4s ease-out infinite;
+}
+
+@keyframes dictate-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 16px color-mix(in srgb, var(--danger) 0%, transparent);
+  }
+}
+
+/* in focus mode the button steps back until it is needed */
+.app.focus .dictate:not(.listening):not(:hover) {
+  opacity: 0.35;
+}
+
+.cm-dictation {
+  color: var(--ink-dim);
+  font-style: italic;
+  background: color-mix(in srgb, var(--accent-text) 10%, transparent);
+  border-radius: 3px;
+}
+
 /* ---------- the reader's view: font, spacing ---------- */
 
 .reader[data-font="sans"] .reader-book {

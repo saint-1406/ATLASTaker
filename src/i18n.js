@@ -110,6 +110,8 @@ const ru = {
     atlasHint: 'колесо — масштаб · перетаскивание — обзор · клик — высадиться · Esc — назад',
     library: 'Библиотека',
     libraryKey: 'Библиотека (Ctrl+O)',
+    dictate: 'Диктовка',
+    dictateKey: 'Диктовка (Ctrl+Shift+D)',
   },
   status: {
     selected: (chars) => `Выделено ${chars}`,
@@ -235,6 +237,7 @@ const ru = {
     backupsFolder: 'Папка бэкапов',
     library: 'Библиотека',
     addDocument: 'Добавить документ в библиотеку',
+    dictate: 'Диктовка: говорите — текст встанет у курсора',
     // names the language it switches to, in that language
     otherLang: 'Language: English',
   },
@@ -328,6 +331,20 @@ const ru = {
     progress: (percent) => `${percent}%`,
     finished: 'прочитано',
     loadFailed: 'Читалка не загрузилась',
+  },
+  dictation: {
+    listening: 'Слушаю… Ещё раз на микрофон или Esc — стоп',
+    stop: 'Остановить диктовку (Esc)',
+    unsupported: 'Здесь диктовка недоступна: она работает в Edge, Chrome и в приложении для Android. В Windows можно нажать Win+H.',
+    cloud: 'Речь распознаёт сервис браузера: в Edge звук уходит в облако Microsoft, в Chrome — Google.',
+    notAllowed: 'Нет доступа к микрофону — разрешите его для ATLAS',
+    network: 'Распознавание речи не отвечает: для диктовки здесь нужен интернет',
+    language: 'Распознавание не знает этот язык. На телефоне его можно скачать в настройках голосового ввода Google.',
+    busy: 'Распознавание речи занято другим приложением — попробуйте ещё раз',
+    noService: 'На телефоне нет службы распознавания речи — нужно приложение Google',
+    failed: 'Диктовка остановилась — попробуйте ещё раз',
+    // said aloud while dictating: these words are not written, they do what they say
+    spoken: { newLine: 'новая строка', newParagraph: 'новый абзац' },
   },
   reader: {
     opening: 'Открываю…',
@@ -469,6 +486,8 @@ const en = {
     atlasHint: 'wheel to zoom · drag to look around · click to land · Esc to go back',
     library: 'Library',
     libraryKey: 'Library (Ctrl+O)',
+    dictate: 'Dictate',
+    dictateKey: 'Dictate (Ctrl+Shift+D)',
   },
   status: {
     selected: (chars) => `${chars} selected`,
@@ -593,6 +612,7 @@ const en = {
     backupsFolder: 'Backups folder',
     library: 'Library',
     addDocument: 'Add a document to the library',
+    dictate: 'Dictate: speak and the text lands at the cursor',
     otherLang: 'Язык: русский',
   },
   palette: {
@@ -685,6 +705,19 @@ const en = {
     progress: (percent) => `${percent}%`,
     finished: 'finished',
     loadFailed: 'The reader did not load',
+  },
+  dictation: {
+    listening: 'Listening… Tap the microphone again or press Esc to stop',
+    stop: 'Stop dictating (Esc)',
+    unsupported: 'Dictation is not available here: it works in Edge, Chrome and the Android app. On Windows, Win+H works too.',
+    cloud: 'Speech is recognized by the browser’s service: Edge sends the sound to Microsoft’s cloud, Chrome to Google’s.',
+    notAllowed: 'No access to the microphone — allow it for ATLAS',
+    network: 'Speech recognition does not answer: dictation here needs the internet',
+    language: 'Speech recognition does not know this language. On a phone it can be downloaded in Google voice typing settings.',
+    busy: 'Speech recognition is busy with another app — try again',
+    noService: 'There is no speech recognition service on this phone — it needs the Google app',
+    failed: 'Dictation stopped — try again',
+    spoken: { newLine: 'new line', newParagraph: 'new paragraph' },
   },
   reader: {
     opening: 'Opening…',

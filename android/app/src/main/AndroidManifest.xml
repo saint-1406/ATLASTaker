@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- dictation: the phone's speech recognition listens through the microphone, asked for on first use -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Android 11+ shows an app the speech recognition service only when it says it looks for one -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
     <!-- Notes live in the app's own storage (the WebView's IndexedDB); the .zip export is the backup. -->
     <application
         android:allowBackup="false"
