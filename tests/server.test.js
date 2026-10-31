@@ -184,6 +184,12 @@ test('the library keeps a document, its card and the reader\'s place', async (t)
   assert.equal(refused.progress, 0.25);
   assert.equal(refused.notesId, 'n-abc123');
 
+  // marks: a highlight with a comment is kept; a list with one bad mark is refused whole
+  const marks = [{ id: 'm-abc123', color: 'green', note: 'важно', text: 'слова', where: 'с. 3', anchor: { rects: [[3, 0.1, 0.2, 0.5, 0.02]] }, created: 1 }];
+  assert.deepEqual((await (await call('PATCH', `library/${doc.id}`, { marks })).json()).marks, marks);
+  const badMarks = [...marks, { ...marks[0], id: 'm-def456', color: 'red' }];
+  assert.deepEqual((await (await call('PATCH', `library/${doc.id}`, { marks: badMarks })).json()).marks, marks);
+
   const list = await (await call('GET', 'library')).json();
   assert.deepEqual(list.map((d) => d.id), [doc.id]);
   const file = await fetch(`${app.url}api/library/${doc.id}/file`, { headers: { 'X-Atlas-Token': app.token } });

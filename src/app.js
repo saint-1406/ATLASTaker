@@ -146,7 +146,7 @@ async function boot() {
     onDocChange,
     onSelectionChange,
     onSmartPaste,
-    onOpenLink: (url) => api.openExternal(url),
+    onOpenLink: openLink,
     onContextMenu: openEditorMenu,
     onCopy: (text) => api.copy(text),
     onImage: addImage,
@@ -595,9 +595,12 @@ async function appendToNote(id, addition) {
 }
 
 /** A passage from the reader, as a quote in the document's own note (made on the first quote). */
-async function quoteToNote(doc, text, where) {
+/** link: atlas:<document>#<mark> — the quote's "where" leads back to the place (Ctrl+click). */
+async function quoteToNote(doc, text, where, link) {
   if (suspended || lost) throw new Error(t('errors.offline'));
-  const quote = `${text.split('\n').map((line) => `> ${line}`).join('\n')}\n${where ? `>\n> — ${where}\n` : ''}`;
+  const label = (where || (link ? doc.title || doc.name : '')).replace(/[[\]]/g, '');
+  const source = label && link ? `[${label}](${link})` : label;
+  const quote = `${text.split('\n').map((line) => `> ${line}`).join('\n')}\n${source ? `>\n> — ${source}\n` : ''}`;
   let id = doc.notesId && notes.has(doc.notesId) ? doc.notesId : null;
   if (id) {
     if (!(await appendToNote(id, quote))) throw new Error(t('notes.stayed'));
@@ -918,6 +921,15 @@ function renderIndex() {
 
 // ---------- context menu & comments ----------
 
+/** A link in a note: atlas:… opens the place in a library document, anything else the browser. */
+function openLink(url) {
+  if (url.startsWith('atlas:')) {
+    if (library) library.openLink(url);
+    return;
+  }
+  api.openExternal(url);
+}
+
 function openEditorMenu(event, view) {
   const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
   const before = view.state.selection.main;
@@ -929,7 +941,7 @@ function openEditorMenu(event, view) {
   const url = urlAt(state, sel.head);
 
   const items = [];
-  if (url) items.push({ icon: '↗', text: t('menu.openLink'), kbd: t('menu.ctrlClick'), run: () => api.openExternal(url) }, '-');
+  if (url) items.push({ icon: '↗', text: t('menu.openLink'), kbd: t('menu.ctrlClick'), run: () => openLink(url) }, '-');
   items.push(
     {
       icon: '❝',

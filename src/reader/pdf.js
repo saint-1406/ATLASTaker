@@ -6,6 +6,7 @@
 import { AnnotationMode, getDocument, PDFWorker, TextLayer } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import workerSource from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs';
 import { createPager } from './pager.js';
+import { mergeRects } from '../marks.js';
 
 let worker = null;
 
@@ -298,6 +299,64 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
     for (let i = 0; i < pages.length; i += step) toc.push({ level: 1, page: i + 1, go: () => goToPage(i) });
   }
 
+  // ---------- marks: boxes as fractions of the page, drawn under the (transparent) text layer ----------
+
+  let marks = [];
+  const markLayers = new Map(); // page number → its layer of boxes
+  function anchorOf(range) {
+    if (!range || range.collapsed || !wrap.contains(range.commonAncestorContainer)) return null;
+    const boxes = [];
+    const frames = [...drawn.keys()].map((n) => [n, pages[n - 1].getBoundingClientRect()]);
+    for (const r of range.getClientRects()) {
+      if (r.width < 0.5 || r.height < 0.5) continue;
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const hit = frames.find(([, f]) => cx >= f.left && cx <= f.right && cy >= f.top && cy <= f.bottom);
+      if (!hit) continue;
+      const [n, f] = hit;
+      // the text layer's end-of-content box spans the page: not a line of text
+      if (r.height / f.height > 0.2) continue;
+      boxes.push([n, (r.left - f.left) / f.width, (r.top - f.top) / f.height, r.width / f.width, r.height / f.height]);
+    }
+    const rects = mergeRects(boxes).slice(0, 400);
+    return rects.length ? { rects } : null;
+  }
+  function paintMarks(activeId = null) {
+    for (const layer of markLayers.values()) layer.replaceChildren();
+    for (const m of marks) {
+      for (const [n, x, y, w, h] of m.anchor?.rects ?? []) {
+        const frame = pages[n - 1];
+        if (!frame) continue;
+        let layer = markLayers.get(n);
+        if (!layer) {
+          layer = document.createElement('div');
+          layer.className = 'pdf-marks';
+          frame.append(layer);
+          markLayers.set(n, layer);
+        }
+        const box = document.createElement('div');
+        box.className = `pdf-mark${m.note ? ' noted' : ''}${m.id === activeId ? ' active' : ''}`;
+        box.dataset.color = m.color;
+        box.dataset.mark = m.id;
+        Object.assign(box.style, { left: `${x * 100}%`, top: `${y * 100}%`, width: `${w * 100}%`, height: `${h * 100}%` });
+        layer.append(box);
+      }
+    }
+  }
+  function goToMark(id) {
+    const m = marks.find((x) => x.id === id);
+    const first = m?.anchor?.rects?.[0];
+    if (!first) return false;
+    const index = first[0] - 1;
+    if (!pages[index]) return false;
+    if (pager) pager.go(index);
+    else {
+      const f = pages[index].getBoundingClientRect();
+      host.scrollTop += f.top + first[2] * f.height - viewTop() - host.clientHeight / 3;
+    }
+    return true;
+  }
+
   let rezoom = 0;
   return {
     kind: 'pdf',
@@ -329,6 +388,22 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
       const target = node?.nodeType === 1 ? node : node?.parentElement;
       return { page: Number(target?.closest('.pdf-page')?.dataset.page) || current().page };
     },
+    anchorOf,
+    setMarks(list = [], activeId = null) {
+      marks = list;
+      paintMarks(activeId);
+    },
+    markAt(x, y) {
+      let found = null;
+      for (const layer of markLayers.values()) {
+        for (const box of layer.children) {
+          const b = box.getBoundingClientRect();
+          if (x >= b.left - 2 && x <= b.right + 2 && y >= b.top - 2 && y <= b.bottom + 2) found = box.dataset.mark;
+        }
+      }
+      return found;
+    },
+    goToMark,
     close() {
       observer.disconnect();
       resized.disconnect();

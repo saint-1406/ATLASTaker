@@ -7,6 +7,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { atomicWrite, ID_RE } from './store.js';
+import { validMarks } from '../src/marks.js';
 
 export const DOC_ID_RE = /^d-[a-z0-9]{6,40}$/;
 export const DOC_FORMATS = ['pdf', 'epub', 'fb2', 'docx', 'md', 'txt', 'html'];
@@ -24,6 +25,7 @@ const RULES = {
   opened: (v) => Number.isFinite(v) && v > 0,
   notesId: (v) => v === null || (typeof v === 'string' && ID_RE.test(v)),
   scale: (v) => Number.isFinite(v) && v >= 0.5 && v <= 4,
+  marks: (v) => validMarks(v) && JSON.stringify(v).length <= 4_000_000,
 };
 
 function httpError(status, message) {
@@ -109,6 +111,7 @@ export function createLibrary(dataDir) {
         position: null,
         notesId: null,
         scale: 1,
+        marks: [],
       };
       await atomicWrite(fileOf(doc), bytes);
       docs[doc.id] = doc;

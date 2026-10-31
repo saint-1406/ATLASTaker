@@ -19,7 +19,7 @@ import { createLibrary, MAX_DOC } from './library.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
-const CODE_FILES = ['server/server.js', 'server/store.js', 'server/backups.js', 'server/library.js', 'dist/app.js', 'dist/reader.js'];
+const CODE_FILES = ['server/server.js', 'server/store.js', 'server/backups.js', 'server/library.js', 'src/marks.js', 'dist/app.js', 'dist/reader.js'];
 const readOrEmpty = (file) => {
   try {
     return fs.readFileSync(path.join(ROOT, file));

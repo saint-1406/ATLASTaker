@@ -6,6 +6,10 @@
 import { h, toast, confirmDialog, showMenu, isOverlayOpen } from './overlays.js';
 import { count, t } from './i18n.js';
 import { LEADINGS, READ_FONTS, READ_MODES, THEMES, TURNS } from './skins.js';
+import { MARK_COLORS, MAX_NOTE, MAX_TEXT, newMarkId, sortMarks } from './marks.js';
+
+/** A link from a note back to a place in a document: atlas:<document>#<mark>. */
+export const DOC_LINK_RE = /^atlas:(d-[a-z0-9]{6,40})(?:#(m-[a-z0-9]{4,40}))?$/;
 
 const ACCEPT = '.pdf,.epub,.fb2,.zip,.docx,.doc,.md,.markdown,.txt,.text,.html,.htm,.xhtml,.rtf,.odt';
 const MAX_SIZE = 300 * 1024 * 1024;
@@ -46,6 +50,10 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   let reading = null; // { doc, controller, closed }
   let saveTimer = 0;
   let pendingSave = null;
+  let marksTimer = 0;
+  let pendingMarks = null;
+  let selected = null; // the selection the bar acts on, kept while the bar shows
+  let openMarkId = null; // the mark whose card is open
 
   // ---------- the shelf ----------
 
@@ -75,27 +83,45 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   const readerBack = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => closeReader() }, '←');
   const viewButton = h('button', { type: 'button', class: 'tb-btn icon rd-size', onclick: () => toggleView() }, 'Aa');
   const tocButton = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => toggleToc() }, '☰');
+  const marksButton = h('button', { type: 'button', class: 'tb-btn icon rd-marks-btn', onclick: () => toggleMarks() }, '✎', h('span', { class: 'rd-marks-count' }));
   const prevButton = h('button', { type: 'button', class: 'rd-nav rd-nav-prev', onclick: () => reading?.controller?.prev() }, '‹');
   const nextButton = h('button', { type: 'button', class: 'rd-nav rd-nav-next', onclick: () => reading?.controller?.next() }, '›');
   const viewPanel = h('aside', { class: 'rd-view', hidden: true });
   const status = h('div', { class: 'rd-status', role: 'status' });
   const line = h('div', { class: 'rd-line', 'aria-hidden': 'true' }, h('i'));
   const quoteText = h('span');
-  const quoteButton = h('button', { type: 'button', class: 'rd-quote', hidden: true, onclick: quote }, h('span', { 'aria-hidden': 'true' }, '❝'), quoteText);
+  const quoteButton = h('button', { type: 'button', class: 'rd-quote', onclick: quote }, h('span', { 'aria-hidden': 'true' }, '❝'), quoteText);
+  // the bar over a selection: a colour makes a highlight, 💬 a highlight with a comment, ❝ a quote in the note
+  const swatches = MARK_COLORS.map((color) => h('button', { type: 'button', class: 'rd-swatch', 'data-color': color, onclick: () => addMark(color) }));
+  const commentText = h('span');
+  const commentButton = h(
+    'button',
+    { type: 'button', class: 'rd-sel-btn', onclick: () => addMark(MARK_COLORS[0], { comment: true }) },
+    h('span', { 'aria-hidden': 'true' }, '💬'),
+    commentText,
+  );
+  const selBar = h('div', { class: 'rd-selbar', hidden: true, role: 'toolbar' }, h('div', { class: 'rd-swatches' }, swatches), commentButton, quoteButton);
+  // the card of one mark: its passage, its comment, its colour
+  const markPanel = h('aside', { class: 'rd-markpanel', hidden: true });
   const tocHead = h('div', { class: 'rd-toc-head' });
   const tocList = h('ol', { class: 'rd-toc-list' });
   const tocPanel = h('aside', { class: 'rd-toc', hidden: true }, tocHead, tocList);
+  const marksHead = h('div', { class: 'rd-toc-head' });
+  const marksList = h('ol', { class: 'rd-marks-list' });
+  const marksPanel = h('aside', { class: 'rd-toc rd-marks', hidden: true }, marksHead, marksList);
   const reader = h(
     'section',
     { class: 'reader', hidden: true },
-    h('header', { class: 'rd-head' }, readerBack, h('div', { class: 'rd-titles' }, title, subtitle), percent, viewButton, tocButton),
+    h('header', { class: 'rd-head' }, readerBack, h('div', { class: 'rd-titles' }, title, subtitle), percent, viewButton, marksButton, tocButton),
     scroll,
     status,
     line,
     prevButton,
     nextButton,
-    quoteButton,
+    selBar,
+    markPanel,
     tocPanel,
+    marksPanel,
     viewPanel,
   );
 
@@ -112,6 +138,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
       [readerBack, 'reader.back'],
       [viewButton, 'reader.viewTitle'],
       [tocButton, 'reader.toc'],
+      [marksButton, 'reader.marks.list'],
       [prevButton, 'reader.prevPage'],
       [nextButton, 'reader.nextPage'],
     ]) {
@@ -121,6 +148,13 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     dropHint.textContent = t('library.drop');
     quoteText.textContent = t('reader.quote');
     quoteButton.title = t('reader.quoteTitle');
+    commentText.textContent = t('reader.marks.comment');
+    commentButton.title = t('reader.marks.commentTitle');
+    selBar.setAttribute('aria-label', t('reader.marks.bar'));
+    for (const swatch of swatches) {
+      swatch.title = t('reader.marks.highlight', t(`reader.marks.colors.${swatch.dataset.color}`));
+      swatch.setAttribute('aria-label', swatch.title);
+    }
     tocHead.textContent = t('reader.toc');
   }
 
@@ -311,6 +345,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   }
 
   function flush() {
+    flushMarks();
     clearTimeout(saveTimer);
     if (!pendingSave) return;
     const { id, patch } = pendingSave;
@@ -330,8 +365,11 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     }
     reader.hidden = false;
     tocPanel.hidden = true;
+    marksPanel.hidden = true;
     viewPanel.hidden = true;
-    quoteButton.hidden = true;
+    hideSelBar();
+    markPanel.hidden = true;
+    openMarkId = null;
     const look = getReading();
     reader.dataset.font = look.readFont;
     reader.dataset.leading = look.readLeading;
@@ -366,6 +404,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
         return;
       }
       session.controller = controller;
+      controller.setMarks?.(marksOf(doc));
+      showMarkCount();
       reader.classList.toggle('is-paged', controller.paged);
       status.hidden = true;
       showProgress(controller.progress());
@@ -381,13 +421,15 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
 
   function closeReader() {
     if (!reading) return;
+    closeMark();
     flush();
     reading.closed = true;
     reading.controller?.close();
     reading = null;
     reader.hidden = true;
-    quoteButton.hidden = true;
+    hideSelBar();
     tocPanel.hidden = true;
+    marksPanel.hidden = true;
     viewPanel.hidden = true;
     reader.classList.remove('is-paged');
     render();
@@ -495,7 +537,9 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   }
 
   function toggleView(show = viewPanel.hidden) {
+    marksPanel.hidden = true;
     tocPanel.hidden = true;
+    marksPanel.hidden = true;
     viewPanel.hidden = !show;
     if (show) {
       drawView();
@@ -516,6 +560,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
                   type: 'button',
                   onclick: () => {
                     tocPanel.hidden = true;
+                    marksPanel.hidden = true;
                     entry.go();
                     scroll.focus({ preventScroll: true });
                   },
@@ -530,38 +575,41 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
 
   function toggleToc(show = tocPanel.hidden) {
     viewPanel.hidden = true;
+    marksPanel.hidden = true;
     tocPanel.hidden = !show;
     if (show) tocPanel.querySelector('button')?.focus({ preventScroll: true });
   }
 
-  // a selection inside the document offers to become a quote
+  // a selection inside the document offers a highlight, a comment or a quote
   document.addEventListener('selectionchange', () => {
-    if (!reading?.controller) {
-      quoteButton.hidden = true;
-      return;
-    }
+    if (!reading?.controller) return hideSelBar();
     const sel = document.getSelection();
-    quoteButton.hidden = !(sel && !sel.isCollapsed && scroll.contains(sel.anchorNode) && sel.toString().trim());
+    if (sel && !sel.isCollapsed && sel.rangeCount && scroll.contains(sel.anchorNode) && sel.toString().trim()) {
+      selected = sel.getRangeAt(0).cloneRange();
+      selBar.hidden = false;
+      closeMark();
+    } else if (!selBar.contains(document.activeElement)) hideSelBar();
   });
 
-  async function quote() {
-    const sel = document.getSelection();
-    if (!reading?.controller || !sel || sel.isCollapsed) return;
-    const { doc, controller } = reading;
-    const raw = sel.toString();
-    // a PDF's lines are broken where the page broke them: one paragraph
-    const text = (controller.kind === 'pdf' ? raw.replace(/\s+/g, ' ') : raw.replace(/[ \t ]+/g, ' ').replace(/\s*\n\s*/g, '\n')).trim().slice(0, 5000);
-    if (!text) return;
-    const where = controller.where(sel.anchorNode);
-    quoteButton.disabled = true;
+  function hideSelBar() {
+    selBar.hidden = true;
+    selected = null;
+  }
+
+  /** The words of a passage, tidied: a PDF's lines are broken where the page broke them, so they become one paragraph. */
+  function passage(controller, raw, max = 5000) {
+    return (controller.kind === 'pdf' ? raw.replace(/\s+/g, ' ') : raw.replace(/[ \t ]+/g, ' ').replace(/\s*\n\s*/g, '\n')).trim().slice(0, max);
+  }
+  const whereText = (where) => (where.page ? t('reader.page', where.page) : where.heading) || '';
+
+  /** Sends a passage to the document's note as a quote; true when it got there. */
+  async function sendQuote(doc, text, where, markId) {
     try {
-      const note = await onQuote(doc, text, where.page ? t('reader.page', where.page) : where.heading);
+      const note = await onQuote(doc, text, where, `atlas:${doc.id}${markId ? `#${markId}` : ''}`);
       if (note.id !== doc.notesId) {
         doc.notesId = note.id;
         lib.update(doc.id, { notesId: note.id }).catch(() => {});
       }
-      sel.removeAllRanges();
-      quoteButton.hidden = true;
       toast(t('reader.quoted', note.title), {
         timeout: 6000,
         action: {
@@ -572,20 +620,310 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
           },
         },
       });
+      return true;
     } catch (err) {
       console.error(err);
       toast(t('reader.quoteFailed', err.message));
+      return false;
+    }
+  }
+
+  async function quote() {
+    const range = selected;
+    if (!reading?.controller || !range || range.collapsed) return;
+    const { doc, controller } = reading;
+    const text = passage(controller, range.toString());
+    if (!text) return;
+    quoteButton.disabled = true;
+    try {
+      // the quoted passage stays highlighted in the document, and the quote links back to it
+      const mark = makeMark(controller, range, MARK_COLORS[0]);
+      if (mark) {
+        marksOf(doc).push(mark);
+        saveMarks();
+      }
+      if (await sendQuote(doc, text, whereText(controller.where(range.startContainer)), mark?.id)) {
+        document.getSelection()?.removeAllRanges();
+        hideSelBar();
+      }
     } finally {
       quoteButton.disabled = false;
     }
   }
+
+  // ---------- marks ----------
+
+  const marksOf = (doc) => (Array.isArray(doc.marks) ? doc.marks : (doc.marks = []));
+
+  /** The marks changed: drawn again at once, kept a moment later (all of the document's marks in one go). */
+  function saveMarks(session = reading) {
+    if (!session || session.closed) return;
+    session.controller?.setMarks?.(marksOf(session.doc), openMarkId);
+    showMarkCount();
+    if (!marksPanel.hidden) fillMarks();
+    pendingMarks = { id: session.doc.id, marks: marksOf(session.doc) };
+    clearTimeout(marksTimer);
+    marksTimer = setTimeout(flushMarks, 500);
+  }
+
+  function flushMarks() {
+    clearTimeout(marksTimer);
+    if (!pendingMarks) return;
+    const { id, marks } = pendingMarks;
+    pendingMarks = null;
+    lib.update(id, { marks }).catch((err) => {
+      console.error(err);
+      toast(t('reader.marks.failed', err.message));
+    });
+  }
+
+  /** A new mark over a selection, or null where none can go. */
+  function makeMark(controller, range, color) {
+    const anchor = controller?.anchorOf?.(range);
+    if (!anchor) return null;
+    return {
+      id: newMarkId(),
+      color,
+      note: '',
+      text: passage(controller, range.toString(), MAX_TEXT),
+      where: whereText(controller.where(range.startContainer)).slice(0, 300),
+      anchor,
+      created: Date.now(),
+    };
+  }
+
+  function addMark(color, { comment = false } = {}) {
+    const range = selected;
+    if (!reading?.controller || !range) return;
+    const mark = makeMark(reading.controller, range, color);
+    if (!mark) {
+      toast(t('reader.marks.noPlace'));
+      return;
+    }
+    marksOf(reading.doc).push(mark);
+    document.getSelection()?.removeAllRanges();
+    hideSelBar();
+    if (comment) openMark(mark.id, { focus: true });
+    else saveMarks();
+  }
+
+  const findMark = (id) => (reading ? marksOf(reading.doc).find((m) => m.id === id) : null);
+
+  function closeMark() {
+    if (!openMarkId) return;
+    const mark = findMark(openMarkId);
+    markPanel.hidden = true;
+    openMarkId = null;
+    if (mark) mark.note = mark.note.trim();
+    saveMarks();
+  }
+
+  function removeMark(id) {
+    if (!reading) return;
+    const session = reading;
+    const list = marksOf(session.doc);
+    const index = list.findIndex((m) => m.id === id);
+    if (index < 0) return;
+    const [mark] = list.splice(index, 1);
+    markPanel.hidden = true;
+    openMarkId = null;
+    saveMarks();
+    toast(t('reader.marks.removed'), {
+      timeout: 6000,
+      action: {
+        text: t('reader.marks.undo'),
+        run: () => {
+          if (session.closed) return;
+          const again = marksOf(session.doc);
+          again.splice(Math.min(index, again.length), 0, mark);
+          saveMarks(session);
+        },
+      },
+    });
+  }
+
+  function openMark(id, { focus = false } = {}) {
+    const mark = findMark(id);
+    if (!mark) return;
+    if (openMarkId && openMarkId !== id) closeMark();
+    openMarkId = id;
+    hideSelBar();
+    tocPanel.hidden = true;
+    marksPanel.hidden = true;
+    viewPanel.hidden = true;
+    const note = h('textarea', {
+      class: 'field rd-mark-note',
+      rows: '3',
+      maxlength: String(MAX_NOTE),
+      placeholder: t('reader.marks.placeholder'),
+      'aria-label': t('reader.marks.comment'),
+    });
+    note.value = mark.note;
+    note.addEventListener('input', () => {
+      mark.note = note.value.slice(0, MAX_NOTE);
+      mark.edited = Date.now();
+      saveMarks();
+    });
+    note.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' || (e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeMark();
+        scroll.focus({ preventScroll: true });
+      }
+    });
+    const colors = MARK_COLORS.map((color) =>
+      h('button', {
+        type: 'button',
+        class: 'rd-swatch',
+        'data-color': color,
+        'aria-pressed': String(mark.color === color),
+        title: t(`reader.marks.colors.${color}`),
+        'aria-label': t(`reader.marks.colors.${color}`),
+        onclick: () => {
+          mark.color = color;
+          mark.edited = Date.now();
+          for (const b of colors) b.setAttribute('aria-pressed', String(b.dataset.color === color));
+          saveMarks();
+        },
+      }),
+    );
+    const toNote = h(
+      'button',
+      {
+        type: 'button',
+        class: 'tb-btn',
+        title: t('reader.quoteTitle'),
+        onclick: () => sendQuote(reading.doc, mark.note.trim() ? `${mark.text}\n\n💬 ${mark.note.trim()}` : mark.text, mark.where, mark.id),
+      },
+      '❝ ',
+      t('reader.quote'),
+    );
+    markPanel.replaceChildren(
+      h(
+        'div',
+        { class: 'rd-mark-head' },
+        h('div', { class: 'rd-swatches' }, colors),
+        h('span', { class: 'rd-mark-where' }, mark.where || ''),
+        h('button', { type: 'button', class: 'tb-btn icon', title: t('reader.marks.close'), 'aria-label': t('reader.marks.close'), onclick: () => closeMark() }, '✕'),
+      ),
+      h('blockquote', { class: 'rd-mark-text' }, mark.text),
+      note,
+      h(
+        'div',
+        { class: 'rd-mark-actions' },
+        toNote,
+        h('button', { type: 'button', class: 'tb-btn rd-mark-remove', onclick: () => removeMark(mark.id) }, t('reader.marks.remove')),
+        h('button', { type: 'button', class: 'tb-btn accent', onclick: () => closeMark() }, t('reader.marks.done')),
+      ),
+    );
+    markPanel.hidden = false;
+    reading.controller?.setMarks?.(marksOf(reading.doc), id);
+    if (focus) note.focus({ preventScroll: true });
+  }
+
+  // ---------- the list of marks ----------
+
+  function showMarkCount() {
+    const n = reading ? marksOf(reading.doc).length : 0;
+    marksButton.lastChild.textContent = n ? String(n) : '';
+  }
+
+  function fillMarks() {
+    const list = reading ? sortMarks(marksOf(reading.doc).filter((m) => m.anchor)) : [];
+    marksHead.textContent = list.length ? `${t('reader.marks.list')} · ${list.length}` : t('reader.marks.list');
+    marksList.replaceChildren(
+      ...(list.length
+        ? list.map((mark) =>
+            h(
+              'li',
+              { class: 'rd-marks-item' },
+              h(
+                'button',
+                { type: 'button', 'data-color': mark.color, onclick: () => showMark(mark.id) },
+                h('span', { class: 'rd-marks-dot', 'aria-hidden': 'true' }),
+                h(
+                  'span',
+                  { class: 'rd-marks-body' },
+                  h('span', { class: 'rd-marks-text' }, mark.text),
+                  mark.note ? h('span', { class: 'rd-marks-note' }, `💬 ${mark.note}`) : null,
+                  mark.where ? h('span', { class: 'rd-marks-where' }, mark.where) : null,
+                ),
+              ),
+            ),
+          )
+        : [h('li', { class: 'rd-toc-empty' }, t('reader.marks.none'))]),
+    );
+  }
+
+  function toggleMarks(show = marksPanel.hidden) {
+    viewPanel.hidden = true;
+    tocPanel.hidden = true;
+    closeMark();
+    marksPanel.hidden = !show;
+    if (show) {
+      fillMarks();
+      marksPanel.querySelector('button')?.focus({ preventScroll: true });
+    }
+  }
+
+  /** Takes the reader to a mark and opens its card. */
+  function showMark(id) {
+    marksPanel.hidden = true;
+    if (!reading?.controller?.goToMark?.(id)) {
+      toast(t('reader.marks.notFound'));
+      return;
+    }
+    openMark(id);
+  }
+
+  /** Follows a link from a note (atlas:<document>#<mark>): opens the document there. */
+  async function openLink(url) {
+    const [, docId, markId] = DOC_LINK_RE.exec(url) ?? [];
+    if (!docId) return false;
+    if (!docs.some((d) => d.id === docId)) await refresh();
+    if (!docs.some((d) => d.id === docId)) {
+      toast(t('reader.marks.noDoc'));
+      return true;
+    }
+    if (reading?.doc.id !== docId || !reading.controller) await read(docId);
+    if (markId && reading?.doc.id === docId && reading.controller) showMark(markId);
+    return true;
+  }
+
+  // a short tap on a mark opens its card (caught before the pager can take the tap as a page turn)
+  let tap = null;
+  scroll.addEventListener(
+    'pointerdown',
+    (e) => {
+      tap = e.button === 0 ? { x: e.clientX, y: e.clientY, at: performance.now() } : null;
+    },
+    true,
+  );
+  scroll.addEventListener(
+    'pointerup',
+    (e) => {
+      const start = tap;
+      tap = null;
+      if (!start || !reading?.controller?.markAt || performance.now() - start.at > 500 || Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) return;
+      const sel = document.getSelection();
+      if ((sel && !sel.isCollapsed && scroll.contains(sel.anchorNode)) || e.target.closest?.('a[data-target]')) return;
+      const id = reading.controller.markAt(e.clientX, e.clientY);
+      if (!id) return;
+      e.stopPropagation();
+      openMark(id);
+    },
+    true,
+  );
 
   // the contents and view panels close on a press anywhere else in the reader
   reader.addEventListener('pointerdown', (e) => {
     if (!e.target.closest('.rd-view, .rd-toc, .rd-head')) {
       viewPanel.hidden = true;
       tocPanel.hidden = true;
+      marksPanel.hidden = true;
     }
+    if (!e.target.closest('.rd-markpanel, .rd-selbar, .rd-head')) closeMark();
   });
 
   // ---------- dropping files ----------
@@ -609,8 +947,13 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
 
   /** One step back: the contents list, then the reader, then the shelf. False when nothing was open. */
   function back() {
-    if (!tocPanel.hidden || !viewPanel.hidden) {
+    if (openMarkId) {
+      closeMark();
+      return true;
+    }
+    if (!tocPanel.hidden || !marksPanel.hidden || !viewPanel.hidden) {
       tocPanel.hidden = true;
+      marksPanel.hidden = true;
       viewPanel.hidden = true;
       return true;
     }
@@ -636,7 +979,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
         render();
       } else back();
     } else if (mod && e.code === 'KeyO') close();
-    else if (reading?.controller?.paged && !mod && !e.altKey && !e.target.closest?.('input, .rd-view, .rd-toc') && PAGE_KEYS[e.key] !== undefined) {
+    else if (reading?.controller?.paged && !mod && !e.altKey && !e.target.closest?.('input, textarea, .rd-view, .rd-toc, .rd-markpanel') && PAGE_KEYS[e.key] !== undefined) {
       if (PAGE_KEYS[e.key] === 'shift-aware') (e.shiftKey ? reading.controller.prev : reading.controller.next)();
       else if (PAGE_KEYS[e.key] > 0) reading.controller.next();
       else reading.controller.prev();
@@ -662,6 +1005,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     },
     /** Files handed over by another app (Android "Open with" / "Share"). */
     receive: (files) => addFiles(files, { openSingle: true }),
+    /** atlas:<document>#<mark> from a note; false when the link is not one of these. */
+    openLink,
     back,
     onKey,
     flush,

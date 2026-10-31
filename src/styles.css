@@ -2467,7 +2467,8 @@ textarea {
 .library[hidden],
 .reader[hidden],
 .rd-status[hidden],
-.rd-quote[hidden],
+.rd-selbar[hidden],
+.rd-markpanel[hidden],
 .rd-toc[hidden],
 .lib-empty[hidden] {
   display: none;
@@ -2749,23 +2750,292 @@ textarea {
   background: var(--hairline);
 }
 
-.rd-quote {
+.rd-selbar {
   position: fixed;
   bottom: calc(22px + env(safe-area-inset-bottom, 0px));
   left: 50%;
   z-index: 45;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100vw - 16px);
+  padding: 6px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+}
+
+.rd-swatches {
+  display: flex;
+  gap: 6px;
+  padding: 0 4px;
+}
+
+.rd-swatch {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: var(--mark-swatch);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+}
+
+.rd-swatch[aria-pressed="true"] {
+  border-color: var(--ink);
+}
+
+.rd-swatch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+[data-color="yellow"] { --mark-swatch: #ffd84d; --mark-fill: rgba(255, 210, 40, 0.4); }
+[data-color="green"] { --mark-swatch: #6ed38a; --mark-fill: rgba(70, 200, 110, 0.34); }
+[data-color="blue"] { --mark-swatch: #6aaeff; --mark-fill: rgba(70, 150, 255, 0.32); }
+[data-color="pink"] { --mark-swatch: #ff8cc6; --mark-fill: rgba(255, 100, 180, 0.32); }
+
+.rd-sel-btn,
+.rd-quote {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 18px;
+  gap: 6px;
+  padding: 8px 14px;
   border: 0;
   border-radius: 999px;
+  font: 600 14px var(--font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.rd-sel-btn {
+  background: transparent;
+  color: var(--ink);
+}
+
+.rd-sel-btn:hover {
+  background: var(--hairline);
+}
+
+.rd-quote {
   background: var(--accent);
   color: var(--accent-ink);
-  font: 600 14px var(--font-ui);
-  box-shadow: var(--shadow);
+}
+
+@media (max-width: 480px) {
+  .rd-sel-btn > span:last-child,
+  .rd-quote > span:last-child {
+    display: none;
+  }
+}
+
+.rd-marks-btn {
+  position: relative;
+}
+
+.rd-marks-count {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  min-width: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: 600 9px/14px var(--font-ui);
+  text-align: center;
+}
+
+.rd-marks-count:empty {
+  display: none;
+}
+
+.rd-marks-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rd-marks-item > button {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 16px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  text-align: left;
   cursor: pointer;
+}
+
+.rd-marks-item > button:hover,
+.rd-marks-item > button:focus-visible {
+  background: var(--hairline);
+  outline: none;
+}
+
+.rd-marks-dot {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--mark-swatch);
+}
+
+.rd-marks-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.rd-marks-text {
+  display: -webkit-box;
+  overflow: hidden;
+  font: 14px/1.4 var(--font-ui);
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.rd-marks-note {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--ink-soft);
+  font: italic 13px/1.4 var(--font-ui);
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.rd-marks-where {
+  color: var(--ink-dim);
+  font: 12px var(--font-ui);
+}
+
+/* a mark's card: the passage, its comment, its colour */
+.rd-markpanel {
+  position: fixed;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  z-index: 46;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(460px, calc(100vw - 16px));
+  max-height: min(70vh, 520px);
+  padding: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--bg-raised);
+  color: var(--ink);
+  box-shadow: var(--shadow);
   transform: translateX(-50%);
+}
+
+.rd-mark-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rd-mark-head .rd-swatches {
+  padding: 0;
+}
+
+.rd-mark-where {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-dim);
+  font: 12px var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rd-mark-text {
+  margin: 0;
+  padding: 2px 0 2px 10px;
+  overflow: auto;
+  max-height: 7.5em;
+  border-left: 3px solid var(--accent);
+  color: var(--ink-soft);
+  font: 14px/1.5 var(--font-read, var(--font-ui));
+  white-space: pre-wrap;
+}
+
+.rd-mark-note {
+  width: 100%;
+  min-height: 4.5em;
+  resize: vertical;
+  font: 14px/1.45 var(--font-ui);
+}
+
+.rd-mark-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rd-mark-remove {
+  margin-right: auto;
+  color: var(--danger);
+}
+
+/* marks in a book: painted over the text, nothing added to it */
+:root {
+  --hl-yellow: rgba(255, 214, 50, 0.38);
+  --hl-green: rgba(90, 220, 130, 0.38);
+  --hl-blue: rgba(90, 165, 255, 0.42);
+  --hl-pink: rgba(255, 110, 190, 0.4);
+}
+:root[data-theme="light"],
+:root[data-theme="sepia"] {
+  --hl-yellow: rgba(255, 205, 0, 0.42);
+  --hl-green: rgba(60, 190, 100, 0.32);
+  --hl-blue: rgba(60, 140, 255, 0.28);
+  --hl-pink: rgba(255, 90, 170, 0.3);
+}
+::highlight(atlas-mark-yellow) { background-color: var(--hl-yellow); }
+::highlight(atlas-mark-green) { background-color: var(--hl-green); }
+::highlight(atlas-mark-blue) { background-color: var(--hl-blue); }
+::highlight(atlas-mark-pink) { background-color: var(--hl-pink); }
+::highlight(atlas-mark-noted) {
+  text-decoration: underline dotted;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+::highlight(atlas-mark-active) {
+  text-decoration: underline solid;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+/* marks in a PDF: boxes under the transparent text layer, so the words stay selectable */
+.pdf-marks {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.pdf-mark {
+  position: absolute;
+  background: var(--mark-fill);
+  mix-blend-mode: multiply;
+  border-radius: 2px;
+}
+
+.pdf-mark.noted {
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.45);
+}
+
+.pdf-mark.active {
+  outline: 2px solid var(--accent);
 }
 
 .rd-quote:disabled {

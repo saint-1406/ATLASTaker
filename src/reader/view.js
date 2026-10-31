@@ -10,6 +10,7 @@
 
 import { CLASSES, safeHref, TAGS } from './model.js';
 import { createPager } from './pager.js';
+import { MARK_COLORS } from '../marks.js';
 
 const BLOCKS = 'p, h1, h2, h3, h4, h5, h6, li, pre, figure, tr, dt, dd, hr';
 // a part's size in characters of text (a picture counts as a paragraph): a new chapter may start a
@@ -280,6 +281,112 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
     else host.scrollTop += target.getBoundingClientRect().top - host.getBoundingClientRect().top - 12;
   }
 
+  // ---------- marks: block number + character offsets, drawn with the CSS Custom Highlight API ----------
+  // Nothing is added to the text: the highlights are painted over it, so pages and positions stay as they were.
+
+  const blockIndex = new Map(blocks.map((b, i) => [b, i]));
+  /** The innermost block a node is in, or -1. */
+  function blockOf(node) {
+    for (let e = node?.nodeType === 1 ? node : node?.parentElement; e && e !== page; e = e.parentElement) {
+      const i = blockIndex.get(e);
+      if (i !== undefined) return i;
+    }
+    return -1;
+  }
+  function offsetIn(block, container, offset) {
+    const r = document.createRange();
+    r.setStart(block, 0);
+    r.setEnd(container, offset);
+    return r.toString().length;
+  }
+  /** The text node and offset `offset` characters into a block. */
+  function pointAt(block, offset) {
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    let left = offset;
+    let last = null;
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (left <= n.data.length) return [n, left];
+      left -= n.data.length;
+      last = n;
+    }
+    return last ? [last, last.data.length] : [block, block.childNodes.length];
+  }
+  function anchorOf(range) {
+    if (!range || range.collapsed || !page.contains(range.commonAncestorContainer)) return null;
+    let a = blockOf(range.startContainer);
+    let ao = a >= 0 ? offsetIn(blocks[a], range.startContainer, range.startOffset) : 0;
+    let b = blockOf(range.endContainer);
+    let bo = b >= 0 ? offsetIn(blocks[b], range.endContainer, range.endOffset) : 0;
+    // an end on the edge of a block (a triple click, a selection to the end of a chapter): the nearest whole block
+    if (a < 0) a = blocks.findIndex((bl) => range.intersectsNode(bl));
+    if (b < 0) {
+      b = blocks.findLastIndex((bl) => range.intersectsNode(bl));
+      if (b >= 0) bo = blocks[b].textContent.length;
+    }
+    if (a < 0 || b < 0 || b < a || (a === b && bo <= ao)) return null;
+    return { a, ao, b, bo };
+  }
+  function rangeOf(anchor) {
+    const start = blocks[anchor?.a];
+    const end = blocks[anchor?.b];
+    if (!start || !end) return null;
+    const r = document.createRange();
+    try {
+      r.setStart(...pointAt(start, anchor.ao));
+      r.setEnd(...pointAt(end, anchor.bo));
+    } catch {
+      return null;
+    }
+    return r.collapsed ? null : r;
+  }
+
+  let marks = [];
+  const markRanges = new Map(); // mark id → Range
+  const HIGHLIGHTS = [...MARK_COLORS, 'noted', 'active'].map((c) => `atlas-mark-${c}`);
+  function paintMarks(activeId = null) {
+    if (!window.CSS?.highlights || typeof Highlight !== 'function') return;
+    const groups = new Map();
+    const add = (name, r) => (groups.get(name) ?? groups.set(name, []).get(name)).push(r);
+    for (const m of marks) {
+      const r = markRanges.get(m.id);
+      if (!r) continue;
+      add(`atlas-mark-${m.color}`, r);
+      if (m.note) add('atlas-mark-noted', r);
+      if (m.id === activeId) add('atlas-mark-active', r);
+    }
+    for (const name of HIGHLIGHTS) {
+      if (groups.has(name)) CSS.highlights.set(name, new Highlight(...groups.get(name)));
+      else CSS.highlights.delete(name);
+    }
+  }
+  const hits = (r, x, y) => [...r.getClientRects()].some((b) => b.width > 0 && x >= b.left - 2 && x <= b.right + 2 && y >= b.top - 2 && y <= b.bottom + 2);
+
+  let focusMark = null; // a mark asked for while the book is still settling: settle() shows it, not the old place
+
+  /** Shows a mark: its page in page mode, the passage a third down the screen when scrolling. */
+  function goToMark(id) {
+    if (settling) focusMark = id;
+    return showMark(id);
+  }
+  function showMark(id) {
+    const m = marks.find((x) => x.id === id);
+    const r = markRanges.get(id);
+    if (!m || !r) return false;
+    if (pager) {
+      const p = partOf(blocks[m.anchor.a]);
+      if (p !== shown) {
+        showPart(p);
+        pager.relayout();
+      }
+      const box = r.getClientRects()[0] ?? r.getBoundingClientRect();
+      pager.go(pageAt(box.left + 1), { animate: !settling });
+    } else {
+      const box = r.getBoundingClientRect();
+      host.scrollTop += box.top - host.getBoundingClientRect().top - host.clientHeight / 3;
+    }
+    return true;
+  }
+
   const report = () => onPosition?.(current(), progress());
 
   function setMode(next, pos = current()) {
@@ -350,7 +457,7 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
       forget();
       pager.relayout();
     }
-    restore(position);
+    if (!(focusMark && showMark(focusMark))) restore(position);
     learn();
   };
   requestAnimationFrame(settle);
@@ -431,7 +538,28 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
       }
       return { heading: found?.textContent.replace(/\s+/g, ' ').trim() ?? '' };
     },
+    /** A selection as a place in the book, or null. */
+    anchorOf,
+    setMarks(list = [], activeId = null) {
+      marks = list;
+      markRanges.clear();
+      for (const m of list) {
+        const r = m.anchor && !m.anchor.rects ? rangeOf(m.anchor) : null;
+        if (r) markRanges.set(m.id, r);
+      }
+      paintMarks(activeId);
+    },
+    /** The mark under a point on screen (the newest, where they overlap), or null. */
+    markAt(x, y) {
+      for (let i = marks.length - 1; i >= 0; i--) {
+        const r = markRanges.get(marks[i].id);
+        if (r && hits(r, x, y)) return marks[i].id;
+      }
+      return null;
+    },
+    goToMark,
     close() {
+      for (const name of HIGHLIGHTS) window.CSS?.highlights?.delete(name);
       resized.disconnect();
       pager?.destroy();
       host.classList.remove('paged');
