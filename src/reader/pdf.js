@@ -7,6 +7,7 @@ import { AnnotationMode, getDocument, PDFWorker, TextLayer } from 'pdfjs-dist/le
 import workerSource from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs';
 import { createPager } from './pager.js';
 import { mergeRects } from '../marks.js';
+import { findIn, foldText, MAX_HITS, queryPattern, snippet } from './search.js';
 
 let worker = null;
 
@@ -358,6 +359,161 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
     return true;
   }
 
+  // ---------- finding words: every page's text, read a few pages at a time; matches as boxes like the marks ----------
+
+  const texts = new Map(); // page number → Promise of { text, folded, items: [{ start, end, str, transform, width, height }], viewport }
+  function pageText(n) {
+    if (!texts.has(n)) {
+      texts.set(
+        n,
+        (async () => {
+          const page = await doc.getPage(n);
+          const content = await page.getTextContent();
+          let text = '';
+          const items = [];
+          for (const item of content.items) {
+            if (typeof item.str !== 'string') continue;
+            const font = content.styles?.[item.fontName]?.fontFamily || 'sans-serif';
+            items.push({ start: text.length, end: text.length + item.str.length, str: item.str, transform: item.transform, width: item.width, height: item.height, font });
+            text += item.str;
+            if (item.hasEOL) text += '\n';
+          }
+          return { text, folded: foldText(text), items, viewport: page.getViewport({ scale: 1 }) };
+        })().catch(() => ({ text: '', folded: foldText(''), items: [], viewport: null })),
+      );
+    }
+    return texts.get(n);
+  }
+
+  // how far into a run of text a character starts, as a share of the run: measured in the font the
+  // text layer uses for it, as pdf.js stretches that to the run's width too
+  let measurer = null;
+  function shareAt(item, i) {
+    if (i <= 0) return 0;
+    if (i >= item.str.length) return 1;
+    measurer ??= document.createElement('canvas').getContext('2d');
+    measurer.font = `100px ${item.font}`;
+    const whole = measurer.measureText(item.str).width;
+    return whole > 0 ? measurer.measureText(item.str.slice(0, i)).width / whole : i / item.str.length;
+  }
+
+  /** Boxes [page, x, y, w, h] (fractions of the page) over characters [s, e) of a page's text. */
+  function boxesOf(n, { items, viewport }, s, e) {
+    const boxes = [];
+    if (!viewport) return boxes;
+    for (const item of items) {
+      if (item.end <= s || item.start >= e || !item.str.length) continue;
+      const [a, b, c, d, x, y] = item.transform;
+      const along = Math.hypot(a, b) || 1;
+      const up = Math.hypot(c, d) || 1;
+      const [ux, uy] = [a / along, b / along];
+      const [vx, vy] = [c / up, d / up];
+      const size = item.height || up;
+      const w = item.width || size * item.str.length * 0.5;
+      const i0 = shareAt(item, Math.max(s, item.start) - item.start);
+      const i1 = shareAt(item, Math.min(e, item.end) - item.start);
+      const xs = [];
+      const ys = [];
+      for (const t of [i0, i1]) {
+        for (const k of [-0.25, 0.95]) {
+          const [px, py] = viewport.convertToViewportPoint(x + ux * w * t + vx * size * k, y + uy * w * t + vy * size * k);
+          xs.push(px);
+          ys.push(py);
+        }
+      }
+      const left = Math.min(...xs);
+      const top = Math.min(...ys);
+      boxes.push([n, left / viewport.width, top / viewport.height, (Math.max(...xs) - left) / viewport.width, (Math.max(...ys) - top) / viewport.height]);
+    }
+    return mergeRects(boxes);
+  }
+
+  let findRun = 0; // a new search stops the one before
+  let foundBoxes = []; // match → its boxes (elements)
+  let foundAt = []; // match → [page, x, y, w, h] of its first box
+  let foundNow = -1;
+  const findLayers = new Map(); // page number → its layer of boxes
+  function clearFind() {
+    findRun++;
+    for (const layer of findLayers.values()) layer.remove();
+    findLayers.clear();
+    foundBoxes = [];
+    foundAt = [];
+    foundNow = -1;
+  }
+  function paintHit(rects) {
+    const elements = [];
+    for (const [n, x, y, w, h] of rects) {
+      let layer = findLayers.get(n);
+      if (!layer) {
+        layer = document.createElement('div');
+        layer.className = 'pdf-finds';
+        pages[n - 1].append(layer);
+        findLayers.set(n, layer);
+      }
+      const box = document.createElement('div');
+      box.className = 'pdf-found';
+      Object.assign(box.style, { left: `${x * 100}%`, top: `${y * 100}%`, width: `${w * 100}%`, height: `${h * 100}%` });
+      layer.append(box);
+      elements.push(box);
+    }
+    foundBoxes.push(elements);
+    foundAt.push(rects[0] ?? null);
+  }
+  /**
+   * Every match of a query, page after page: [{ before, text, after, place (page number), page }].
+   * onProgress({ done, total, hits }) tells how far it has got, with the matches so far; null when a
+   * newer search took over.
+   */
+  async function find(query, onProgress) {
+    clearFind();
+    const run = findRun;
+    const pattern = queryPattern(query);
+    const hits = [];
+    let anyText = false;
+    let lastReport = performance.now();
+    const AHEAD = 6;
+    for (let n = 1; n <= pages.length && pattern; n++) {
+      for (let k = n; k <= Math.min(pages.length, n + AHEAD); k++) pageText(k);
+      const content = await pageText(n);
+      if (run !== findRun) return null;
+      if (content.folded.text.trim()) anyText = true;
+      for (const [s, e] of findIn(content.folded, pattern, MAX_HITS - hits.length)) {
+        const [before, match, after] = snippet(content.text, s, e);
+        hits.push({ before, text: match, after, place: n, page: n });
+        paintHit(boxesOf(n, content, s, e));
+      }
+      if (hits.length >= MAX_HITS) break;
+      if (performance.now() - lastReport > 120) {
+        onProgress?.({ done: n, total: pages.length, hits });
+        // let the window breathe between portions
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (run !== findRun) return null;
+        lastReport = performance.now();
+      }
+    }
+    return { hits, noText: Boolean(pattern) && !anyText && hits.length === 0 };
+  }
+  function showFound(i) {
+    const at = foundAt[i];
+    if (!at) return false;
+    foundBoxes[foundNow]?.forEach((box) => box.classList.remove('now'));
+    foundNow = i;
+    foundBoxes[i].forEach((box) => box.classList.add('now'));
+    const index = at[0] - 1;
+    if (pager) pager.go(index, { animate: false });
+    else {
+      const f = pages[index].getBoundingClientRect();
+      const top = f.top + at[2] * f.height;
+      const view = host.getBoundingClientRect();
+      if (top < view.top + 40 || top + at[4] * f.height > view.bottom - 40) host.scrollTop += top - viewTop() - host.clientHeight / 3;
+      const left = f.left + at[1] * f.width;
+      if (left < view.left || left > view.right - 40) host.scrollLeft += left - view.left - host.clientWidth / 3;
+    }
+    report();
+    return true;
+  }
+
   let rezoom = 0;
   return {
     kind: 'pdf',
@@ -405,12 +561,16 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
       return found;
     },
     goToMark,
+    find,
+    showFound,
+    clearFind,
     goTo(pos) {
       restore(pos);
       report();
     },
     describe: (pos) => ({ page: pos?.page ?? current().page, snippet: '' }),
     close() {
+      clearFind();
       observer.disconnect();
       resized.disconnect();
       pager?.destroy();
