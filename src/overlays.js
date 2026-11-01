@@ -23,7 +23,7 @@ export function h(tag, attrs = {}, ...children) {
 let menu = null;
 
 export function isOverlayOpen() {
-  return Boolean(menu) || Boolean(layer()?.querySelector('.scrim'));
+  return Boolean(menu) || Boolean(layer()?.querySelector('.scrim, .side-scrim'));
 }
 
 export function closeMenu(restoreFocus = true) {
@@ -123,7 +123,7 @@ function trapTab(e, box) {
   }
 }
 
-function openDialog(build, { onClose, dismissable = true, className = '' } = {}) {
+export function openDialog(build,{ onClose, dismissable = true, className = '' } = {}) {
   const scrim = h('div', { class: 'scrim' });
   const box = h('div', { class: `modal ${className}`.trim(), role: 'dialog', 'aria-modal': 'true' });
   scrim.append(box);
@@ -389,128 +389,103 @@ export function commandPalette({ notes, commands, onPick, onCreate, initial = ''
 }
 
 /**
- * Ctrl+,: the look and the language of the app. Changes apply at once; getPrefs() and getData()
- * are read again after each one, so the dialog always shows what is on screen, in its language.
+ * The look and the language of the app, as the side menu's "Settings" section. Changes apply at
+ * once; getPrefs() and getData() are read again after each one, so it always shows what is on
+ * screen, in its language. `extra` adds rows of the caller's (reading appearance) after the size.
  */
-export function openSettings({ getPrefs, onChange, getData, getSync }) {
-  openDialog(
-    (box, close) => {
-      // the frame stays, its words and the body are redrawn: the body keeps its scroll position
-      const kicker = h('div', { class: 'modal-kicker' });
-      const title = h('h2', { class: 'modal-title' });
-      const body = h('div', { class: 'set-body' });
-      const hint = h('span', { class: 'modal-hint' });
-      const done = h('button', { type: 'button', class: 'btn primary', onclick: () => close(null), 'data-autofocus': true });
-      const choice = (key, value, node) => {
-        node.dataset.focusKey = `${key}:${value}`;
-        node.addEventListener('click', () => {
-          onChange({ [key]: value });
-          draw();
-        });
-        return node;
-      };
-      const group = (label, ...content) => h('section', { class: 'set-group' }, h('div', { class: 'set-label' }, label), ...content);
-      const radio = (checked, attrs = {}) => ({ type: 'button', class: 'seg-btn', role: 'radio', 'aria-checked': String(checked), ...attrs });
-
-      function draw() {
-        const prefs = getPrefs();
-        const data = getData?.();
-        const focused = document.activeElement?.dataset?.focusKey;
-        const languages = h(
-          'div',
-          { class: 'seg', role: 'radiogroup', 'aria-label': t('settings.language') },
-          LANGS.map((lang) => choice('lang', lang.id, h('button', radio(prefs.lang === lang.id, { lang: lang.id }), lang.title))),
-        );
-        const skins = h(
-          'div',
-          { class: 'set-skins', role: 'radiogroup', 'aria-label': t('settings.look') },
-          SKINS.map((skin) =>
-            choice(
-              'skin',
-              skin,
-              h(
-                'button',
-                { type: 'button', class: `set-skin set-skin-${skin}`, role: 'radio', 'aria-checked': String(prefs.skin === skin) },
-                h('span', { class: 'set-skin-art', 'aria-hidden': 'true' }),
-                h('span', { class: 'set-skin-title' }, t(`look.${skin}.title`)),
-                h('span', { class: 'set-skin-about' }, t(`look.${skin}.about`)),
-              ),
-            ),
-          ),
-        );
-        const themes = h(
-          'div',
-          { class: 'seg', role: 'radiogroup', 'aria-label': t('settings.theme') },
-          THEMES.map((theme) => choice('theme', theme, h('button', radio(prefs.theme === theme), t(`themes.${theme}`)))),
-        );
-        const atlas = prefs.skin === 'atlas';
-        const accents = h(
-          'div',
-          { class: 'set-swatches', role: 'radiogroup', 'aria-label': t('settings.accent') },
-          ACCENTS.map((accent) =>
-            choice(
-              'accent',
-              accent,
-              h(
-                'button',
-                {
-                  type: 'button',
-                  class: 'set-swatch',
-                  role: 'radio',
-                  'data-swatch': accent,
-                  title: t(`accents.${accent}`),
-                  'aria-label': t(`accents.${accent}`),
-                  'aria-checked': String(prefs.accent === accent),
-                  disabled: atlas || null,
-                },
-                h('span', { class: 'set-swatch-name' }, t(`accents.${accent}`)),
-              ),
-            ),
-          ),
-        );
-        const size = h(
-          'div',
-          { class: 'set-size' },
-          choice('fontScale', prefs.fontScale - 0.08, h('button', { type: 'button', class: 'seg-btn', 'aria-label': t('settings.smaller') }, '−')),
-          h('span', { class: 'set-size-value' }, `${Math.round(prefs.fontScale * 100)}%`),
-          choice('fontScale', prefs.fontScale + 0.08, h('button', { type: 'button', class: 'seg-btn', 'aria-label': t('settings.larger') }, '+')),
-          choice('fontScale', 1, h('button', { type: 'button', class: 'seg-btn seg-reset' }, t('settings.reset'))),
-        );
-        const storage = data
-          ? group(
-              t('settings.notes'),
-              h('div', { class: 'set-note' }, data.text),
-              h(
-                'div',
-                { class: 'set-actions' },
-                data.actions.map((action) =>
-                  h('button', { type: 'button', class: 'seg-btn', onclick: () => { close(null); action.run(); } }, action.text),
-                ),
-              ),
-            )
-          : null;
-        kicker.textContent = t('settings.kicker');
-        title.textContent = t('settings.title');
-        hint.textContent = t('settings.hint');
-        done.textContent = t('settings.done');
-        body.replaceChildren(
-          group(t('settings.language'), languages),
-          group(t('settings.look'), skins),
-          group(t('settings.theme'), themes, h('div', { class: 'set-note' }, t(atlas ? 'settings.atlasThemes' : 'settings.themeHint'))),
-          group(t('settings.accent'), accents, atlas ? h('div', { class: 'set-note' }, t('settings.atlasAccent')) : null),
-          group(t('settings.size'), size),
-          storage,
-          getSync?.() ?? null,
-        );
-        // keep keyboard focus on the control that was just used
-        if (focused) body.querySelector(`[data-focus-key="${CSS.escape(focused)}"]`)?.focus();
-      }
-
-      box.append(kicker, title, body, h('div', { class: 'modal-actions' }, hint, done));
+export function settingsSection({ getPrefs, onChange, getData, extra = () => [] }) {
+  const body = h('div', { class: 'set-body side-settings' });
+  const choice = (key, value, node) => {
+    node.dataset.focusKey = `${key}:${value}`;
+    node.addEventListener('click', () => {
+      onChange({ [key]: value });
       draw();
-    },
-    { className: 'modal-settings' },
-  );
+    });
+    return node;
+  };
+  const group = (label, ...content) => h('section', { class: 'set-group' }, h('div', { class: 'set-label' }, label), ...content);
+  const radio = (checked, attrs = {}) => ({ type: 'button', class: 'seg-btn', role: 'radio', 'aria-checked': String(checked), ...attrs });
+
+  function draw() {
+    const prefs = getPrefs();
+    const data = getData?.();
+    const focused = document.activeElement?.dataset?.focusKey;
+    const languages = h(
+      'div',
+      { class: 'seg', role: 'radiogroup', 'aria-label': t('settings.language') },
+      LANGS.map((lang) => choice('lang', lang.id, h('button', radio(prefs.lang === lang.id, { lang: lang.id }), lang.title))),
+    );
+    const skins = h(
+      'div',
+      { class: 'set-skins', role: 'radiogroup', 'aria-label': t('settings.look') },
+      SKINS.map((skin) =>
+        choice(
+          'skin',
+          skin,
+          h(
+            'button',
+            { type: 'button', class: `set-skin set-skin-${skin}`, role: 'radio', 'aria-checked': String(prefs.skin === skin) },
+            h('span', { class: 'set-skin-art', 'aria-hidden': 'true' }),
+            h('span', { class: 'set-skin-title' }, t(`look.${skin}.title`)),
+            h('span', { class: 'set-skin-about' }, t(`look.${skin}.about`)),
+          ),
+        ),
+      ),
+    );
+    const themes = h(
+      'div',
+      { class: 'seg', role: 'radiogroup', 'aria-label': t('settings.theme') },
+      THEMES.map((theme) => choice('theme', theme, h('button', radio(prefs.theme === theme), t(`themes.${theme}`)))),
+    );
+    const atlas = prefs.skin === 'atlas';
+    const accents = h(
+      'div',
+      { class: 'set-swatches', role: 'radiogroup', 'aria-label': t('settings.accent') },
+      ACCENTS.map((accent) =>
+        choice(
+          'accent',
+          accent,
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'set-swatch',
+              role: 'radio',
+              'data-swatch': accent,
+              title: t(`accents.${accent}`),
+              'aria-label': t(`accents.${accent}`),
+              'aria-checked': String(prefs.accent === accent),
+              disabled: atlas || null,
+            },
+            h('span', { class: 'set-swatch-name' }, t(`accents.${accent}`)),
+          ),
+        ),
+      ),
+    );
+    const size = h(
+      'div',
+      { class: 'set-size' },
+      choice('fontScale', prefs.fontScale - 0.08, h('button', { type: 'button', class: 'seg-btn', 'aria-label': t('settings.smaller') }, '−')),
+      h('span', { class: 'set-size-value' }, `${Math.round(prefs.fontScale * 100)}%`),
+      choice('fontScale', prefs.fontScale + 0.08, h('button', { type: 'button', class: 'seg-btn', 'aria-label': t('settings.larger') }, '+')),
+      choice('fontScale', 1, h('button', { type: 'button', class: 'seg-btn seg-reset' }, t('settings.reset'))),
+    );
+    const storage = data ? group(t('settings.notes'), h('div', { class: 'set-note' }, data.text)) : null;
+    body.replaceChildren(
+      group(t('settings.language'), languages),
+      group(t('settings.look'), skins),
+      group(t('settings.theme'), themes, h('div', { class: 'set-note' }, t(atlas ? 'settings.atlasThemes' : 'settings.themeHint'))),
+      group(t('settings.accent'), accents, atlas ? h('div', { class: 'set-note' }, t('settings.atlasAccent')) : null),
+      group(t('settings.size'), size),
+      ...extra(),
+      storage,
+    );
+    // keep keyboard focus on the control that was just used
+    if (focused) body.querySelector(`[data-focus-key="${CSS.escape(focused)}"]`)?.focus();
+  }
+
+  draw();
+  return body;
 }
 
 /** A picture from a note, as large as the window allows; a click or Esc closes it. */
