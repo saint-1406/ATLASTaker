@@ -475,7 +475,8 @@ textarea {
 .statusbar,
 .index,
 .sheet,
-.outline {
+.outline,
+.dictate {
   pointer-events: auto;
 }
 
