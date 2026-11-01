@@ -44,9 +44,10 @@ function loadReader() {
  * shown (skins.js: readMode, readTurn, readFont, readLeading), kept by the app; getTheme() /
  * onTheme(theme): the app's theme, which the reader's view panel can change too. onQuote(doc, text,
  * where) → { id, title } of the note the quote went to; onOpenNote(id) shows a note; onLink(url)
- * opens a web link; onClose() runs when the shelf goes away.
+ * opens a web link; onClose() runs when the shelf goes away. translator: translateCard.js, for the
+ * selection bar's "Translate".
  */
-export function createLibrary({ api, phone = false, getReading, onReading, getTheme, onTheme, onQuote, onOpenNote, onLink, onClose }) {
+export function createLibrary({ api, phone = false, getReading, onReading, getTheme, onTheme, onQuote, onOpenNote, onLink, onClose, translator = null }) {
   const lib = api.library;
   let docs = [];
   let reading = null; // { doc, controller, closed }
@@ -104,7 +105,16 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     h('span', { 'aria-hidden': 'true' }, '💬'),
     commentText,
   );
-  const selBar = h('div', { class: 'rd-selbar', hidden: true, role: 'toolbar' }, h('div', { class: 'rd-swatches' }, swatches), commentButton, quoteButton);
+  const translateText = h('span');
+  const translateButton = h('button', { type: 'button', class: 'rd-sel-btn', onclick: () => translateSelection() }, h('span', { 'aria-hidden': 'true' }, '🌐'), translateText);
+  const selBar = h(
+    'div',
+    { class: 'rd-selbar', hidden: true, role: 'toolbar' },
+    h('div', { class: 'rd-swatches' }, swatches),
+    commentButton,
+    translator ? translateButton : null,
+    quoteButton,
+  );
   // the card of one mark: its passage, its comment, its colour
   const markPanel = h('aside', { class: 'rd-markpanel', hidden: true });
   const tocHead = h('div', { class: 'rd-toc-head' });
@@ -160,6 +170,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     quoteButton.title = t('reader.quoteTitle');
     commentText.textContent = t('reader.marks.comment');
     commentButton.title = t('reader.marks.commentTitle');
+    translateText.textContent = t('translate.button');
+    translateButton.title = t('commands.translate');
     selBar.setAttribute('aria-label', t('reader.marks.bar'));
     for (const swatch of swatches) {
       swatch.title = t('reader.marks.highlight', t(`reader.marks.colors.${swatch.dataset.color}`));
@@ -664,6 +676,21 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     } finally {
       quoteButton.disabled = false;
     }
+  }
+
+  /** The selected passage in the translation card; "To note" sends the translation as a quote. */
+  function translateSelection() {
+    const range = selected;
+    if (!translator || !reading?.controller || !range || range.collapsed) return;
+    const { doc, controller } = reading;
+    const text = passage(controller, range.toString());
+    const where = whereText(controller.where(range.startContainer));
+    hideSelBar();
+    translator.open({
+      text,
+      rect: range.getBoundingClientRect(),
+      toNote: { title: t('translate.toNoteReader'), run: (translation) => sendQuote(doc, translation, where) },
+    });
   }
 
   // ---------- marks ----------

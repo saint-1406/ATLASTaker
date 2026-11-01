@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark light">
   <meta name="atlas-token" content="__ATLAS_TOKEN__">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src blob:; object-src 'none'; base-uri 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src blob:; object-src 'none'; base-uri 'none'">
   <title>ATLAS Notetaker</title>
   <link rel="icon" href="assets/icon.png">
   <link rel="stylesheet" href="dist/styles.css">
@@ -70,6 +70,7 @@
         <button class="dictate" id="btn-dictate" type="button" title="Диктовка (Ctrl+Shift+D)" aria-label="Диктовка" aria-pressed="false" data-i18n-title="chrome.dictateKey" data-i18n-label="chrome.dictate" hidden>
           <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="1.75" width="5" height="8.5" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
         </button>
+        <button class="translate-sel" id="btn-translate" type="button" title="Перевести выделенное (русский ↔ английский)" data-i18n-title="commands.translate" hidden>🌐 <span data-i18n="translate.button">Перевести</span></button>
       </main>
       <aside class="outline" id="outline" aria-label="Содержание заметки" data-i18n-label="chrome.outline">
         <div class="outline-label"></div>

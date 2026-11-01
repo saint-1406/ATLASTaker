@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { createStore } from './store.js';
 import { createBackups } from './backups.js';
 import { createLibrary, MAX_DOC } from './library.js';
+import { createTranslateFiles, TRANSLATE_TYPES } from './translate.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
@@ -52,7 +53,7 @@ const MIME = {
 };
 const CSP = [
   "default-src 'self'",
-  "script-src 'self'",
+  "script-src 'self' 'wasm-unsafe-eval'", // the translator's models run on WebAssembly (src/translateModel.js)
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self'",
   "img-src 'self' data: blob:",
@@ -131,6 +132,7 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
   const store = createStore(notesDir);
   const backups = createBackups(dataDir, { version: VERSION, build: BUILD });
   const library = createLibrary(dataDir);
+  const translateFiles = createTranslateFiles(dataDir);
   // before the page can change anything: the notes as the previous version left them
   await backups.atStart().catch((err) => console.error('Резервная копия не сделана:', err.message));
   const dailyTimer = setInterval(() => backups.daily().catch((err) => console.error('Резервная копия не сделана:', err.message)), 60 * 60 * 1000);
@@ -169,6 +171,16 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
         throw new HttpError(404, 'not found');
       }
       send(res, 200, data, MIME[path.extname(file)], { 'Cache-Control': 'private, max-age=31536000, immutable' });
+      return;
+    }
+    // the translator's models and runtime, once downloaded (server/translate.js); never fetched from here
+    if (rel.startsWith('/translate-files/')) {
+      const file = translateFiles.fileFor(rel.slice('/translate-files/'.length));
+      const stat = file ? await fsp.stat(file).catch(() => null) : null;
+      if (!stat?.isFile()) throw new HttpError(404, 'not found');
+      res.writeHead(200, baseHeaders({ 'Content-Type': TRANSLATE_TYPES[path.extname(file)] ?? 'application/octet-stream', 'Content-Length': stat.size, 'Cache-Control': 'no-cache' }));
+      if (req.method === 'HEAD') return void res.end();
+      await pipeline(fs.createReadStream(file), res);
       return;
     }
     let file = fixedAssets[rel];
@@ -261,6 +273,12 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
         return send(res, 204);
       }
       throw new HttpError(405, 'method not allowed');
+    }
+    // the translator's files: which are missing, and fetching one (once the person agreed in the page)
+    if (route === 'translate/status' && req.method === 'POST') return send(res, 200, await translateFiles.status((await readJson(req)).paths));
+    if (route === 'translate/download' && req.method === 'POST') {
+      await translateFiles.download(String((await readJson(req)).path ?? ''), res);
+      return;
     }
     if (route === 'drafts' && req.method === 'POST') {
       // unsaved text the page found at start and the user did not put back
