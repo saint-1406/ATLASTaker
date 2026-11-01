@@ -247,6 +247,7 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
         return send(res, 201, await library.add(await readBody(req, MAX_DOC), meta));
       }
       if (id && !action && req.method === 'PATCH') return send(res, 200, library.update(id, await readJson(req)));
+      if (id && action === 'file' && req.method === 'PUT') return send(res, 200, await library.replace(id, await readBody(req, MAX_DOC)));
       if (id && action === 'file' && req.method === 'GET') {
         const file = library.file(id);
         const stat = await fsp.stat(file).catch(() => null);

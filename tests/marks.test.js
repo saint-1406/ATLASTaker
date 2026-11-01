@@ -64,3 +64,20 @@ test('a bookmark is a kept place with a name', async () => {
   assert.ok(validBookmarks([b]));
   assert.ok(!validBookmarks([b, b]));
 });
+
+test('after a PDF\'s pages change, marks and bookmarks follow their pages', async () => {
+  const { remapPdf, turnBox } = await import('../src/marks.js');
+  // a quarter turn clockwise: the top-left corner goes to the top-right
+  assert.deepEqual(turnBox([0.1, 0.2, 0.3, 0.05], 90).map((v) => Math.round(v * 1000) / 1000), [0.75, 0.1, 0.05, 0.3]);
+  assert.deepEqual(turnBox(turnBox([0.1, 0.2, 0.3, 0.05], 90), 270).map((v) => Math.round(v * 1000) / 1000), [0.1, 0.2, 0.3, 0.05]);
+  assert.deepEqual(turnBox([0.1, 0.2, 0.3, 0.05], 180).map((v) => Math.round(v * 1000) / 1000), [0.6, 0.75, 0.3, 0.05]);
+  const m = (page, id) => ({ id, color: 'yellow', note: '', text: 'x', where: `p. ${page}`, anchor: { rects: [[page, 0.1, 0.2, 0.3, 0.05]] }, created: 1 });
+  const marks = [m(1, 'm-aaaa'), m(2, 'm-bbbb'), m(3, 'm-cccc')];
+  const bookmarks = [{ id: 'b-aaaa', position: { page: 3, frac: 0.5 }, progress: 1, label: 'Page 3', created: 1 }];
+  // page 3 first, page 1 turned, page 2 gone, a page from another file at the end
+  const plan = [{ src: 0, page: 3, turn: 0 }, { src: 0, page: 1, turn: 90 }, { src: 1, page: 1, turn: 0 }];
+  const out = remapPdf({ marks, bookmarks }, plan);
+  assert.deepEqual(out.marks.map((x) => [x.id, x.anchor.rects[0][0], x.where]), [['m-aaaa', 2, 'p. 2'], ['m-cccc', 1, 'p. 1']]);
+  assert.deepEqual(out.marks[0].anchor.rects[0].slice(1), [0.75, 0.1, 0.05, 0.3]);
+  assert.deepEqual(out.bookmarks.map((b) => [b.position.page, b.label, b.progress]), [[1, 'Page 1', 0]]);
+});

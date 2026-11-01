@@ -116,3 +116,50 @@ export function validBookmark(b) {
 export function validBookmarks(list) {
   return Array.isArray(list) && list.length <= MAX_BOOKMARKS && list.every(validBookmark) && new Set(list.map((b) => b.id)).size === list.length;
 }
+
+// ---------- after a PDF's pages were edited ----------
+
+/** A box [x, y, w, h] (fractions of the page) on a page turned clockwise by `turn` degrees. */
+export function turnBox([x, y, w, h], turn) {
+  switch (((turn % 360) + 360) % 360) {
+    case 90:
+      return [1 - y - h, x, h, w];
+    case 180:
+      return [1 - x - w, 1 - y - h, w, h];
+    case 270:
+      return [y, 1 - x - w, h, w];
+    default:
+      return [x, y, w, h];
+  }
+}
+
+/**
+ * plan: the new pages in order, [{ src, page (1-based in its source), turn }]; source 0 is the document
+ * itself. Marks and bookmarks on its pages follow them; those on removed pages go.
+ */
+export function remapPdf({ marks = [], bookmarks = [] }, plan) {
+  const moved = new Map(); // old page → { page, turn }
+  plan.forEach((p, i) => {
+    if (p.src === 0 && !moved.has(p.page)) moved.set(p.page, { page: i + 1, turn: p.turn || 0 });
+  });
+  const round = (v) => Math.round(v * 10000) / 10000;
+  const outMarks = [];
+  for (const mark of marks) {
+    if (!mark.anchor?.rects) continue;
+    const rects = mark.anchor.rects
+      .filter(([page]) => moved.has(page))
+      .map(([page, ...box]) => {
+        const to = moved.get(page);
+        return [to.page, ...turnBox(box, to.turn).map(round)];
+      });
+    if (rects.length) outMarks.push({ ...mark, anchor: { rects }, where: mark.where && /\d/.test(mark.where) ? mark.where.replace(/\d+/, String(rects[0][0])) : mark.where });
+  }
+  const outBookmarks = [];
+  const count = Math.max(1, plan.length);
+  for (const b of bookmarks) {
+    const to = moved.get(b.position?.page);
+    if (!to) continue;
+    outBookmarks.push({ ...b, position: { ...b.position, page: to.page, frac: to.turn ? 0 : b.position.frac }, progress: count > 1 ? (to.page - 1) / (count - 1) : 0, label: b.label.replace(/\d+/, String(to.page)) });
+  }
+  return { marks: outMarks, bookmarks: outBookmarks };
+}

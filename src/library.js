@@ -6,7 +6,8 @@
 import { h, toast, confirmDialog, showMenu, isOverlayOpen } from './overlays.js';
 import { count, t } from './i18n.js';
 import { LEADINGS, READ_FONTS, READ_MODES, THEMES, TURNS } from './skins.js';
-import { MARK_COLORS, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, newBookmarkId, newMarkId, sortMarks } from './marks.js';
+import { MARK_COLORS, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, newBookmarkId, newMarkId, remapPdf, sortMarks } from './marks.js';
+import { openPageEditor } from './pageEditor.js';
 
 /** A link from a note back to a place in a document: atlas:<document>#<mark>. */
 export const DOC_LINK_RE = /^atlas:(d-[a-z0-9]{6,40})(?:#(m-[a-z0-9]{4,40}))?$/;
@@ -83,6 +84,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   const readerBack = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => closeReader() }, '←');
   const viewButton = h('button', { type: 'button', class: 'tb-btn icon rd-size', onclick: () => toggleView() }, 'Aa');
   const tocButton = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => toggleToc() }, '☰');
+  const moreButton = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => openMore() }, '⋯');
   const marksButton = h('button', { type: 'button', class: 'tb-btn icon rd-marks-btn', onclick: () => toggleMarks() }, '✎', h('span', { class: 'rd-marks-count' }));
   const prevButton = h('button', { type: 'button', class: 'rd-nav rd-nav-prev', onclick: () => reading?.controller?.prev() }, '‹');
   const nextButton = h('button', { type: 'button', class: 'rd-nav rd-nav-next', onclick: () => reading?.controller?.next() }, '›');
@@ -112,7 +114,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   const reader = h(
     'section',
     { class: 'reader', hidden: true },
-    h('header', { class: 'rd-head' }, readerBack, h('div', { class: 'rd-titles' }, title, subtitle), percent, viewButton, marksButton, tocButton),
+    h('header', { class: 'rd-head' }, readerBack, h('div', { class: 'rd-titles' }, title, subtitle), percent, viewButton, marksButton, tocButton, moreButton),
     scroll,
     status,
     line,
@@ -139,6 +141,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
       [viewButton, 'reader.viewTitle'],
       [tocButton, 'reader.toc'],
       [marksButton, 'reader.marks.list'],
+      [moreButton, 'reader.more'],
       [prevButton, 'reader.prevPage'],
       [nextButton, 'reader.nextPage'],
     ]) {
@@ -820,6 +823,92 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     markPanel.hidden = false;
     reading.controller?.setMarks?.(marksOf(reading.doc), id);
     if (focus) note.focus({ preventScroll: true });
+  }
+
+  // ---------- the file: download it, and a PDF's pages and marks ----------
+
+  const MIME = { pdf: 'application/pdf', epub: 'application/epub+zip', fb2: 'application/xml', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', md: 'text/markdown', txt: 'text/plain', html: 'text/html' };
+
+  function openMore() {
+    if (!reading?.controller) return;
+    const { doc } = reading;
+    const r = moreButton.getBoundingClientRect();
+    const items = [];
+    if (doc.format === 'pdf') {
+      items.push(
+        { icon: '▦', text: t('pages.edit'), run: editPages },
+        { icon: '⤓', text: t('pages.exportMarked'), disabled: !marksOf(doc).length, title: marksOf(doc).length ? undefined : t('pages.noMarks'), run: exportMarked },
+        '-',
+      );
+    }
+    items.push({ icon: '⤓', text: t('library.download'), run: downloadFile });
+    showMenu(Math.max(8, r.right - 260), r.bottom + 4, items);
+  }
+
+  const baseOf = (doc) => doc.name.replace(/\.[^.]+$/, '') || 'document';
+
+  async function downloadFile() {
+    const doc = reading?.doc;
+    if (!doc) return;
+    try {
+      api.download(doc.name, await lib.bytes(doc.id), MIME[doc.format] ?? 'application/octet-stream');
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+
+  async function exportMarked() {
+    const doc = reading?.doc;
+    if (!doc) return;
+    flush();
+    toast(t('pages.exporting'));
+    try {
+      const code = await loadReader();
+      const out = await code.pdfWithMarks(await lib.bytes(doc.id), marksOf(doc));
+      api.download(`${baseOf(doc)} ${t('pages.markedSuffix')}.pdf`, out, 'application/pdf');
+    } catch (err) {
+      console.error(err);
+      toast(err.encrypted ? t('pages.encrypted') : t('pages.failed', err.message));
+    }
+  }
+
+  async function editPages() {
+    const session = reading;
+    if (!session?.controller || session.doc.format !== 'pdf') return;
+    const { doc } = session;
+    flush();
+    let code;
+    let bytes;
+    try {
+      code = await loadReader();
+      bytes = await lib.bytes(doc.id);
+    } catch (err) {
+      toast(err.message);
+      return;
+    }
+    const saved = await openPageEditor({
+      code,
+      bytes,
+      title: nameOf(doc),
+      async onSave(out, plan) {
+        const kept = remapPdf({ marks: marksOf(doc), bookmarks: bookmarksOf(doc) }, plan);
+        const at = plan.findIndex((p) => p.src === 0 && p.page === doc.position?.page) + 1 || 1;
+        await lib.replace(doc.id, out);
+        const info = await code.inspect(doc.name, out).catch(() => null);
+        const patch = {
+          marks: kept.marks,
+          bookmarks: kept.bookmarks,
+          position: { page: at, frac: 0 },
+          progress: plan.length > 1 ? (at - 1) / (plan.length - 1) : 0,
+          ...(info?.cover ? { cover: info.cover } : {}),
+        };
+        Object.assign(doc, patch, { size: out.length });
+        await lib.update(doc.id, patch);
+      },
+    });
+    if (!saved) return;
+    toast(t('pages.saved'));
+    if (reading === session) await read(doc.id);
   }
 
   // ---------- the list of marks ----------

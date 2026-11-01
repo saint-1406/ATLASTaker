@@ -20,12 +20,12 @@ function sharedWorker() {
   return worker;
 }
 
-function loadPdf(bytes) {
+export function loadPdf(bytes) {
   // pdf.js takes the buffer over: hand it a copy
   return getDocument({ data: bytes.slice(), worker: sharedWorker(), useSystemFonts: true, enableXfa: false, stopAtErrors: false }).promise;
 }
 
-const closeDoc = (doc) => doc.loadingTask.destroy().catch(() => {});
+export const closeDoc = (doc) => doc.loadingTask.destroy().catch(() => {});
 
 // "Microsoft Word - report.docx", "untitled" and the like are not titles
 const NOT_A_TITLE = /^(microsoft (word|powerpoint|excel) - |untitled|document\d*$|slide \d+$)|\.(docx?|pptx?|xlsx?|pdf|tex|indd)$/i;
@@ -139,7 +139,8 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
       canvas.height = Math.floor(viewport.height);
       entry.canvas = canvas;
       frame.append(canvas);
-      entry.task = page.render({ canvasContext: canvas.getContext('2d'), viewport, annotationMode: AnnotationMode.DISABLE });
+      // highlights, notes and drawings other PDF programs left in the file are drawn with the page
+      entry.task = page.render({ canvasContext: canvas.getContext('2d'), viewport, annotationMode: AnnotationMode.ENABLE });
       await entry.task.promise;
       if (entry.cancelled) return;
       const text = document.createElement('div');

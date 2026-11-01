@@ -106,6 +106,14 @@ function serverApi() {
         const res = await fetchOk(`/api/library/${enc(id)}/file`, { headers: { 'X-Atlas-Token': token }, cache: 'no-store' });
         return new Uint8Array(await res.arrayBuffer());
       },
+      async replace(id, bytes) {
+        const res = await fetchOk(`/api/library/${enc(id)}/file`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/octet-stream', 'X-Atlas-Token': token },
+          body: bytes,
+        });
+        return res.json();
+      },
       remove: (id) => call('POST', `library/${enc(id)}/trash`),
     },
     // The window is closing. keepalive lets a request outlive the page but caps its body at 64 KB
@@ -204,6 +212,17 @@ function browserApi() {
         const blob = await request((await store('docFiles')).get(id));
         if (!blob) throw Object.assign(new Error(`no document ${id}`), { status: 404 });
         return new Uint8Array(await blob.arrayBuffer());
+      },
+      async replace(id, bytes) {
+        const t = (await opened).transaction(['docs', 'docFiles'], 'readwrite');
+        const docs = t.objectStore('docs');
+        const doc = await request(docs.get(id));
+        if (!doc) throw Object.assign(new Error(`no document ${id}`), { status: 404 });
+        doc.size = bytes.length;
+        t.objectStore('docFiles').put(new Blob([bytes]), id);
+        docs.put(doc);
+        await finished(t);
+        return doc;
       },
       async remove(id) {
         const t = (await opened).transaction(['docs', 'docFiles'], 'readwrite');

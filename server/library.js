@@ -132,6 +132,22 @@ export function createLibrary(dataDir) {
       return doc;
     },
 
+    /** A new version of a document's file (an edited PDF); the old one waits in .trash. */
+    async replace(id, bytes) {
+      const doc = get(id);
+      if (!bytes?.length) throw httpError(400, 'пустой файл');
+      if (bytes.length > MAX_DOC) throw httpError(413, 'файл слишком большой');
+      try {
+        await fsp.copyFile(fileOf(doc), path.join(trashDir, `${doc.id}-${Date.now()}.${doc.format}`));
+      } catch (err) {
+        if (err.code !== 'ENOENT') throw err;
+      }
+      await atomicWrite(fileOf(doc), bytes);
+      doc.size = bytes.length;
+      save();
+      return doc;
+    },
+
     async remove(id) {
       const doc = get(id);
       try {
