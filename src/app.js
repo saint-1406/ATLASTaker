@@ -10,7 +10,7 @@ import { createDictation } from './dictation.js';
 import { createTranslator } from './translateCard.js';
 import { analyze, imageRefs } from './markdown.js';
 import { commentTarget, commentsUnder, formatStamp } from './comments.js';
-import { normalizeLook, normalizeReading, PALETTES, toneOf } from './skins.js';
+import { DEFAULT_LOOK, LOOK_VERSION, normalizeLook, normalizeReading, PALETTES, toneOf } from './skins.js';
 import { browserLanguages, count, formatDay, formatTime, isLang, pickLang, setLang, t, ui } from './i18n.js';
 import { Outline } from './outline.js';
 import { hashString } from './terrain.js';
@@ -40,7 +40,7 @@ import welcomeAndroidText from './welcome-android.md';
 import welcomeTextEn from './welcome-en.md';
 import welcomeBrowserTextEn from './welcome-browser-en.md';
 import welcomeAndroidTextEn from './welcome-android-en.md';
-import { avatarNode, drawHome, shrinkPicture } from './home.js';
+import { addReading, avatarNode, createTabBar, dayKey, drawHome, GOALS, shrinkPicture, streakOf } from './home.js';
 
 const $ = (sel) => document.querySelector(sel);
 const WELCOME = {
@@ -92,6 +92,9 @@ let sync = null; // Google Drive sync (sync/client.js), where this build has it
 let sideMenu = null; // the menu sliding in from the right (sidemenu.js)
 const profile = { avatar: null, name: '' }; // the picture and the name the person gave (Account)
 const homeEl = h('section', { class: 'home', hidden: true }); // the main page (home.js)
+const readingLog = { days: {}, goal: 20 }; // minutes read per day, and the day's goal (home.js)
+let readingClock = 0;
+const tabBar = createTabBar((tab) => pickTab(tab)); // the tabs at the foot of the main page and the library
 let readingTimer = 0;
 
 let markReady;
@@ -135,6 +138,13 @@ async function boot() {
   if (typeof saved.fontScale === 'number') prefs.fontScale = saved.fontScale;
   if (typeof saved.avatar === 'string') profile.avatar = saved.avatar;
   if (typeof saved.profileName === 'string') profile.name = saved.profileName;
+  if (saved.readDays && typeof saved.readDays === 'object') readingLog.days = saved.readDays;
+  if (Number.isInteger(saved.readGoal)) readingLog.goal = saved.readGoal;
+  // 0.13 brought the cosy look: every install is moved to it once (the theme can be changed back in Settings)
+  if ((saved.lookVersion ?? 0) < LOOK_VERSION) {
+    Object.assign(prefs, DEFAULT_LOOK);
+    api.setState({ ...DEFAULT_LOOK, lookVersion: LOOK_VERSION }).catch(() => {});
+  }
   Object.assign(prefs, normalizeReading(saved));
   // the language is settled once and stored, so it no longer follows the browser's afterwards
   const lang = pickLang({ saved: saved.lang, existing: Boolean(saved.welcomed), preferred: browserLanguages() });
@@ -206,7 +216,8 @@ async function boot() {
       onQuote: quoteToNote,
       onOpenNote: (id) => openNote(id),
       onLink: (url) => api.openExternal(url),
-      onClose: () => editor.view.focus(),
+      // the main page stays under the library: back there (its progress drawn again), or back to the note
+      onClose: () => (homeEl.hidden ? editor.view.focus() : showHome()),
     });
   }
   sideMenu = createSideMenu({ sections: menuSections(), onClose: () => editor.view.focus({ preventScroll: true }) });
@@ -222,7 +233,9 @@ async function boot() {
   setInterval(tickPace, 10_000);
   markReady();
   // the app opens on the main page, where the person picks where to go
-  document.body.append(homeEl);
+  document.body.append(homeEl, tabBar.node);
+  new MutationObserver(updateTabs).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+  readingClock = setInterval(countReading, 30_000);
   showAvatar();
   await showHome();
   if (android) receiveIncoming();
@@ -1297,7 +1310,7 @@ function showAppearance({ pdf = false } = {}) {
 }
 
 function toggleTheme() {
-  setLook({ theme: effectiveTheme() === 'dark' ? 'light' : 'dark' });
+  setLook({ theme: effectiveTheme() === 'dark' ? (prefs.skin === 'cozy' ? 'cream' : 'light') : 'dark' });
 }
 
 function applySidebar(show, { persist = true } = {}) {
@@ -1459,6 +1472,14 @@ async function showHome() {
     profile,
     notes: list,
     shelf,
+    reading: { today: readingLog.days[dayKey()] ?? 0, goal: readingLog.goal, streak: streakOf(readingLog.days) },
+    onGoal: (anchor) => {
+      const r = anchor.getBoundingClientRect();
+      showMenu(r.left + 12, r.bottom - 8, [
+        { header: t('home.goalPick') },
+        ...GOALS.map((m) => ({ icon: m === readingLog.goal ? '✓' : '', text: t('home.goalWhat', m), run: () => setGoal(m) })),
+      ]);
+    },
     onMenu: () => sideMenu?.open('account'),
     onNote: (id) => {
       hideHome();
@@ -1466,16 +1487,18 @@ async function showHome() {
       else editor.view.focus();
     },
     onNewNote: leave(() => createNote()),
-    onLibrary: leave(() => (library ? openLibrary() : toast(t('home.noLibrary')))),
+    // the library and the reader open over the main page, which is there again when they close
+    onLibrary: () => (library ? openLibrary() : toast(t('home.noLibrary'))),
     onBook: (id) => {
-      hideHome();
       flushSave();
       library?.readDoc(id);
     },
-    onAddBook: leave(() => (library ? openLibrary({ pick: true }) : toast(t('home.noLibrary')))),
+    onAddBook: () => (library ? openLibrary({ pick: true }) : toast(t('home.noLibrary'))),
+    onShelf: (name) => library?.open({ shelf: name }),
   });
   homeEl.hidden = false;
   document.body.classList.add('at-home');
+  updateTabs();
   homeEl.querySelector('.home-book, .home-tile')?.focus({ preventScroll: true });
 }
 
@@ -1483,6 +1506,44 @@ function hideHome() {
   if (homeEl.hidden) return;
   homeEl.hidden = true;
   document.body.classList.remove('at-home');
+  updateTabs();
+}
+
+/** The tab bar shows on the main page and the library's shelf, with the place it is at marked. */
+function updateTabs() {
+  const libraryOpen = document.documentElement.classList.contains('library-open');
+  tabBar.node.hidden = homeEl.hidden && !libraryOpen;
+  document.body.classList.toggle('has-tabbar', !tabBar.node.hidden);
+  tabBar.select(libraryOpen ? 'library' : 'home');
+}
+
+function pickTab(tab) {
+  if (tab === 'profile') {
+    sideMenu?.open('account');
+    return;
+  }
+  if (tab === 'library') {
+    openLibrary();
+    return;
+  }
+  if (tab === 'notes') hideHome();
+  // the library closes onto the main page or the note, whichever is under it
+  if (library?.isOpen()) library.close();
+  if (tab === 'home') showHome();
+  else editor.view.focus();
+}
+
+/** Every half minute with a book open on screen: half a minute more read today. */
+function countReading() {
+  if (!library?.openDocId() || document.visibilityState !== 'visible') return;
+  readingLog.days = addReading(readingLog.days, 0.5);
+  api.setState({ readDays: readingLog.days }).catch(() => {});
+}
+
+function setGoal(minutes) {
+  readingLog.goal = minutes;
+  api.setState({ readGoal: minutes }).catch(() => {});
+  showHome();
 }
 
 /** The menu button in the header is the person's avatar. */

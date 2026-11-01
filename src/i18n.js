@@ -24,6 +24,7 @@ const ru = {
     line: { one: 'строка', few: 'строки', many: 'строк', other: 'строки' },
     metre: { one: 'м', few: 'м', many: 'м', other: 'м' },
     doc: { one: 'документ', few: 'документа', many: 'документов', other: 'документа' },
+    book: { one: 'книга', few: 'книги', many: 'книг', other: 'книги' },
   },
   // Each look has its own words for the same things: on a map, "saved" reads «Нанесено на карту».
   look: {
@@ -75,6 +76,7 @@ const ru = {
     },
   },
   themes: {
+    cream: 'Кремовая',
     dark: 'Тёмная',
     light: 'Светлая',
     sepia: 'Сепия',
@@ -139,6 +141,20 @@ const ru = {
     addBookSub: 'PDF, EPUB, FB2, DOCX…',
     recent: 'Недавние заметки',
     noLibrary: 'В этой версии нет библиотеки',
+    tagline: 'Заметки и книги в одном месте',
+    streak: (n) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'день' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 'дня' : 'дней'} подряд`,
+    streakTitle: 'Сколько дней подряд вы читаете',
+    goal: 'Цель на сегодня',
+    goalWhat: (m) => `Читать ${m} минут`,
+    goalCount: (done, goal) => `${done} / ${goal} мин`,
+    goalChange: 'Изменить цель',
+    goalPick: 'Сколько читать в день',
+    newBooks: 'Недавно добавленные',
+    seeAll: 'Все',
+    new: 'Новая',
+    sections: 'Разделы',
+    noNotes: 'Заметок пока нет',
+    tabs: { home: 'Главная', library: 'Библиотека', notes: 'Заметки', profile: 'Профиль' },
   },
   profile: {
     name: 'Имя',
@@ -455,6 +471,26 @@ const ru = {
     progress: (percent) => `${percent}%`,
     finished: 'прочитано',
     loadFailed: 'Читалка не загрузилась',
+    myBooks: 'Мои книги',
+    // the sections a new library starts with: a few genres, and one for papers (statements, certificates)
+    defaultShelves: ['Художественная', 'Фэнтези', 'Хоррор', 'Классика', 'Учёба', 'Документы'],
+    all: 'Все',
+    unsorted: 'Без раздела',
+    shelfEmpty: (name) => `В разделе «${name}» пока пусто. Добавьте книгу — она ляжет сюда, — или перенесите сюда книгу из меню книги.`,
+    newShelf: 'Новый раздел',
+    renameShelf: 'Переименовать раздел',
+    removeShelf: 'Удалить раздел',
+    removeShelfTitle: (name) => `Удалить раздел «${name}»?`,
+    removeShelfText: (books) => `${books} останутся в библиотеке, без раздела.`,
+    shelfTaken: 'Такой раздел уже есть',
+    moveToShelf: 'Переместить в раздел…',
+    moveTo: 'Переместить в раздел',
+    noShelf: 'Без раздела',
+    moved: (title, name) => `«${title}» → ${name}`,
+    unshelved: (title) => `«${title}» теперь без раздела`,
+    markRead: 'Отметить как прочитанную',
+    markUnread: 'Отметить как непрочитанную',
+    save: 'Сохранить',
   },
   dictation: {
     listening: 'Слушаю… Ещё раз на микрофон или Esc — стоп',
@@ -654,6 +690,7 @@ const en = {
     line: { one: 'line', other: 'lines' },
     metre: { one: 'm', other: 'm' },
     doc: { one: 'document', other: 'documents' },
+    book: { one: 'book', other: 'books' },
   },
   look: {
     minimal: {
@@ -704,6 +741,7 @@ const en = {
     },
   },
   themes: {
+    cream: 'Cream',
     dark: 'Dark',
     light: 'Light',
     sepia: 'Sepia',
@@ -767,6 +805,20 @@ const en = {
     addBookSub: 'PDF, EPUB, FB2, DOCX…',
     recent: 'Recent notes',
     noLibrary: 'This version has no library',
+    tagline: 'Notes and books in one place',
+    streak: (n) => `${n} day streak`,
+    streakTitle: 'Days in a row with some reading',
+    goal: "Today's goal",
+    goalWhat: (m) => `Read for ${m} minutes`,
+    goalCount: (done, goal) => `${done} / ${goal} min`,
+    goalChange: 'Change the goal',
+    goalPick: 'How long to read a day',
+    newBooks: 'Recently added',
+    seeAll: 'See all',
+    new: 'New',
+    sections: 'Sections',
+    noNotes: 'No notes yet',
+    tabs: { home: 'Home', library: 'Library', notes: 'Notes', profile: 'Profile' },
   },
   profile: {
     name: 'Name',
@@ -1081,6 +1133,25 @@ const en = {
     progress: (percent) => `${percent}%`,
     finished: 'finished',
     loadFailed: 'The reader did not load',
+    myBooks: 'My books',
+    defaultShelves: ['Fiction', 'Fantasy', 'Horror', 'Classics', 'Study', 'Documents'],
+    all: 'All',
+    unsorted: 'No section',
+    shelfEmpty: (name) => `“${name}” is empty for now. Add a book while it is open, or move one here from a book's menu.`,
+    newShelf: 'New section',
+    renameShelf: 'Rename section',
+    removeShelf: 'Remove section',
+    removeShelfTitle: (name) => `Remove the section “${name}”?`,
+    removeShelfText: (books) => `${books} stay in the library, in no section.`,
+    shelfTaken: 'There is such a section already',
+    moveToShelf: 'Move to section…',
+    moveTo: 'Move to section',
+    noShelf: 'No section',
+    moved: (title, name) => `“${title}” → ${name}`,
+    unshelved: (title) => `“${title}” is in no section now`,
+    markRead: 'Mark as read',
+    markUnread: 'Mark as unread',
+    save: 'Save',
   },
   dictation: {
     listening: 'Listening… Tap the microphone again or press Esc to stop',
@@ -1265,6 +1336,10 @@ const en = {
     noNote: (id) => `no note ${id}`,
   },
 };
+
+// the cosy look speaks as the minimal one does, under its own name
+ru.look.cozy = { ...ru.look.minimal, title: 'Уют', about: 'Тёплая бумага, заголовки с засечками, мягкие карточки' };
+en.look.cozy = { ...en.look.minimal, title: 'Cosy', about: 'Warm paper, serif titles, soft cards' };
 
 export const STRINGS = { ru, en };
 

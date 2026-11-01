@@ -1,5 +1,6 @@
-// The main page: what the app opens on. A greeting, the book read last, the notes, and the way to the
-// library, so the person picks where to go. The avatar (top right) opens the menu, as in the notes.
+// The main page: what the app opens on. A greeting, the book read last with a play button, today's
+// reading goal, the newest books, the library's sections and the latest notes; the person picks where
+// to go. The avatar (top right) opens the menu, as in the notes; the tab bar sits at the bottom.
 
 import { h } from './overlays.js';
 import { count, currentLocale, t } from './i18n.js';
@@ -25,36 +26,88 @@ export async function shrinkPicture(file, size = 160) {
   return canvas.toDataURL('image/jpeg', 0.85);
 }
 
+// ---------- reading days: minutes read per day, for the goal and the streak ----------
+
+/** "YYYY-MM-DD" of a moment, in local time. */
+export const dayKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+/** Adds minutes to a day; keeps the last `keep` days only. */
+export function addReading(days, minutes, date = new Date(), keep = 45) {
+  const out = { ...(days ?? {}) };
+  const key = dayKey(date);
+  out[key] = Math.round(((out[key] ?? 0) + minutes) * 100) / 100;
+  const cutoff = new Date(date);
+  cutoff.setDate(cutoff.getDate() - keep);
+  for (const k of Object.keys(out)) if (k < dayKey(cutoff)) delete out[k];
+  return out;
+}
+
+/** Days in a row with some reading, up to today (or yesterday, while today has none yet). */
+export function streakOf(days, date = new Date()) {
+  const has = (d) => (days?.[dayKey(d)] ?? 0) >= 1;
+  const day = new Date(date);
+  if (!has(day)) day.setDate(day.getDate() - 1);
+  let n = 0;
+  while (has(day) && n < 400) {
+    n++;
+    day.setDate(day.getDate() - 1);
+  }
+  return n;
+}
+
+export const GOALS = [10, 15, 20, 30, 45, 60];
+
 function greeting(name) {
   const hour = new Date().getHours();
   const part = hour < 5 ? 'night' : hour < 12 ? 'morning' : hour < 18 ? 'day' : 'evening';
   return name?.trim() ? t(`home.hello.${part}Name`, name.trim()) : t(`home.hello.${part}`);
 }
 
+// a quiet drawing for the corner of the page: an open book, a leaf, a few sparks (the theme's colours)
+const ART = `<svg viewBox="0 0 200 150" aria-hidden="true">
+  <path d="M30 118c18-9 44-11 68-3V58c-24-8-50-6-68 3z" fill="var(--home-art-page)" stroke="var(--home-art-line)" stroke-width="2.4" stroke-linejoin="round"/>
+  <path d="M166 118c-18-9-44-11-68-3V58c24-8 50-6 68 3z" fill="var(--home-art-page)" stroke="var(--home-art-line)" stroke-width="2.4" stroke-linejoin="round"/>
+  <path d="M44 72c14-4 30-4 44 0M44 84c14-4 30-4 44 0M44 96c14-4 30-4 44 0M110 72c14-4 30-4 44 0M110 84c14-4 30-4 44 0" stroke="var(--home-art-line)" stroke-width="1.6" stroke-linecap="round" opacity=".45"/>
+  <path d="M150 50c4-18 18-30 34-32-2 17-14 30-34 32z" fill="var(--home-art-leaf)" opacity=".8"/>
+  <path d="M150 50c8-10 18-18 30-26" stroke="var(--home-art-line)" stroke-width="1.4" stroke-linecap="round" opacity=".5"/>
+  <path d="M60 30l2.6 6.4L69 39l-6.4 2.6L60 48l-2.6-6.4L51 39l6.4-2.6z" fill="var(--home-art-spark)"/>
+  <path d="M120 20l1.6 3.9 3.9 1.6-3.9 1.6L120 31l-1.6-3.9-3.9-1.6 3.9-1.6z" fill="var(--home-art-spark)" opacity=".8"/>
+  <path d="M182 92l1.4 3.3 3.3 1.4-3.3 1.4-1.4 3.3-1.4-3.3-3.3-1.4 3.3-1.4z" fill="var(--home-art-spark)" opacity=".7"/>
+</svg>`;
+
+const pct = (v) => `${Math.round(Math.min(1, Math.max(0, v || 0)) * 100)}%`;
+
 /**
- * ctx: { profile: { avatar, name }, notes: [{ id, title, updated }] newest first, shelf: { count, last },
- * onMenu(), onNote(id), onNewNote(), onLibrary(), onBook(id), onAddBook() }
+ * ctx: { profile: { avatar, name }, notes: [{ id, title, updated }] newest first,
+ * shelf: { count, last, shelves: [{ name, count }], recent: [book] } | null,
+ * reading: { today (minutes), goal (minutes), streak (days) },
+ * onMenu(), onNote(id), onNewNote(), onLibrary(), onBook(id), onAddBook(), onShelf(name), onGoal(anchor) }
  */
 export function drawHome(root, ctx) {
-  const { profile, notes, shelf } = ctx;
-  const today = new Intl.DateTimeFormat(currentLocale(), { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
+  const { profile, notes, shelf, reading } = ctx;
   const last = shelf?.last;
-  const pct = (v) => `${Math.round(Math.min(1, Math.max(0, v || 0)) * 100)}%`;
 
   const book = last
     ? h(
-        'button',
-        { type: 'button', class: 'home-card home-book', onclick: () => ctx.onBook(last.id) },
-        last.cover ? h('img', { class: 'home-cover', src: last.cover, alt: '' }) : h('span', { class: 'home-cover home-cover-blank' }, last.format.toUpperCase()),
+        'div',
+        { class: 'home-card home-book' },
         h(
-          'span',
-          { class: 'home-card-text' },
-          h('span', { class: 'home-kicker' }, t('home.continue')),
-          h('span', { class: 'home-card-title' }, last.name),
-          last.author ? h('span', { class: 'home-card-sub' }, last.author) : null,
-          h('span', { class: 'home-progress', 'aria-hidden': 'true' }, h('i', { style: `width: ${pct(last.progress)}` })),
-          h('span', { class: 'home-card-sub' }, t('home.read', pct(last.progress))),
+          'button',
+          { type: 'button', class: 'home-book-open', onclick: () => ctx.onBook(last.id), 'aria-label': `${t('home.continue')}: ${last.name}` },
+          last.cover ? h('img', { class: 'home-cover', src: last.cover, alt: '' }) : h('span', { class: 'home-cover home-cover-blank' }, last.format.toUpperCase()),
+          h(
+            'span',
+            { class: 'home-card-text' },
+            h('span', { class: 'home-kicker' }, t('home.continue')),
+            h('span', { class: 'home-card-title' }, last.name),
+            last.author ? h('span', { class: 'home-card-sub' }, last.author) : null,
+            h('span', { class: 'home-progress-row' }, h('span', { class: 'home-progress', 'aria-hidden': 'true' }, h('i', { style: `width: ${pct(last.progress)}` })), h('span', { class: 'home-pct' }, pct(last.progress))),
+          ),
         ),
+        reading.streak
+          ? h('span', { class: 'home-streak', title: t('home.streakTitle') }, h('b', { 'aria-hidden': 'true' }, '🔥'), h('span', {}, t('home.streak', reading.streak)))
+          : null,
+        h('button', { type: 'button', class: 'home-play', title: t('home.continue'), 'aria-label': t('home.continue'), onclick: () => ctx.onBook(last.id) }, h('span', { 'aria-hidden': 'true' }, '▶')),
       )
     : h(
         'button',
@@ -63,37 +116,93 @@ export function drawHome(root, ctx) {
         h('span', { class: 'home-card-text' }, h('span', { class: 'home-kicker' }, t('home.library')), h('span', { class: 'home-card-title' }, t('home.addFirst'))),
       );
 
-  const tile = (glyph, title, sub, run, cls = '') =>
-    h('button', { type: 'button', class: `home-tile ${cls}`.trim(), onclick: run }, h('span', { class: 'home-tile-ico', 'aria-hidden': 'true' }, glyph), h('span', { class: 'home-tile-title' }, title), sub ? h('span', { class: 'home-tile-sub' }, sub) : null);
+  const done = Math.min(reading.today, reading.goal);
+  const goal = h(
+    'button',
+    { type: 'button', class: 'home-card home-goal', title: t('home.goalChange'), onclick: (e) => ctx.onGoal(e.currentTarget) },
+    h(
+      'span',
+      { class: 'home-goal-text' },
+      h('span', { class: 'home-goal-head' }, h('span', { class: 'home-goal-ico', 'aria-hidden': 'true' }, '◎'), t('home.goal')),
+      h('span', { class: 'home-goal-what' }, t('home.goalWhat', reading.goal)),
+      h(
+        'span',
+        { class: 'home-progress-row' },
+        h('span', { class: 'home-progress warm', 'aria-hidden': 'true' }, h('i', { style: `width: ${pct(done / reading.goal)}` })),
+        h('span', { class: 'home-goal-count' }, t('home.goalCount', Math.floor(reading.today), reading.goal)),
+      ),
+    ),
+    h('span', { class: 'home-goal-art', 'aria-hidden': 'true' }, reading.today >= reading.goal ? '🏆' : '☕'),
+  );
 
-  const recent = notes.slice(0, 5).map((n) =>
+  const recentBooks = (shelf?.recent ?? []).slice(0, 10);
+  const books = recentBooks.length
+    ? h(
+        'section',
+        { class: 'home-section' },
+        h('div', { class: 'home-section-head' }, h('h2', {}, t('home.newBooks')), h('button', { type: 'button', class: 'home-see-all', onclick: () => ctx.onLibrary() }, t('home.seeAll'), ' ›')),
+        h(
+          'div',
+          { class: 'home-books' },
+          recentBooks.map((b) =>
+            h(
+              'button',
+              { type: 'button', class: 'home-mini', onclick: () => ctx.onBook(b.id) },
+              b.cover ? h('img', { class: 'home-mini-cover', src: b.cover, alt: '' }) : h('span', { class: 'home-mini-cover home-cover-blank' }, b.format.toUpperCase()),
+              !b.progress && !b.finished ? h('span', { class: 'home-new' }, t('home.new')) : null,
+              h('span', { class: 'home-mini-title' }, b.name),
+              b.author ? h('span', { class: 'home-mini-sub' }, b.author) : null,
+            ),
+          ),
+        ),
+      )
+    : null;
+
+  const sections = shelf?.shelves?.length
+    ? h(
+        'section',
+        { class: 'home-section' },
+        h('div', { class: 'home-section-head' }, h('h2', {}, t('home.sections'))),
+        h(
+          'div',
+          { class: 'home-cats' },
+          shelf.shelves.map((s) => h('button', { type: 'button', class: 'home-cat', onclick: () => ctx.onShelf(s.name) }, h('span', { class: 'home-cat-name' }, s.name), h('span', { class: 'home-cat-count' }, String(s.count)))),
+        ),
+      )
+    : null;
+
+  const recentNotes = notes.slice(0, 4).map((n) =>
     h('li', {}, h('button', { type: 'button', class: 'home-note', onclick: () => ctx.onNote(n.id) }, h('span', { class: 'home-note-title' }, n.title), h('span', { class: 'home-note-when' }, when(n.updated)))),
+  );
+  const notesBlock = h(
+    'section',
+    { class: 'home-section' },
+    h(
+      'div',
+      { class: 'home-section-head' },
+      h('h2', {}, t('home.notes'), h('span', { class: 'home-count' }, count(notes.length, 'note'))),
+      h('button', { type: 'button', class: 'home-see-all', onclick: () => ctx.onNewNote() }, '＋ ', t('home.newNote')),
+    ),
+    recentNotes.length ? h('ol', { class: 'home-notes' }, recentNotes) : h('p', { class: 'home-empty' }, t('home.noNotes')),
   );
 
   root.replaceChildren(
     h(
-      'div',
-      { class: 'home-top' },
-      h('button', { type: 'button', class: 'home-avatar', title: t('chrome.menuKey'), 'aria-label': t('chrome.menu'), onclick: () => ctx.onMenu() }, avatarNode(profile, 36)),
-    ),
-    h(
-      'div',
-      { class: 'home-body' },
-      h('p', { class: 'home-date' }, today),
-      h('h1', { class: 'home-hello' }, greeting(profile.name)),
-      h('p', { class: 'home-ask' }, t('home.ask')),
-      book,
+      'header',
+      { class: 'home-hero' },
+      h('span', { class: 'home-art', 'aria-hidden': 'true' }),
       h(
         'div',
-        { class: 'home-tiles' },
-        tile('✎', t('home.notes'), count(notes.length, 'note'), () => ctx.onNote(notes[0]?.id ?? null)),
-        tile('＋', t('home.newNote'), t('home.newNoteSub'), () => ctx.onNewNote(), 'accent'),
-        tile('▥', t('home.library'), shelf ? count(shelf.count, 'doc') : '', () => ctx.onLibrary()),
-        tile('⇡', t('home.addBook'), t('home.addBookSub'), () => ctx.onAddBook()),
+        { class: 'home-top' },
+        h('button', { type: 'button', class: 'home-avatar', title: t('chrome.menuKey'), 'aria-label': t('chrome.menu'), onclick: () => ctx.onMenu() }, avatarNode(profile, 40)),
       ),
-      recent.length ? h('section', { class: 'home-recent' }, h('h2', {}, t('home.recent')), h('ol', {}, recent)) : null,
+      h('p', { class: 'home-hello' }, greeting(profile.name), h('span', { class: 'home-spark', 'aria-hidden': 'true' }, ' ✦')),
+      h('h1', { class: 'home-brand' }, 'ATLAS'),
+      h('p', { class: 'home-tagline' }, t('home.tagline')),
     ),
+    h('div', { class: 'home-body' }, book, goal, books, sections, notesBlock),
   );
+  root.querySelector('.home-art').innerHTML = ART; // fixed markup from this file
 }
 
 function when(time) {
@@ -101,4 +210,37 @@ function when(time) {
   const date = new Date(time);
   const sameDay = date.toDateString() === new Date().toDateString();
   return new Intl.DateTimeFormat(currentLocale(), sameDay ? { hour: '2-digit', minute: '2-digit' } : { day: 'numeric', month: 'short' }).format(date);
+}
+
+// ---------- the tab bar at the foot of the main page and the library ----------
+
+const TAB_ICONS = {
+  home: '<path d="M2.5 7.2 8 2.7l5.5 4.5V13a.8.8 0 0 1-.8.8H9.8V10H6.2v3.8H3.3a.8.8 0 0 1-.8-.8Z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/>',
+  library: '<path d="M2 3.4c2-.6 4-.5 6 .5v9.6c-2-1-4-1.1-6-.5ZM14 3.4c-2-.6-4-.5-6 .5v9.6c2-1 4-1.1 6-.5Z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/>',
+  notes: '<path d="M4 1.8h5.5L12.5 5v9.2H4Z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M9.3 1.9V5h3M6 8h4.5M6 10.5h3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>',
+  profile: '<circle cx="8" cy="5.4" r="2.7" fill="none" stroke="currentColor" stroke-width="1.25"/><path d="M2.8 14c.6-2.9 2.7-4.3 5.2-4.3s4.6 1.4 5.2 4.3" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/>',
+};
+export const TABS = ['home', 'library', 'notes', 'profile'];
+
+/** onPick(tab); returns { node, select(tab) }. */
+export function createTabBar(onPick) {
+  const buttons = TABS.map((tab) => {
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.setAttribute('viewBox', '0 0 16 16');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML = TAB_ICONS[tab]; // fixed markup from this file
+    const label = h('span', { class: 'tabbar-label' });
+    const button = h('button', { type: 'button', class: 'tabbar-btn', 'data-tab': tab, onclick: () => onPick(tab) }, icon, label);
+    return button;
+  });
+  const node = h('nav', { class: 'tabbar', hidden: true }, buttons);
+  return {
+    node,
+    select(tab) {
+      for (const b of buttons) {
+        b.lastChild.textContent = t(`home.tabs.${b.dataset.tab}`);
+        b.setAttribute('aria-current', b.dataset.tab === tab ? 'page' : 'false');
+      }
+    },
+  };
 }

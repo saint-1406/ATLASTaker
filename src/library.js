@@ -3,8 +3,9 @@
 // remembers the place and sends a selected passage, as a quote, to the document's own note.
 // The reader's code (dist/reader.js, with pdf.js) is loaded the first time it is needed.
 
-import { h, toast, confirmDialog, showMenu, isOverlayOpen } from './overlays.js';
+import { h, toast, confirmDialog, showMenu, isOverlayOpen, openDialog } from './overlays.js';
 import { count, t } from './i18n.js';
+import { addShelf, groupShelves, isShelf, renameShelf, shelfList } from './shelves.js';
 import { shownTheme } from './skins.js';
 import { drawQuickPanel, paintTheme, setDim } from './readLook.js';
 import { MARK_COLORS, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, MAX_TEXT_LENGTH, MAX_TEXTS, newBookmarkId, newEditId, newMarkId, newTextId, remapPdf, remapTexts, sortMarks, sortTexts, TEXT_COLORS, TEXT_SIZES } from './marks.js';
@@ -62,6 +63,12 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   // ---------- the shelf ----------
 
   const grid = h('ol', { class: 'lib-grid' });
+  // sections: a row of chips (All, each section, +), the sections as pockets of covers under All
+  const chips = h('div', { class: 'lib-chips', role: 'tablist' });
+  const pockets = h('div', { class: 'lib-pockets' });
+  const looseHead = h('h3', { class: 'lib-section-head', hidden: true });
+  let shelves = []; // the saved order of sections (shelves.js)
+  let activeShelf = null; // null: all; otherwise the section shown
   const emptyNote = h('p', { class: 'lib-empty', hidden: true });
   const filter = h('input', { class: 'field lib-filter', type: 'search', spellcheck: 'false' });
   const heading = h('span', { class: 'lib-heading-text' });
@@ -74,7 +81,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     'section',
     { class: 'library', hidden: true },
     h('header', { class: 'lib-head' }, shelfBack, h('h2', { class: 'lib-heading' }, heading, counter), filter, addButton),
-    h('div', { class: 'lib-body' }, grid, emptyNote),
+    h('div', { class: 'lib-body' }, chips, pockets, looseHead, grid, emptyNote),
     dropHint,
   );
 
@@ -267,7 +274,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   document.body.append(shelf, reader);
 
   function localize() {
-    heading.textContent = t('library.title');
+    heading.textContent = t('library.myBooks');
     filter.placeholder = t('library.find');
     filter.setAttribute('aria-label', t('library.find'));
     addLabel.textContent = t('library.add');
@@ -308,7 +315,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
 
   function card(doc) {
     const pct = Math.round((doc.progress || 0) * 100);
-    const state = !doc.opened ? t('library.notOpened') : pct >= 99 ? t('library.finished') : t('library.progress', pct);
+    const state = doc.finished || pct >= 99 ? t('library.finished') : !doc.opened ? t('library.notOpened') : t('library.progress', pct);
     const more = h('button', { type: 'button', class: 'lib-more', title: t('library.actions'), 'aria-label': t('library.actions') }, '⋯');
     const cover = doc.cover
       ? h('img', { class: 'lib-cover-img', src: doc.cover, alt: '' })
@@ -327,6 +334,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     const menu = (x, y) =>
       showMenu(x, y, [
         { icon: '↗', text: t('library.read'), run: () => read(doc.id) },
+        { icon: doc.finished ? '○' : '✓', text: t(doc.finished ? 'library.markUnread' : 'library.markRead'), run: () => toggleFinished(doc) },
+        { icon: '▤', text: t('library.moveToShelf'), run: () => moveMenu(doc, x, y) },
         '-',
         { icon: '✕', text: t('library.remove'), kbd: 'Del', className: 'danger', run: () => remove(doc.id) },
       ]);
@@ -353,12 +362,246 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
 
   function render() {
     const q = filter.value.trim().toLowerCase();
-    const sorted = [...docs].sort((a, b) => (b.opened || b.added) - (a.opened || a.added));
-    const shown = q ? sorted.filter((d) => `${d.title} ${d.author} ${d.name}`.toLowerCase().includes(q)) : sorted;
-    grid.replaceChildren(...shown.map(card));
+    const list = shelfList(shelves, docs);
+    if (activeShelf !== null && !list.includes(activeShelf)) activeShelf = null;
+    drawChips(list);
     counter.textContent = docs.length ? String(docs.length) : '';
-    emptyNote.textContent = t(phone ? 'library.emptyPhone' : 'library.empty');
-    emptyNote.hidden = docs.length > 0;
+    pockets.replaceChildren();
+    looseHead.hidden = true;
+    emptyNote.hidden = true;
+    const newest = (a, b) => (b.opened || b.added) - (a.opened || a.added);
+    if (q) {
+      // a search looks through every section
+      grid.replaceChildren(...[...docs].sort(newest).filter((d) => `${d.title} ${d.author} ${d.name} ${d.shelf ?? ''}`.toLowerCase().includes(q)).map(card));
+    } else if (activeShelf === null) {
+      const { groups, unsorted } = groupShelves(list, docs);
+      const full = groups.filter((g) => g.docs.length);
+      pockets.replaceChildren(...full.map(pocket));
+      grid.replaceChildren(...unsorted.map(card));
+      looseHead.textContent = t('library.unsorted');
+      looseHead.hidden = !full.length || !unsorted.length;
+    } else {
+      const inShelf = docs.filter((d) => isShelf(d, activeShelf)).sort(newest);
+      grid.replaceChildren(...inShelf.map(card));
+      if (!inShelf.length && docs.length) {
+        emptyNote.textContent = t('library.shelfEmpty', activeShelf);
+        emptyNote.hidden = false;
+      }
+    }
+    if (!docs.length) {
+      emptyNote.textContent = t(phone ? 'library.emptyPhone' : 'library.empty');
+      emptyNote.hidden = false;
+    }
+  }
+
+  // ---------- sections ----------
+
+  async function loadShelves() {
+    try {
+      const state = (await api.getState?.()) ?? {};
+      if (Array.isArray(state.shelves)) shelves = state.shelves;
+      else {
+        // a first look at the library: a few genres and one for papers, to sort into or rename
+        shelves = [...t('library.defaultShelves')];
+        saveShelves();
+      }
+    } catch {
+      shelves = [];
+    }
+  }
+
+  function saveShelves() {
+    api.setState?.({ shelves })?.catch?.((err) => toast(err.message));
+  }
+
+  function drawChips(list) {
+    const chip = (label, name) =>
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'lib-chip',
+          role: 'tab',
+          'aria-selected': String(activeShelf === name),
+          onclick: () => {
+            activeShelf = name;
+            filter.value = '';
+            render();
+          },
+        },
+        label,
+      );
+    chips.replaceChildren(
+      chip(t('library.all'), null),
+      ...list.map((name) => {
+        const node = chip(name, name);
+        // a long press (or right click) on a section: rename it, remove it
+        node.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          shelfMenu(name, e.clientX, e.clientY);
+        });
+        return node;
+      }),
+      h('button', { type: 'button', class: 'lib-chip add', title: t('library.newShelf'), 'aria-label': t('library.newShelf'), onclick: () => newShelf() }, '＋'),
+    );
+  }
+
+  /** A section under All: its first covers fanned in a pocket, its name and how many books. */
+  function pocket(group) {
+    const covers = group.docs.slice(0, 3).map((doc, i) =>
+      h('span', { class: `lib-pocket-cover c${i}` }, doc.cover ? h('img', { src: doc.cover, alt: '' }) : h('span', { class: 'lib-pocket-blank' }, nameOf(doc))),
+    );
+    const node = h(
+      'button',
+      {
+        type: 'button',
+        class: 'lib-pocket',
+        onclick: () => {
+          activeShelf = group.name;
+          render();
+        },
+      },
+      h('span', { class: 'lib-pocket-stack', 'aria-hidden': 'true' }, ...covers.reverse(), h('span', { class: 'lib-pocket-glass' })),
+      h('span', { class: 'lib-pocket-label' }, h('b', {}, group.name), h('span', {}, ` · ${count(group.docs.length, 'book')}`)),
+    );
+    node.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      shelfMenu(group.name, e.clientX, e.clientY);
+    });
+    return node;
+  }
+
+  /** A name for a section, asked in a small dialog; null when cancelled. */
+  function askName({ title, value = '' }) {
+    return new Promise((resolve) => {
+      openDialog(
+        (box, close) => {
+          const input = h('input', { class: 'field', type: 'text', maxlength: '60', 'data-autofocus': true, 'aria-label': title });
+          input.value = value;
+          const done = () => close(input.value);
+          input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              done();
+            }
+          });
+          box.append(
+            h('div', { class: 'modal-kicker' }, t('library.title')),
+            h('h2', { class: 'modal-title' }, title),
+            input,
+            h(
+              'div',
+              { class: 'modal-actions' },
+              h('button', { type: 'button', class: 'btn', onclick: () => close(null) }, t('dialog.cancel')),
+              h('button', { type: 'button', class: 'btn primary', onclick: done }, t('library.save')),
+            ),
+          );
+        },
+        { onClose: (v) => resolve(typeof v === 'string' ? v : null) },
+      );
+    });
+  }
+
+  async function newShelf() {
+    const name = await askName({ title: t('library.newShelf') });
+    if (name === null) return null;
+    const next = addShelf(shelfList(shelves, docs), name);
+    if (!next) {
+      if (name.trim()) toast(t('library.shelfTaken'));
+      return null;
+    }
+    shelves = next;
+    saveShelves();
+    activeShelf = next[next.length - 1];
+    render();
+    return activeShelf;
+  }
+
+  function shelfMenu(name, x, y) {
+    showMenu(x, y, [
+      { header: name },
+      {
+        icon: '✎',
+        text: t('library.renameShelf'),
+        run: async () => {
+          const to = await askName({ title: t('library.renameShelf'), value: name });
+          if (to === null) return;
+          const before = shelfList(shelves, docs);
+          const next = renameShelf(before, name, to);
+          if (!next) {
+            toast(t('library.shelfTaken'));
+            return;
+          }
+          const renamed = next[before.indexOf(name)];
+          shelves = next;
+          saveShelves();
+          for (const doc of docs.filter((d) => isShelf(d, name))) await setShelf(doc, renamed, { quiet: true });
+          if (activeShelf === name) activeShelf = renamed;
+          render();
+        },
+      },
+      {
+        icon: '✕',
+        text: t('library.removeShelf'),
+        className: 'danger',
+        run: async () => {
+          const inside = docs.filter((d) => isShelf(d, name));
+          const ok = await confirmDialog({
+            kicker: t('library.title'),
+            title: t('library.removeShelfTitle', name),
+            text: inside.length ? t('library.removeShelfText', count(inside.length, 'book')) : '',
+            ok: t('library.removeOk'),
+            danger: true,
+          });
+          if (!ok) return;
+          shelves = shelfList(shelves, docs).filter((n) => n !== name);
+          saveShelves();
+          for (const doc of inside) await setShelf(doc, '', { quiet: true });
+          if (activeShelf === name) activeShelf = null;
+          render();
+        },
+      },
+    ]);
+  }
+
+  async function setShelf(doc, name, { quiet = false } = {}) {
+    doc.shelf = name;
+    try {
+      await lib.update(doc.id, { shelf: name });
+    } catch (err) {
+      toast(err.message);
+    }
+    if (quiet) return;
+    render();
+    toast(name ? t('library.moved', nameOf(doc), name) : t('library.unshelved', nameOf(doc)));
+  }
+
+  function moveMenu(doc, x, y) {
+    const list = shelfList(shelves, docs);
+    showMenu(x, y, [
+      { header: t('library.moveTo') },
+      ...list.map((name) => ({ icon: isShelf(doc, name) ? '✓' : '', text: name, run: () => setShelf(doc, name) })),
+      { icon: doc.shelf ? '' : '✓', text: t('library.noShelf'), run: () => setShelf(doc, '') },
+      '-',
+      {
+        icon: '＋',
+        text: t('library.newShelf'),
+        run: async () => {
+          const name = await newShelf();
+          if (name) await setShelf(doc, name);
+        },
+      },
+    ]);
+  }
+
+  async function toggleFinished(doc) {
+    doc.finished = !doc.finished;
+    try {
+      await lib.update(doc.id, { finished: doc.finished });
+    } catch (err) {
+      toast(err.message);
+    }
+    render();
   }
 
   async function refresh() {
@@ -376,10 +619,12 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     document.getElementById('app')?.toggleAttribute('inert', on);
   }
 
-  async function open() {
+  async function open({ shelf: section } = {}) {
     localize();
     cover(true);
     await refresh();
+    await loadShelves();
+    if (section !== undefined) activeShelf = section;
     render();
     (grid.querySelector('.lib-card') ?? addButton).focus({ preventScroll: true });
   }
@@ -428,7 +673,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       try {
         const info = await code.inspect(file.name, new Uint8Array(await file.arrayBuffer()));
         let doc = await lib.add(file, { name: file.name, format: info.format });
-        doc = await lib.update(doc.id, { title: info.title || '', author: info.author || '', cover: info.cover ?? null });
+        // a book added while a section is open goes into it
+        doc = await lib.update(doc.id, { title: info.title || '', author: info.author || '', cover: info.cover ?? null, ...(activeShelf && !shelf.hidden ? { shelf: activeShelf } : {}) });
         docs.push(doc);
         out.push(doc);
         added++;
@@ -1817,7 +2063,16 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     async shelfSummary() {
       await refresh();
       const last = docs.filter((d) => d.opened).sort((a, b) => b.opened - a.opened)[0];
-      return { count: docs.length, last: last ? { id: last.id, name: nameOf(last), author: last.author || '', progress: last.progress || 0, format: last.format, cover: last.cover || null } : null };
+      await loadShelves();
+      const brief = (d) => ({ id: d.id, name: nameOf(d), author: d.author || '', progress: d.progress || 0, format: d.format, cover: d.cover || null, finished: Boolean(d.finished) });
+      const { groups } = groupShelves(shelfList(shelves, docs), docs);
+      return {
+        count: docs.length,
+        last: last ? brief(last) : null,
+        // the main page: the sections with books in them, and the newest books for its row of covers
+        shelves: groups.filter((g) => g.docs.length).map((g) => ({ name: g.name, count: g.docs.length })),
+        recent: [...docs].sort((a, b) => (b.added || 0) - (a.added || 0)).slice(0, 12).map(brief),
+      };
     },
     async readDoc(id) {
       await open();

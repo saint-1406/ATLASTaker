@@ -13,8 +13,8 @@ export const ASSET_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif
 const META_FILE = 'atlas.json';
 const RETRYABLE = new Set(['EPERM', 'EBUSY', 'EACCES']);
 const STATE_RULES = {
-  skin: (v) => v === 'minimal' || v === 'atlas',
-  theme: (v) => ['dark', 'light', 'sepia', 'dusk', 'night', 'contrast', 'system'].includes(v),
+  skin: (v) => v === 'cozy' || v === 'minimal' || v === 'atlas',
+  theme: (v) => ['cream', 'dark', 'light', 'sepia', 'dusk', 'night', 'contrast', 'system'].includes(v),
   accent: (v) => ['lime', 'cyan', 'orange', 'violet'].includes(v),
   lang: (v) => v === 'ru' || v === 'en',
   sidebar: (v) => typeof v === 'boolean',
@@ -32,6 +32,13 @@ const STATE_RULES = {
   // the person's picture (a small square JPEG, src/home.js shrinkPicture) and name
   avatar: (v) => v === null || (typeof v === 'string' && v.length <= 200_000 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/.test(v)),
   profileName: (v) => typeof v === 'string' && v.length <= 60,
+  // the library's sections, in order (src/shelves.js); books name theirs on their cards
+  shelves: (v) => Array.isArray(v) && v.length <= 60 && v.every((s) => typeof s === 'string' && s.length > 0 && s.length <= 60),
+  // the look the app has been moved to once (0.13: the cosy design)
+  lookVersion: (v) => Number.isInteger(v) && v >= 0 && v < 100,
+  // minutes read per day, for the main page's goal: { 'YYYY-MM-DD': minutes }, a few weeks kept
+  readDays: (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length <= 60 && Object.values(v).every((m) => Number.isFinite(m) && m >= 0 && m < 1440),
+  readGoal: (v) => Number.isInteger(v) && v >= 5 && v <= 600,
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

@@ -79,7 +79,7 @@ export function planNotes(local, remote, base) {
 // ---------- library cards ----------
 
 /** Card fields that travel, in groups that change together. `opened` is the newest of both. */
-export const CARD_GROUPS = [['name'], ['format'], ['added'], ['title'], ['author'], ['cover'], ['position', 'progress'], ['notesId'], ['scale']];
+export const CARD_GROUPS = [['name'], ['format'], ['added'], ['title'], ['author'], ['cover'], ['position', 'progress'], ['notesId'], ['scale'], ['shelf'], ['finished']];
 export const CARD_FIELDS = [...CARD_GROUPS.flat(), 'opened', 'marks', 'bookmarks', 'texts', 'edits'];
 
 const pick = (card, keys) => Object.fromEntries(keys.map((k) => [k, card?.[k] ?? null]));

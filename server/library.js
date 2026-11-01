@@ -29,6 +29,9 @@ const RULES = {
   bookmarks: (v) => validBookmarks(v) && JSON.stringify(v).length <= 1_000_000,
   texts: (v) => validTexts(v) && JSON.stringify(v).length <= 4_000_000,
   edits: (v) => validEdits(v) && JSON.stringify(v).length <= 4_000_000,
+  // the section of the library the document sits in ('' — none) and whether it was read to the end
+  shelf: text(60),
+  finished: (v) => typeof v === 'boolean',
 };
 
 function httpError(status, message) {

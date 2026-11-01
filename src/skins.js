@@ -6,13 +6,17 @@
 // warm dim text), contrast for eyes that need it. The atlas look keeps its own palette and takes
 // only the tone.
 
-export const SKINS = ['minimal', 'atlas'];
-export const THEMES = ['dark', 'light', 'sepia', 'dusk', 'night', 'contrast', 'system'];
+// cozy: warm paper, a violet accent, serif titles, soft round cards (0.13); the default since then
+export const SKINS = ['cozy', 'minimal', 'atlas'];
+export const THEMES = ['cream', 'dark', 'light', 'sepia', 'dusk', 'night', 'contrast', 'system'];
 export const ACCENTS = ['lime', 'cyan', 'orange', 'violet'];
 /** Palette → the tone it sits on. */
-export const PALETTES = { sepia: 'light', dusk: 'dark', night: 'dark', contrast: 'dark' };
+export const PALETTES = { cream: 'light', sepia: 'light', dusk: 'dark', night: 'dark', contrast: 'dark' };
 
-export const DEFAULT_LOOK = { skin: 'minimal', theme: 'dark', accent: 'lime' };
+export const DEFAULT_LOOK = { skin: 'cozy', theme: 'cream', accent: 'violet' };
+
+/** The look every install is moved to once, when it first runs 0.13 (lookVersion in the app's state). */
+export const LOOK_VERSION = 13;
 
 /** Keeps only known values, falling back to the defaults. */
 export function normalizeLook(saved = {}) {
