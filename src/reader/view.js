@@ -91,9 +91,16 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
 
   const parts = []; // { start (characters before it), size, first unit, last unit }
   const unitPart = new Array(units.length);
+  const unitStart = new Array(units.length); // characters before each unit, for the place as a share of the book
+  const unitText = new Array(units.length);
+  const unitPictures = new Array(units.length);
   let total = 0;
   for (const [i, unit] of units.entries()) {
-    const size = unit.textContent.length + unit.querySelectorAll('img').length * PICTURE_WEIGHT + 40;
+    unitText[i] = unit.textContent.length;
+    unitPictures[i] = unit.querySelectorAll('img').length;
+    unit.classList.add('rd-u');
+    const size = unitText[i] + unitPictures[i] * PICTURE_WEIGHT + 40;
+    unitStart[i] = total;
     const last = parts[parts.length - 1];
     const chapter = /^H[1-3]$/.test(unit.tagName);
     const afterHeading = /^H[1-6]$/.test(units[i - 1]?.tagName ?? '');
@@ -135,6 +142,36 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
       }
     }
   });
+
+  /** The unit an element of the book is in, or -1. */
+  function unitOf(el) {
+    for (let node = el; node && node !== page; node = node.parentElement) {
+      const i = unitIndex.get(node);
+      if (i !== undefined) return i;
+    }
+    return -1;
+  }
+
+  // Scrolling, a long book is not laid out whole: every unit is content-visibility: auto (styles.css),
+  // so only those near the screen are, and the rest stand in with a height guessed from their text.
+  // Laying out a 2400-page novel took 2.3 s on a computer (and several times that on a phone) before
+  // the first page showed. Places are still told by the blocks' boxes, which stay in order either way.
+  function guessHeights() {
+    if (pager || !units.length) return;
+    const sample = units.slice(0, 60).map((u) => u.textContent).join(' ').slice(0, 3000) || 'x';
+    const probe = document.createElement('p');
+    probe.textContent = sample;
+    probe.style.cssText = 'visibility:hidden;margin:0;content-visibility:visible';
+    page.prepend(probe);
+    const line = parseFloat(getComputedStyle(probe).lineHeight) || 30;
+    const perChar = probe.getBoundingClientRect().height / sample.length;
+    probe.remove();
+    const picture = Math.round(host.clientHeight * 0.6);
+    units.forEach((unit, i) => {
+      const guess = Math.max(line, Math.ceil((unitText[i] * perChar) / line) * line) + unitPictures[i] * picture;
+      unit.style.containIntrinsicBlockSize = `auto ${Math.round(guess)}px`;
+    });
+  }
 
   let shown = -1; // the part laid out in page mode; -1: the whole book (scroll mode)
 
@@ -243,8 +280,14 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
       if (shown === parts.length - 1 && pager.index >= pager.count - 1) return 1;
       return Math.min(1, (part.start + (pager.index / Math.max(1, pager.count)) * part.size) / total);
     }
+    // scrolling: by the text before the place, as the heights of the pieces not laid out are guesses
     const room = host.scrollHeight - host.clientHeight;
-    return room > 0 ? Math.min(1, host.scrollTop / room) : 1;
+    if (room <= 0 || host.scrollTop >= room - 2) return 1;
+    const { at, frac } = current();
+    const u = unitOf(blocks[at]);
+    if (u < 0 || !total) return Math.min(1, host.scrollTop / room);
+    const size = unitText[u] + unitPictures[u] * PICTURE_WEIGHT + 40;
+    return Math.min(1, (unitStart[u] + (blocks[at] === units[u] ? frac * size : 0)) / total);
   };
 
   // Page numbers for the whole book. Only the part on screen is laid out, so the rest is counted from
@@ -499,10 +542,12 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
   function setMode(next, pos = current()) {
     if ((next === 'pages') === Boolean(pager)) return;
     if (next === 'pages') {
-      host.classList.add('paged');
-      host.scrollTop = 0;
+      // the other parts are hidden before the columns start: setting scrollTop lays the book out, and
+      // all of it in columns took seconds
       forget();
       showPart(blocks[pos?.at] ? blockPart[pos.at] : 0);
+      host.classList.add('paged');
+      host.scrollTop = 0;
       pager = createPager({
         host,
         strip: page,
@@ -531,6 +576,7 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
       pager = null;
       host.classList.remove('paged');
       showAll();
+      guessHeights();
     }
     restore(pos);
     report();
@@ -541,6 +587,7 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
     const pos = current();
     forget();
     pager?.relayout();
+    guessHeights();
     restore(pos);
     learn();
   }
@@ -555,7 +602,10 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
   });
 
   if (mode === 'pages') setMode('pages', position);
-  else restore(position);
+  else {
+    guessHeights();
+    restore(position);
+  }
 
   // fonts and pictures settle a moment after the first layout: until the reader moves, keep the place
   const settle = () => {
@@ -594,7 +644,10 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
   const onScroll = () => {
     if (pager) return;
     clearTimeout(timer);
-    timer = setTimeout(report, 300);
+    timer = setTimeout(() => {
+      timer = 0;
+      report();
+    }, 300);
   };
   host.addEventListener('scroll', onScroll, { passive: true });
 
@@ -632,6 +685,7 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
       host.style.setProperty('--reader-scale', String(value));
       forget();
       pager?.relayout();
+      guessHeights();
       restore(pos);
       learn();
     },
@@ -665,6 +719,17 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
       return null;
     },
     goToMark,
+    /**
+     * The reader is leaving: the place on screen is told now, even if the scrolling has not stopped
+     * (or its event has not come yet). Not while the book is still settling untouched: then the
+     * place is the one it was opened at.
+     */
+    keep() {
+      if (settling && !timer) return;
+      clearTimeout(timer);
+      timer = 0;
+      report();
+    },
     find,
     showFound,
     clearFind,

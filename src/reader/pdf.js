@@ -259,7 +259,10 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
   const onScroll = () => {
     if (pager) return;
     clearTimeout(timer);
-    timer = setTimeout(report, 300);
+    timer = setTimeout(() => {
+      timer = 0;
+      report();
+    }, 300);
   };
   host.addEventListener('scroll', onScroll, { passive: true });
 
@@ -569,6 +572,7 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
       return Boolean(pager);
     },
     pages: () => (pager ? { index: pager.index, count: pages.length, first: pager.index === 0, last: pager.index >= pages.length - 1 } : null),
+    pageCount: pages.length,
     setMode: (next) => setMode(next),
     setTurn(value) {
       currentTurn = value;
@@ -606,6 +610,12 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
       return found;
     },
     goToMark,
+    /** The reader is leaving: the place on screen is told now, even if the scrolling has not stopped. */
+    keep() {
+      clearTimeout(timer);
+      timer = 0;
+      report();
+    },
     setTexts(list = [], activeId = null) {
       written = list;
       paintTexts(activeId);

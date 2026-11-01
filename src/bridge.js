@@ -130,7 +130,7 @@ function serverApi() {
         });
         return res.json();
       },
-      update: (id, patch) => call('PATCH', `library/${enc(id)}`, patch),
+      update: (id, patch, { keepalive = false } = {}) => call('PATCH', `library/${enc(id)}`, patch, { keepalive }),
       async bytes(id) {
         const res = await fetchOk(`/api/library/${enc(id)}/file`, { headers: { 'X-Atlas-Token': token }, cache: 'no-store' });
         return new Uint8Array(await res.arrayBuffer());

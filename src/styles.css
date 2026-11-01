@@ -2718,9 +2718,27 @@ textarea {
   display: none;
 }
 
+/* the page number: small, at the foot of the screen, over the book's bottom margin; taps go through */
 .rd-pct {
-  min-width: 3.4em;
-  text-align: right;
+  position: absolute;
+  bottom: calc(7px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  z-index: 2;
+  padding: 1px 8px;
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 0 6px 4px var(--bg);
+  color: color-mix(in srgb, var(--ink-dim) 85%, transparent);
+  font-size: 11px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.reader:has(.rd-status:not([hidden])) .rd-pct {
+  visibility: hidden;
 }
 
 .tb-btn.rd-size {
@@ -3678,6 +3696,11 @@ textarea {
 /* the parts of a long book not on screen (view.js): not laid out at all */
 .rd-scroll.paged .rd-off {
   display: none !important;
+}
+
+/* scrolling: only the pieces near the screen are laid out, the rest keep a guessed height (view.js, guessHeights) */
+.rd-scroll:not(.paged) .rd-u {
+  content-visibility: auto;
 }
 
 .rd-scroll.paged .reader-book :is(h1, h2, h3, h4, h5, h6) {

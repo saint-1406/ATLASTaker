@@ -82,7 +82,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   const scroll = h('div', { class: 'rd-scroll', tabindex: '-1' });
   const title = h('span', { class: 'rd-title' });
   const subtitle = h('span', { class: 'rd-sub' });
-  const percent = h('span', { class: 'rd-pct' });
+  // the page number (or how far, when scrolling a book) at the foot of the screen; taps go through it
+  const percent = h('div', { class: 'rd-pct', 'aria-live': 'off' });
   const readerBack = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => closeReader() }, '←');
   const viewButton = h('button', { type: 'button', class: 'tb-btn icon rd-size', onclick: () => toggleView() }, 'Aa');
   const tocButton = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => toggleToc() }, '☰');
@@ -128,10 +129,11 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   const reader = h(
     'section',
     { class: 'reader', hidden: true },
-    h('header', { class: 'rd-head' }, readerBack, h('div', { class: 'rd-titles' }, title, subtitle), percent, viewButton, findButton, textButton, marksButton, tocButton, moreButton),
+    h('header', { class: 'rd-head' }, readerBack, h('div', { class: 'rd-titles' }, title, subtitle), viewButton, findButton, textButton, marksButton, tocButton, moreButton),
     scroll,
     status,
     line,
+    percent,
     prevButton,
     nextButton,
     selBar,
@@ -350,11 +352,17 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
 
   // ---------- reading ----------
 
-  /** How far into the book: the page number in page mode, a percentage when scrolling. */
+  /** How far into the book: the page number in page mode and in a PDF, a percentage when scrolling a book. */
   function showProgress(value) {
     const pct = Math.round(Math.min(1, Math.max(0, value)) * 100);
-    const pages = reading?.controller?.pages?.();
-    percent.textContent = pages ? t('reader.pageOf', pages.index + 1, pages.count) : t('library.progress', pct);
+    const controller = reading?.controller;
+    const pages = controller?.pages?.();
+    const pdfPage = !pages && controller?.kind === 'pdf' ? controller.position().page : 0;
+    percent.textContent = pages
+      ? t('reader.pageOf', pages.index + 1, pages.count)
+      : pdfPage
+        ? t('reader.pageOf', pdfPage, controller.pageCount)
+        : t('library.progress', pct);
     line.firstChild.style.transform = `scaleX(${pct / 100})`;
     prevButton.disabled = !pages || pages.first;
     nextButton.disabled = !pages || pages.last;
@@ -370,13 +378,17 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     saveTimer = setTimeout(flush, 1500);
   }
 
+  /** Everything kept now: on closing the reader, Back, the app going to the background, the window closing. */
   function flush() {
     flushMarks();
+    // the place where the scrolling stopped a moment ago has not been told yet
+    if (reading && !reading.closed) reading.controller?.keep?.();
     clearTimeout(saveTimer);
     if (!pendingSave) return;
     const { id, patch } = pendingSave;
     pendingSave = null;
-    lib.update(id, patch).catch((err) => console.error(err));
+    // keepalive: the request outlives a closing window (the patch is tiny, well under its 64 KB)
+    lib.update(id, patch, { keepalive: true }).catch((err) => console.error(err));
   }
 
   async function read(id) {
