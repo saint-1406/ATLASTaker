@@ -558,6 +558,21 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
       return null;
     },
     goToMark,
+    /** Back to a place kept earlier (a bookmark). */
+    goTo(pos) {
+      if (settling) {
+        position = pos;
+        focusMark = null;
+      }
+      restore(pos);
+      report();
+    },
+    /** What a bookmark at `pos` is called: the chapter, and the words it starts with. */
+    describe(pos) {
+      const block = blocks[pos?.at];
+      if (!block) return { heading: '', snippet: '' };
+      return { ...this.where(block), snippet: block.textContent.replace(/\s+/g, ' ').trim().slice(0, 160) };
+    },
     close() {
       for (const name of HIGHLIGHTS) window.CSS?.highlights?.delete(name);
       resized.disconnect();

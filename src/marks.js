@@ -15,6 +15,8 @@ const ID_RE = /^m-[a-z0-9]{4,40}$/;
 const num = (v) => Number.isFinite(v);
 const int = (v) => Number.isInteger(v) && v >= 0;
 
+export const MAX_BOOKMARKS = 1000;
+
 export function newMarkId() {
   return `m-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -82,4 +84,35 @@ export function mergeRects(rects) {
   }
   const round = (v) => Math.round(v * 10000) / 10000;
   return out.map(([page, ...box]) => [page, ...box.map(round)]);
+}
+
+// Bookmarks: places to come back to, without a passage — the reader's own position at that moment.
+//   { id, position, progress, label, snippet, created }
+
+export function newBookmarkId() {
+  return `b-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function validBookmark(b) {
+  return (
+    Boolean(b) &&
+    typeof b === 'object' &&
+    typeof b.id === 'string' &&
+    /^b-[a-z0-9]{4,40}$/.test(b.id) &&
+    Boolean(b.position) &&
+    typeof b.position === 'object' &&
+    !Array.isArray(b.position) &&
+    JSON.stringify(b.position).length <= 2000 &&
+    num(b.progress) &&
+    b.progress >= 0 &&
+    b.progress <= 1 &&
+    typeof b.label === 'string' &&
+    b.label.length <= 300 &&
+    (b.snippet === undefined || (typeof b.snippet === 'string' && b.snippet.length <= 300)) &&
+    num(b.created)
+  );
+}
+
+export function validBookmarks(list) {
+  return Array.isArray(list) && list.length <= MAX_BOOKMARKS && list.every(validBookmark) && new Set(list.map((b) => b.id)).size === list.length;
 }

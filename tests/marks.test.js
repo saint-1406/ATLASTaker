@@ -52,3 +52,15 @@ test('marks sort in reading order', () => {
   const p1high = mark({ anchor: { rects: [[1, 0.5, 0.2, 0.1, 0.02]] } });
   assert.deepEqual(sortMarks([p2, p1low, p1high]).map((m) => m.id), [p1high.id, p1low.id, p2.id]);
 });
+
+test('a bookmark is a kept place with a name', async () => {
+  const { newBookmarkId, validBookmark, validBookmarks } = await import('../src/marks.js');
+  const b = { id: newBookmarkId(), position: { at: 12, frac: 0.3 }, progress: 0.4, label: 'Глава 2 · 40%', snippet: 'Он вошёл', created: 1 };
+  assert.ok(validBookmark(b));
+  assert.ok(validBookmark({ ...b, position: { page: 7, frac: 0 }, snippet: undefined }));
+  assert.ok(!validBookmark({ ...b, progress: 2 }));
+  assert.ok(!validBookmark({ ...b, position: null }));
+  assert.ok(!validBookmark({ ...b, id: 'm-abcdef' }));
+  assert.ok(validBookmarks([b]));
+  assert.ok(!validBookmarks([b, b]));
+});

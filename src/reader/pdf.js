@@ -404,6 +404,11 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
       return found;
     },
     goToMark,
+    goTo(pos) {
+      restore(pos);
+      report();
+    },
+    describe: (pos) => ({ page: pos?.page ?? current().page, snippet: '' }),
     close() {
       observer.disconnect();
       resized.disconnect();

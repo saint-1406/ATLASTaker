@@ -6,7 +6,7 @@
 import { h, toast, confirmDialog, showMenu, isOverlayOpen } from './overlays.js';
 import { count, t } from './i18n.js';
 import { LEADINGS, READ_FONTS, READ_MODES, THEMES, TURNS } from './skins.js';
-import { MARK_COLORS, MAX_NOTE, MAX_TEXT, newMarkId, sortMarks } from './marks.js';
+import { MARK_COLORS, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, newBookmarkId, newMarkId, sortMarks } from './marks.js';
 
 /** A link from a note back to a place in a document: atlas:<document>#<mark>. */
 export const DOC_LINK_RE = /^atlas:(d-[a-z0-9]{6,40})(?:#(m-[a-z0-9]{4,40}))?$/;
@@ -824,35 +824,98 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
 
   // ---------- the list of marks ----------
 
+  const bookmarksOf = (doc) => (Array.isArray(doc.bookmarks) ? doc.bookmarks : (doc.bookmarks = []));
+
   function showMarkCount() {
-    const n = reading ? marksOf(reading.doc).length : 0;
+    const n = reading ? marksOf(reading.doc).length + bookmarksOf(reading.doc).length : 0;
     marksButton.lastChild.textContent = n ? String(n) : '';
   }
 
+  let bookmarksTimer = 0;
+  function saveBookmarks(session = reading) {
+    if (!session || session.closed) return;
+    showMarkCount();
+    if (!marksPanel.hidden) fillMarks();
+    clearTimeout(bookmarksTimer);
+    const { id } = session.doc;
+    const bookmarks = bookmarksOf(session.doc);
+    bookmarksTimer = setTimeout(() => lib.update(id, { bookmarks }).catch((err) => toast(t('reader.marks.failed', err.message))), 300);
+  }
+
+  /** A bookmark where the reader is now (Ctrl+D). */
+  function addBookmark() {
+    const controller = reading?.controller;
+    if (!controller?.describe) return;
+    const list = bookmarksOf(reading.doc);
+    if (list.length >= MAX_BOOKMARKS) return;
+    const position = controller.position();
+    const progress = Math.min(1, Math.max(0, controller.progress()));
+    const about = controller.describe(position);
+    const pages = controller.pages?.();
+    const label = (about.page ? t('reader.pageN', about.page) : [about.heading, pages ? t('reader.pageN', pages.index + 1) : t('library.progress', Math.round(progress * 100))].filter(Boolean).join(' · ')).slice(0, 300);
+    list.push({ id: newBookmarkId(), position, progress, label, snippet: about.snippet.slice(0, 300), created: Date.now() });
+    list.sort((x, y) => x.progress - y.progress || x.created - y.created);
+    saveBookmarks();
+    toast(t('reader.bookmarks.added', label));
+  }
+
+  function removeBookmark(id) {
+    if (!reading) return;
+    const list = bookmarksOf(reading.doc);
+    const index = list.findIndex((b) => b.id === id);
+    if (index >= 0) list.splice(index, 1);
+    saveBookmarks();
+  }
+
+  function goToBookmark(bookmark) {
+    marksPanel.hidden = true;
+    reading?.controller?.goTo?.(bookmark.position);
+    scroll.focus({ preventScroll: true });
+  }
+
   function fillMarks() {
-    const list = reading ? sortMarks(marksOf(reading.doc).filter((m) => m.anchor)) : [];
-    marksHead.textContent = list.length ? `${t('reader.marks.list')} · ${list.length}` : t('reader.marks.list');
+    const doc = reading?.doc;
+    const marks = doc ? sortMarks(marksOf(doc).filter((m) => m.anchor)) : [];
+    const bookmarks = doc ? bookmarksOf(doc) : [];
+    marksHead.textContent = t('reader.marks.list');
+    const add = h('button', { type: 'button', class: 'tb-btn rd-bm-add', title: t('reader.bookmarks.addTitle'), onclick: addBookmark }, '🔖 ', t('reader.bookmarks.add'));
+    const bookmarkItems = bookmarks.map((b) =>
+      h(
+        'li',
+        { class: 'rd-marks-item rd-bm-item' },
+        h(
+          'button',
+          { type: 'button', onclick: () => goToBookmark(b) },
+          h('span', { class: 'rd-bm-icon', 'aria-hidden': 'true' }, '🔖'),
+          h('span', { class: 'rd-marks-body' }, h('span', { class: 'rd-marks-text' }, b.label), b.snippet ? h('span', { class: 'rd-marks-where' }, b.snippet) : null),
+        ),
+        h('button', { type: 'button', class: 'rd-bm-remove', title: t('reader.bookmarks.remove'), 'aria-label': t('reader.bookmarks.remove'), onclick: () => removeBookmark(b.id) }, '✕'),
+      ),
+    );
+    const markItems = marks.map((mark) =>
+      h(
+        'li',
+        { class: 'rd-marks-item' },
+        h(
+          'button',
+          { type: 'button', 'data-color': mark.color, onclick: () => showMark(mark.id) },
+          h('span', { class: 'rd-marks-dot', 'aria-hidden': 'true' }),
+          h(
+            'span',
+            { class: 'rd-marks-body' },
+            h('span', { class: 'rd-marks-text' }, mark.text),
+            mark.note ? h('span', { class: 'rd-marks-note' }, `💬 ${mark.note}`) : null,
+            mark.where ? h('span', { class: 'rd-marks-where' }, mark.where) : null,
+          ),
+        ),
+      ),
+    );
     marksList.replaceChildren(
-      ...(list.length
-        ? list.map((mark) =>
-            h(
-              'li',
-              { class: 'rd-marks-item' },
-              h(
-                'button',
-                { type: 'button', 'data-color': mark.color, onclick: () => showMark(mark.id) },
-                h('span', { class: 'rd-marks-dot', 'aria-hidden': 'true' }),
-                h(
-                  'span',
-                  { class: 'rd-marks-body' },
-                  h('span', { class: 'rd-marks-text' }, mark.text),
-                  mark.note ? h('span', { class: 'rd-marks-note' }, `💬 ${mark.note}`) : null,
-                  mark.where ? h('span', { class: 'rd-marks-where' }, mark.where) : null,
-                ),
-              ),
-            ),
-          )
-        : [h('li', { class: 'rd-toc-empty' }, t('reader.marks.none'))]),
+      h('li', { class: 'rd-bm-actions' }, add),
+      h('li', { class: 'rd-marks-section' }, `${t('reader.bookmarks.title')}${bookmarks.length ? ` · ${bookmarks.length}` : ''}`),
+      ...(bookmarkItems.length ? bookmarkItems : [h('li', { class: 'rd-toc-empty' }, t('reader.bookmarks.none'))]),
+      h('li', { class: 'rd-marks-section' }, `${t('reader.marks.title')}${marks.length ? ` · ${marks.length}` : ''}`),
+      ...(markItems.length ? markItems : [h('li', { class: 'rd-toc-empty' }, t('reader.marks.none'))]),
     );
   }
 
@@ -986,6 +1049,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     } else if (reading && mod && (e.code === 'Equal' || e.code === 'NumpadAdd')) zoom(1);
     else if (reading && mod && (e.code === 'Minus' || e.code === 'NumpadSubtract')) zoom(-1);
     else if (reading && mod && (e.code === 'Digit0' || e.code === 'Numpad0')) zoom(0);
+    else if (reading?.controller && mod && e.code === 'KeyD') addBookmark();
     else if (!reading && mod && e.code === 'KeyF') filter.focus();
     else handled = false;
     if (handled) {

@@ -2916,6 +2916,51 @@ textarea {
   font: 12px var(--font-ui);
 }
 
+.rd-bm-actions {
+  padding: 4px 16px 8px;
+}
+
+.rd-bm-add {
+  width: 100%;
+  justify-content: center;
+}
+
+.rd-marks-section {
+  padding: 12px 16px 4px;
+  color: var(--kicker);
+  font: 600 10px var(--font-mono, var(--font-ui));
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rd-bm-item {
+  display: flex;
+  align-items: stretch;
+}
+
+.rd-bm-item > button:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.rd-bm-icon {
+  flex: none;
+  font-size: 12px;
+}
+
+.rd-bm-remove {
+  flex: none;
+  width: 36px;
+  border: 0;
+  background: none;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+
+.rd-bm-remove:hover {
+  color: var(--danger);
+}
+
 /* a mark's card: the passage, its comment, its colour */
 .rd-markpanel {
   position: fixed;
