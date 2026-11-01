@@ -163,3 +163,69 @@ export function remapPdf({ marks = [], bookmarks = [] }, plan) {
   }
   return { marks: outMarks, bookmarks: outBookmarks };
 }
+
+// ---------- texts: words a reader writes on a PDF page ----------
+//   { id, page, x, y, w, text, size, color, created, edited }
+// x, y: the top left corner and w: the width of the box, as fractions of the page as shown; size: the
+// letter height as a fraction of the page width, so the text keeps its place and size at any zoom.
+
+export const TEXT_COLORS = ['black', 'red', 'blue', 'green'];
+export const TEXT_SIZES = [0.016, 0.022, 0.03, 0.042];
+export const MAX_TEXTS = 2000;
+export const MAX_TEXT_LENGTH = 4000;
+
+export function newTextId() {
+  return `t-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function validText(item) {
+  const frac = (v) => num(v) && v >= 0 && v <= 1;
+  return (
+    Boolean(item) &&
+    typeof item === 'object' &&
+    typeof item.id === 'string' &&
+    /^t-[a-z0-9]{4,40}$/.test(item.id) &&
+    Number.isInteger(item.page) &&
+    item.page >= 1 &&
+    frac(item.x) &&
+    frac(item.y) &&
+    num(item.w) &&
+    item.w >= 0.02 &&
+    item.w <= 1 &&
+    typeof item.text === 'string' &&
+    item.text.length <= MAX_TEXT_LENGTH &&
+    num(item.size) &&
+    item.size >= 0.005 &&
+    item.size <= 0.2 &&
+    TEXT_COLORS.includes(item.color) &&
+    num(item.created) &&
+    (item.edited === undefined || num(item.edited))
+  );
+}
+
+export function validTexts(list) {
+  return Array.isArray(list) && list.length <= MAX_TEXTS && list.every(validText) && new Set(list.map((x) => x.id)).size === list.length;
+}
+
+/** Texts in reading order: by page, then top to bottom. */
+export const sortTexts = (list) => [...list].sort((a, b) => a.page - b.page || a.y - b.y || a.x - b.x || a.created - b.created);
+
+/** After a PDF's pages changed (plan as in remapPdf): texts follow their pages; those on removed pages go. */
+export function remapTexts(texts = [], plan) {
+  const moved = new Map();
+  plan.forEach((p, i) => {
+    if (p.src === 0 && !moved.has(p.page)) moved.set(p.page, { page: i + 1, turn: p.turn || 0 });
+  });
+  const round = (v) => Math.round(v * 10000) / 10000;
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const out = [];
+  for (const item of texts) {
+    const to = moved.get(item.page);
+    if (!to) continue;
+    // the corner turns with the page; the words stay upright, as wide as before (within the page)
+    const [x, y] = turnBox([item.x, item.y, 0, 0], to.turn);
+    const w = clamp(item.w, 0.02, 1);
+    out.push({ ...item, page: to.page, x: round(clamp(x, 0, 1 - w)), y: round(clamp(y, 0, 0.98)), w });
+  }
+  return out;
+}

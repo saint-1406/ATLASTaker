@@ -4470,3 +4470,108 @@ textarea {
 .translate-sel[hidden] {
   display: none;
 }
+
+/* ---------- texts written on a PDF page ---------- */
+
+.pdf-texts {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  /* sizes of the words are fractions of the page width (100cqw) */
+  container-type: size;
+  pointer-events: none;
+}
+
+.pdf-text {
+  position: absolute;
+  box-sizing: border-box;
+  min-height: 1.3em;
+  color: var(--page-ink);
+  font-family: 'Inter Variable', Arial, sans-serif;
+  line-height: 1.25;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: auto;
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+  outline: 1px dashed transparent;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.pdf-text:hover,
+.pdf-text.empty {
+  outline-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.pdf-text.active {
+  outline: 2px solid var(--accent);
+}
+
+.pdf-text[data-color="black"],
+.rd-text-swatch[data-color="black"] { --page-ink: #1a1a1a; --mark-swatch: #1a1a1a; }
+/* black on a dark panel: a light ring keeps it visible */
+.rd-text-swatch[data-color="black"] { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4); }
+.pdf-text[data-color="red"],
+.rd-text-swatch[data-color="red"] { --page-ink: #d32f2f; --mark-swatch: #d32f2f; }
+.pdf-text[data-color="blue"],
+.rd-text-swatch[data-color="blue"] { --page-ink: #1e5bd8; --mark-swatch: #1e5bd8; }
+.pdf-text[data-color="green"],
+.rd-text-swatch[data-color="green"] { --page-ink: #1f8a3b; --mark-swatch: #1f8a3b; }
+
+.placing-text .pdf-page {
+  cursor: crosshair;
+}
+
+.rd-text-btn {
+  font-weight: 600;
+  font-family: Georgia, 'Times New Roman', serif;
+}
+
+.rd-text-btn[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink, #fff);
+}
+
+.rd-text-sizes {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.rd-text-size {
+  min-width: 26px;
+  height: 28px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink-soft);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.rd-text-size[data-size="0"] { font-size: 11px; }
+.rd-text-size[data-size="1"] { font-size: 14px; }
+.rd-text-size[data-size="2"] { font-size: 17px; }
+.rd-text-size[data-size="3"] { font-size: 21px; }
+
+.rd-text-size[aria-pressed="true"] {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.rd-text-hint {
+  margin: 4px 2px 0;
+  color: var(--ink-dim);
+  font-size: 12px;
+}
+
+.rd-text-icon {
+  flex: none;
+  width: 14px;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-weight: 600;
+  text-align: center;
+}

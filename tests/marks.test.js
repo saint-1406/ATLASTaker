@@ -81,3 +81,26 @@ test('after a PDF\'s pages change, marks and bookmarks follow their pages', asyn
   assert.deepEqual(out.marks[0].anchor.rects[0].slice(1), [0.75, 0.1, 0.05, 0.3]);
   assert.deepEqual(out.bookmarks.map((b) => [b.position.page, b.label, b.progress]), [[1, 'Page 1', 0]]);
 });
+
+test('texts on a PDF page: well formed or refused, a list without two under one id', async () => {
+  const { newTextId, validText, validTexts, sortTexts } = await import('../src/marks.js');
+  const item = { id: newTextId(), page: 2, x: 0.1, y: 0.2, w: 0.4, text: 'Привет', size: 0.022, color: 'red', created: 1 };
+  assert.ok(validText(item));
+  assert.ok(validTexts([item]));
+  assert.ok(!validTexts([item, item]));
+  for (const bad of [{ page: 0 }, { x: 1.2 }, { w: 0 }, { color: 'yellow' }, { size: 1 }, { text: 5 }, { id: 'm-abcdef' }]) assert.ok(!validText({ ...item, ...bad }), JSON.stringify(bad));
+  const later = { ...item, id: 't-bbbbbb', page: 1, y: 0.5 };
+  assert.deepEqual(sortTexts([item, later]).map((x) => x.id), ['t-bbbbbb', item.id]);
+});
+
+test('after a PDF\'s pages change, texts follow their pages and stay on the page', async () => {
+  const { remapTexts } = await import('../src/marks.js');
+  const t = (page, id) => ({ id, page, x: 0.1, y: 0.2, w: 0.5, text: 'x', size: 0.022, color: 'black', created: 1 });
+  // page 3 first and turned right, page 1 second, page 2 removed
+  const plan = [{ src: 0, page: 3, turn: 90 }, { src: 0, page: 1, turn: 0 }];
+  const out = remapTexts([t(1, 't-aaaa'), t(2, 't-bbbb'), t(3, 't-cccc')], plan);
+  assert.deepEqual(out.map((x) => [x.id, x.page]), [['t-aaaa', 2], ['t-cccc', 1]]);
+  assert.deepEqual([out[0].x, out[0].y], [0.1, 0.2]);
+  // turned: the corner moves with the page, the box still fits across it
+  assert.ok(out[1].x + out[1].w <= 1 && out[1].y >= 0 && out[1].y <= 0.98);
+});

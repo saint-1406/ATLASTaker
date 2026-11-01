@@ -7,7 +7,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { atomicWrite, ID_RE } from './store.js';
-import { validBookmarks, validMarks } from '../src/marks.js';
+import { validBookmarks, validMarks, validTexts } from '../src/marks.js';
 
 export const DOC_ID_RE = /^d-[a-z0-9]{6,40}$/;
 export const DOC_FORMATS = ['pdf', 'epub', 'fb2', 'docx', 'odt', 'rtf', 'md', 'txt', 'html', 'cbz', 'img'];
@@ -27,6 +27,7 @@ const RULES = {
   scale: (v) => Number.isFinite(v) && v >= 0.5 && v <= 4,
   marks: (v) => validMarks(v) && JSON.stringify(v).length <= 4_000_000,
   bookmarks: (v) => validBookmarks(v) && JSON.stringify(v).length <= 1_000_000,
+  texts: (v) => validTexts(v) && JSON.stringify(v).length <= 4_000_000,
 };
 
 function httpError(status, message) {
@@ -114,6 +115,7 @@ export function createLibrary(dataDir) {
         scale: 1,
         marks: [],
         bookmarks: [],
+        texts: [],
       };
       await atomicWrite(fileOf(doc), bytes);
       docs[doc.id] = doc;
@@ -155,7 +157,7 @@ export function createLibrary(dataDir) {
       const format = known?.format ?? data?.format;
       if (!DOC_FORMATS.includes(format)) throw httpError(415, 'такой формат библиотека не читает');
       if (!known && !bytes?.length) throw httpError(400, 'нет файла документа');
-      const doc = known ?? { id, format, name: 'document', title: '', author: '', cover: null, size: 0, added: Date.now(), opened: 0, progress: 0, position: null, notesId: null, scale: 1, marks: [], bookmarks: [] };
+      const doc = known ?? { id, format, name: 'document', title: '', author: '', cover: null, size: 0, added: Date.now(), opened: 0, progress: 0, position: null, notesId: null, scale: 1, marks: [], bookmarks: [], texts: [] };
       if (bytes?.length) {
         if (known) {
           await fsp.copyFile(fileOf(doc), path.join(trashDir, `${id}-${Date.now()}.${format}`)).catch((err) => {

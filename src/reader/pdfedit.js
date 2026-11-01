@@ -7,6 +7,97 @@ import { closeDoc, loadPdf } from './pdf.js';
 
 const COLORS = { yellow: [1, 0.84, 0.16], green: [0.36, 0.84, 0.47], blue: [0.38, 0.64, 1], pink: [1, 0.45, 0.75] };
 
+const TEXT_INK = { black: '#1a1a1a', red: '#d32f2f', blue: '#1e5bd8', green: '#1f8a3b' };
+const TEXT_FONT = "'Inter Variable', Arial, sans-serif";
+const LINE = 1.25; // line height, as in .pdf-text
+
+/** The lines a text breaks into at a width, as the page shows it (pre-wrap, long words broken anywhere). */
+export function wrapLines(text, width, measure) {
+  const lines = [];
+  for (const para of String(text).split('\n')) {
+    let line = '';
+    for (const word of para.split(/(?<=\s)/)) {
+      if (measure(line + word.trimEnd()) <= width || !line) {
+        line += word;
+      } else {
+        lines.push(line.trimEnd());
+        line = word;
+      }
+      // a word wider than the box breaks letter by letter
+      while (measure(line.trimEnd()) > width && line.length > 1) {
+        let cut = line.length - 1;
+        while (cut > 1 && measure(line.slice(0, cut)) > width) cut--;
+        lines.push(line.slice(0, cut));
+        line = line.slice(cut);
+      }
+    }
+    lines.push(line.trimEnd());
+  }
+  return lines;
+}
+
+/**
+ * One text as a PDF free-text annotation: the words in its Contents (other programs can read and edit
+ * them), and its look drawn as a picture, so any script shows the same in every viewer without a font.
+ */
+async function addText(pdf, page, viewport, item, author) {
+  const k = 4; // picture pixels per page point
+  const fontPx = item.size * viewport.width * k;
+  const font = `${fontPx}px ${TEXT_FONT}`;
+  await document.fonts?.load(font).catch(() => {});
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.font = font;
+  const width = Math.max(1, Math.round(item.w * viewport.width * k));
+  const lines = wrapLines(item.text, width, (s) => ctx.measureText(s).width);
+  const lineH = fontPx * LINE;
+  canvas.width = width;
+  canvas.height = Math.max(1, Math.ceil(lines.length * lineH));
+  ctx.font = font;
+  ctx.fillStyle = TEXT_INK[item.color] ?? TEXT_INK.black;
+  ctx.textBaseline = 'middle';
+  lines.forEach((line, i) => ctx.fillText(line, 0, (i + 0.5) * lineH));
+  const png = new Uint8Array(await (await new Promise((done) => canvas.toBlob(done, 'image/png'))).arrayBuffer());
+  const image = await pdf.embedPng(png);
+
+  // the box on the page as shown → the page's own coordinates (rotation and crop box included)
+  const X = item.x * viewport.width;
+  const Y = item.y * viewport.height;
+  const W = canvas.width / k;
+  const H = canvas.height / k;
+  const p00 = viewport.convertToPdfPoint(X, Y + H); // the picture's bottom left
+  const p10 = viewport.convertToPdfPoint(X + W, Y + H);
+  const p01 = viewport.convertToPdfPoint(X, Y);
+  const p11 = viewport.convertToPdfPoint(X + W, Y);
+  const xs = [p00[0], p10[0], p01[0], p11[0]];
+  const ys = [p00[1], p10[1], p01[1], p11[1]];
+  const rect = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+  const m = [p10[0] - p00[0], p10[1] - p00[1], p01[0] - p00[0], p01[1] - p00[1], p00[0], p00[1]].map((v) => v.toFixed(3)).join(' ');
+  const appearance = pdf.context.stream(`q ${m} cm /Im0 Do Q`, {
+    Type: 'XObject',
+    Subtype: 'Form',
+    BBox: rect,
+    Resources: { XObject: { Im0: image.ref } },
+  });
+  const rgb = (TEXT_INK[item.color] ?? TEXT_INK.black).match(/\w\w/g).map((h) => (parseInt(h, 16) / 255).toFixed(3));
+  const annot = pdf.context.obj({
+    Type: 'Annot',
+    Subtype: 'FreeText',
+    Rect: rect,
+    F: 4,
+    NM: PDFString.of(item.id),
+    T: PDFHexString.fromText(author),
+    Contents: PDFHexString.fromText(item.text),
+    DA: PDFString.of(`/Helv ${(item.size * viewport.width).toFixed(1)} Tf ${rgb.join(' ')} rg`),
+    M: PDFString.fromDate(new Date(item.edited || item.created)),
+    AP: { N: pdf.context.register(appearance) },
+  });
+  const ref = pdf.context.register(annot);
+  const annots = page.node.lookup(PDFName.of('Annots'));
+  if (annots && typeof annots.push === 'function') annots.push(ref);
+  else page.node.set(PDFName.of('Annots'), pdf.context.obj([ref]));
+}
+
 async function loadForEdit(bytes) {
   try {
     return await PDFDocument.load(bytes, { updateMetadata: false });
@@ -76,11 +167,16 @@ export async function rebuildPdf(sources, plan) {
  * The boxes are fractions of the page as shown, so pdf.js turns them into the page's own coordinates
  * (rotation and crop box included).
  */
-export async function pdfWithMarks(bytes, marks, { author = 'ATLAS' } = {}) {
+export async function pdfWithMarks(bytes, marks, { author = 'ATLAS', texts = [] } = {}) {
   const shown = await loadPdf(bytes);
   try {
     const pdf = await loadForEdit(bytes);
     const pages = pdf.getPages();
+    for (const item of texts) {
+      const page = pages[item.page - 1];
+      if (!page || !item.text.trim()) continue;
+      await addText(pdf, page, (await shown.getPage(item.page)).getViewport({ scale: 1 }), item, author);
+    }
     for (const mark of marks) {
       const byPage = new Map();
       for (const [n, ...box] of mark.anchor?.rects ?? []) (byPage.get(n) ?? byPage.set(n, []).get(n)).push(box);

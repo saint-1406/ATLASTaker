@@ -274,3 +274,17 @@ test('fingerprints tell texts apart', () => {
   assert.notEqual(fingerprint('a'), fingerprint('b'));
   assert.equal(fingerprint('заметка'), fingerprint('заметка'));
 });
+
+test('texts on PDF pages sync like marks, and a card from an older app does not remove them', async () => {
+  const { mergeCard, cardSigs } = await import('../src/sync/merge.js');
+  const text = (id, extra = {}) => ({ id, page: 1, x: 0.1, y: 0.1, w: 0.3, text: id, size: 0.022, color: 'black', created: 1, ...extra });
+  const base = cardSigs({ texts: [text('t-aaaa')] });
+  // one side added, the other removed one Drive knew
+  const merged = mergeCard({ opened: 1, texts: [text('t-aaaa'), text('t-bbbb')] }, { opened: 1, texts: [] }, base);
+  assert.deepEqual(merged.texts.map((x) => x.id), ['t-bbbb']);
+  // an older app's card has no texts at all: this device's stay
+  const old = mergeCard({ opened: 1, texts: [text('t-aaaa')] }, { opened: 2, texts: null }, base);
+  assert.deepEqual(old.texts.map((x) => x.id), ['t-aaaa']);
+  const fresh = mergeCard({ opened: 1, texts: null }, { opened: 1, texts: [text('t-cccc')] }, null);
+  assert.deepEqual(fresh.texts.map((x) => x.id), ['t-cccc']);
+});

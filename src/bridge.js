@@ -13,7 +13,7 @@ const onServer = location.protocol.startsWith('http') && token !== '' && !token.
 export const android = typeof window.AtlasAndroid === 'object' && window.AtlasAndroid ? window.AtlasAndroid : null;
 
 /** The fields of a library card the page may change. */
-const DOC_FIELDS = ['title', 'author', 'cover', 'position', 'progress', 'opened', 'notesId', 'scale', 'marks', 'bookmarks'];
+const DOC_FIELDS = ['title', 'author', 'cover', 'position', 'progress', 'opened', 'notesId', 'scale', 'marks', 'bookmarks', 'texts'];
 const newDoc = (blob, { name, format }) => ({
   id: `d-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`,
   name: String(name ?? '').slice(0, 200) || 'document',

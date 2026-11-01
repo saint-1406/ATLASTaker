@@ -6,7 +6,7 @@
 import { h, toast, confirmDialog, showMenu, isOverlayOpen } from './overlays.js';
 import { count, t } from './i18n.js';
 import { LEADINGS, READ_FONTS, READ_MODES, THEMES, TURNS } from './skins.js';
-import { MARK_COLORS, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, newBookmarkId, newMarkId, remapPdf, sortMarks } from './marks.js';
+import { MARK_COLORS, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, MAX_TEXT_LENGTH, MAX_TEXTS, newBookmarkId, newMarkId, newTextId, remapPdf, remapTexts, sortMarks, sortTexts, TEXT_COLORS, TEXT_SIZES } from './marks.js';
 import { openPageEditor } from './pageEditor.js';
 import { createFind } from './readerFind.js';
 
@@ -89,6 +89,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   const moreButton = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => openMore() }, '⋯');
   const findButton = h('button', { type: 'button', class: 'tb-btn icon rd-find-btn', onclick: () => finder.open() }, '⌕');
   const marksButton = h('button', { type: 'button', class: 'tb-btn icon rd-marks-btn', onclick: () => toggleMarks() }, '✎', h('span', { class: 'rd-marks-count' }));
+  // PDF only: the next press on a page puts a text there
+  const textButton = h('button', { type: 'button', class: 'tb-btn icon rd-text-btn', 'aria-pressed': 'false', hidden: true, onclick: () => setPlacing(!reader.classList.contains('placing-text')) }, 'T');
   const prevButton = h('button', { type: 'button', class: 'rd-nav rd-nav-prev', onclick: () => reading?.controller?.prev() }, '‹');
   const nextButton = h('button', { type: 'button', class: 'rd-nav rd-nav-next', onclick: () => reading?.controller?.next() }, '›');
   const viewPanel = h('aside', { class: 'rd-view', hidden: true });
@@ -126,7 +128,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   const reader = h(
     'section',
     { class: 'reader', hidden: true },
-    h('header', { class: 'rd-head' }, readerBack, h('div', { class: 'rd-titles' }, title, subtitle), percent, viewButton, findButton, marksButton, tocButton, moreButton),
+    h('header', { class: 'rd-head' }, readerBack, h('div', { class: 'rd-titles' }, title, subtitle), percent, viewButton, findButton, textButton, marksButton, tocButton, moreButton),
     scroll,
     status,
     line,
@@ -158,6 +160,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
       [tocButton, 'reader.toc'],
       [findButton, 'reader.find.title'],
       [marksButton, 'reader.marks.list'],
+      [textButton, 'reader.texts.button'],
       [moreButton, 'reader.more'],
       [prevButton, 'reader.prevPage'],
       [nextButton, 'reader.nextPage'],
@@ -394,6 +397,9 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     hideSelBar();
     markPanel.hidden = true;
     openMarkId = null;
+    openTextId = null;
+    setPlacing(false);
+    textButton.hidden = doc.format !== 'pdf';
     const look = getReading();
     reader.dataset.font = look.readFont;
     reader.dataset.leading = look.readLeading;
@@ -429,6 +435,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
       }
       session.controller = controller;
       controller.setMarks?.(marksOf(doc));
+      controller.setTexts?.(textsOf(doc));
       showMarkCount();
       reader.classList.toggle('is-paged', controller.paged);
       status.hidden = true;
@@ -446,6 +453,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   function closeReader() {
     if (!reading) return;
     closeMark();
+    closeText();
+    setPlacing(false);
     flush();
     finder.close({ keepText: false });
     reading.closed = true;
@@ -787,6 +796,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   function openMark(id, { focus = false } = {}) {
     const mark = findMark(id);
     if (!mark) return;
+    closeText();
     if (openMarkId && openMarkId !== id) closeMark();
     openMarkId = id;
     hideSelBar();
@@ -864,6 +874,228 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     if (focus) note.focus({ preventScroll: true });
   }
 
+  // ---------- texts: words written on a PDF page ----------
+
+  const textsOf = (doc) => (Array.isArray(doc.texts) ? doc.texts : (doc.texts = []));
+  const findText = (id) => (reading ? textsOf(reading.doc).find((x) => x.id === id) : null);
+  let openTextId = null; // the text whose card is open
+  let textsTimer = 0;
+  let textPress = false; // the press now going on belongs to a text
+
+  function saveTexts(session = reading) {
+    if (!session || session.closed) return;
+    session.controller?.setTexts?.(textsOf(session.doc), openTextId);
+    showMarkCount();
+    if (!marksPanel.hidden) fillMarks();
+    clearTimeout(textsTimer);
+    const { id } = session.doc;
+    const texts = textsOf(session.doc);
+    textsTimer = setTimeout(() => lib.update(id, { texts }).catch((err) => toast(t('reader.marks.failed', err.message))), 400);
+  }
+
+  function setPlacing(on) {
+    reader.classList.toggle('placing-text', on);
+    textButton.setAttribute('aria-pressed', String(on));
+    if (on) toast(t('reader.texts.placing'), { timeout: 4000 });
+  }
+
+  /** A new text where the reader clicked, its card open to write in. */
+  function placeText(x, y) {
+    setPlacing(false);
+    const at = reading?.controller?.pointAt?.(x, y);
+    if (!at) return;
+    const list = textsOf(reading.doc);
+    if (list.length >= MAX_TEXTS) return;
+    const w = Math.max(0.1, Math.min(0.45, 1 - at.x));
+    const item = { id: newTextId(), page: at.page, x: Math.min(at.x, 1 - w), y: Math.max(0, at.y - TEXT_SIZES[1] * 0.7), w, text: '', size: TEXT_SIZES[1], color: 'black', created: Date.now() };
+    list.push(item);
+    saveTexts();
+    openText(item.id, { focus: true });
+  }
+
+  function closeText() {
+    if (!openTextId) return;
+    const session = reading;
+    const id = openTextId;
+    openTextId = null;
+    markPanel.hidden = true;
+    const list = session ? textsOf(session.doc) : [];
+    const index = list.findIndex((x) => x.id === id);
+    // a text left empty is not kept
+    if (index >= 0 && !list[index].text.trim()) list.splice(index, 1);
+    saveTexts(session);
+  }
+
+  function removeText(id) {
+    if (!reading) return;
+    const session = reading;
+    const list = textsOf(session.doc);
+    const index = list.findIndex((x) => x.id === id);
+    if (index < 0) return;
+    const [item] = list.splice(index, 1);
+    openTextId = null;
+    markPanel.hidden = true;
+    saveTexts();
+    if (!item.text.trim()) return;
+    toast(t('reader.texts.removed'), {
+      timeout: 6000,
+      action: {
+        text: t('reader.marks.undo'),
+        run: () => {
+          if (session.closed) return;
+          const again = textsOf(session.doc);
+          again.splice(Math.min(index, again.length), 0, item);
+          saveTexts(session);
+        },
+      },
+    });
+  }
+
+  function openText(id, { focus = false } = {}) {
+    const item = findText(id);
+    if (!item) return;
+    closeMark();
+    if (openTextId && openTextId !== id) closeText();
+    openTextId = id;
+    hideSelBar();
+    tocPanel.hidden = true;
+    marksPanel.hidden = true;
+    viewPanel.hidden = true;
+    const changed = () => {
+      item.edited = Date.now();
+      saveTexts();
+    };
+    const field = h('textarea', { class: 'field rd-mark-note rd-text-field', rows: '3', maxlength: String(MAX_TEXT_LENGTH), placeholder: t('reader.texts.placeholder'), 'aria-label': t('reader.texts.title') });
+    field.value = item.text;
+    field.addEventListener('input', () => {
+      item.text = field.value.slice(0, MAX_TEXT_LENGTH);
+      changed();
+    });
+    field.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' || (e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeText();
+        scroll.focus({ preventScroll: true });
+      }
+    });
+    const colors = TEXT_COLORS.map((color) =>
+      h('button', {
+        type: 'button',
+        class: 'rd-swatch rd-text-swatch',
+        'data-color': color,
+        'aria-pressed': String(item.color === color),
+        title: t(`reader.texts.colors.${color}`),
+        'aria-label': t(`reader.texts.colors.${color}`),
+        onclick: () => {
+          item.color = color;
+          for (const b of colors) b.setAttribute('aria-pressed', String(b.dataset.color === color));
+          changed();
+        },
+      }),
+    );
+    const sizes = TEXT_SIZES.map((size, i) =>
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'rd-text-size',
+          'data-size': String(i),
+          'aria-pressed': String(item.size === size),
+          title: t('reader.texts.size', i + 1),
+          'aria-label': t('reader.texts.size', i + 1),
+          onclick: () => {
+            item.size = size;
+            for (const b of sizes) b.setAttribute('aria-pressed', String(b.dataset.size === String(i)));
+            changed();
+          },
+        },
+        'A',
+      ),
+    );
+    markPanel.replaceChildren(
+      h(
+        'div',
+        { class: 'rd-mark-head' },
+        h('div', { class: 'rd-swatches' }, colors),
+        h('div', { class: 'rd-text-sizes' }, sizes),
+        h('span', { class: 'rd-mark-where' }, t('reader.pageN', item.page)),
+        h('button', { type: 'button', class: 'tb-btn icon', title: t('reader.marks.close'), 'aria-label': t('reader.marks.close'), onclick: () => closeText() }, '✕'),
+      ),
+      field,
+      h('p', { class: 'rd-text-hint' }, t('reader.texts.hint')),
+      h(
+        'div',
+        { class: 'rd-mark-actions' },
+        h('button', { type: 'button', class: 'tb-btn rd-mark-remove', onclick: () => removeText(item.id) }, t('reader.texts.remove')),
+        h('button', { type: 'button', class: 'tb-btn accent', onclick: () => closeText() }, t('reader.marks.done')),
+      ),
+    );
+    markPanel.hidden = false;
+    reading.controller?.setTexts?.(textsOf(reading.doc), id);
+    if (focus) field.focus({ preventScroll: true });
+  }
+
+  /** Takes the reader to a text and opens its card. */
+  function showText(id) {
+    marksPanel.hidden = true;
+    if (!reading?.controller?.goToText?.(id)) return;
+    openText(id);
+  }
+
+  // a press on a text drags it; a press without a move opens its card. In placing mode a press puts a new one.
+  // Caught before the page's own text and the pager see it.
+  scroll.addEventListener(
+    'pointerdown',
+    (e) => {
+      textPress = false;
+      if (e.button !== 0 || !reading?.controller?.pointAt) return;
+      const placing = reader.classList.contains('placing-text');
+      const box = e.target.closest?.('.pdf-text');
+      if (!placing && !box) return;
+      e.preventDefault();
+      e.stopPropagation();
+      textPress = true;
+      closeMark();
+      if (placing) {
+        const end = (up) => {
+          window.removeEventListener('pointerup', end, true);
+          if (Math.hypot(up.clientX - e.clientX, up.clientY - e.clientY) < 10) placeText(up.clientX, up.clientY);
+        };
+        window.addEventListener('pointerup', end, true);
+        return;
+      }
+      const item = findText(box.dataset.text);
+      if (!item) return;
+      const frame = box.closest('.pdf-page').getBoundingClientRect();
+      const from = { x: item.x, y: item.y };
+      let moved = false;
+      const move = (ev) => {
+        const dx = (ev.clientX - e.clientX) / frame.width;
+        const dy = (ev.clientY - e.clientY) / frame.height;
+        if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 5) return;
+        moved = true;
+        item.x = Math.round(Math.min(1 - item.w, Math.max(0, from.x + dx)) * 10000) / 10000;
+        item.y = Math.round(Math.min(0.98, Math.max(0, from.y + dy)) * 10000) / 10000;
+        box.style.left = `${item.x * 100}%`;
+        box.style.top = `${item.y * 100}%`;
+      };
+      const up = () => {
+        window.removeEventListener('pointermove', move, true);
+        window.removeEventListener('pointerup', up, true);
+        window.removeEventListener('pointercancel', up, true);
+        if (moved) {
+          item.edited = Date.now();
+          saveTexts();
+        } else openText(item.id, { focus: true });
+      };
+      window.addEventListener('pointermove', move, true);
+      window.addEventListener('pointerup', up, true);
+      window.addEventListener('pointercancel', up, true);
+    },
+    true,
+  );
+
   // ---------- the file: download it, and a PDF's pages and marks ----------
 
   const MIME = { odt: 'application/vnd.oasis.opendocument.text', rtf: 'application/rtf', cbz: 'application/vnd.comicbook+zip', pdf: 'application/pdf', epub: 'application/epub+zip', fb2: 'application/xml', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', md: 'text/markdown', txt: 'text/plain', html: 'text/html' };
@@ -876,7 +1108,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     if (doc.format === 'pdf') {
       items.push(
         { icon: '▦', text: t('pages.edit'), run: editPages },
-        { icon: '⤓', text: t('pages.exportMarked'), disabled: !marksOf(doc).length, title: marksOf(doc).length ? undefined : t('pages.noMarks'), run: exportMarked },
+        { icon: 'T', text: t('reader.texts.add'), run: () => setPlacing(true) },
+        { icon: '⤓', text: t('pages.exportMarked'), disabled: !marksOf(doc).length && !textsOf(doc).length, title: marksOf(doc).length || textsOf(doc).length ? undefined : t('pages.noMarks'), run: exportMarked },
         '-',
       );
     }
@@ -903,7 +1136,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     toast(t('pages.exporting'));
     try {
       const code = await loadReader();
-      const out = await code.pdfWithMarks(await lib.bytes(doc.id), marksOf(doc));
+      const out = await code.pdfWithMarks(await lib.bytes(doc.id), marksOf(doc), { texts: textsOf(doc).filter((x) => x.text.trim()) });
       api.download(`${baseOf(doc)} ${t('pages.markedSuffix')}.pdf`, out, 'application/pdf');
     } catch (err) {
       console.error(err);
@@ -931,12 +1164,14 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
       title: nameOf(doc),
       async onSave(out, plan) {
         const kept = remapPdf({ marks: marksOf(doc), bookmarks: bookmarksOf(doc) }, plan);
+        const texts = remapTexts(textsOf(doc), plan);
         const at = plan.findIndex((p) => p.src === 0 && p.page === doc.position?.page) + 1 || 1;
         await lib.replace(doc.id, out);
         const info = await code.inspect(doc.name, out).catch(() => null);
         const patch = {
           marks: kept.marks,
           bookmarks: kept.bookmarks,
+          texts,
           position: { page: at, frac: 0 },
           progress: plan.length > 1 ? (at - 1) / (plan.length - 1) : 0,
           ...(info?.cover ? { cover: info.cover } : {}),
@@ -955,7 +1190,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   const bookmarksOf = (doc) => (Array.isArray(doc.bookmarks) ? doc.bookmarks : (doc.bookmarks = []));
 
   function showMarkCount() {
-    const n = reading ? marksOf(reading.doc).length + bookmarksOf(reading.doc).length : 0;
+    const n = reading ? marksOf(reading.doc).length + bookmarksOf(reading.doc).length + textsOf(reading.doc).length : 0;
     marksButton.lastChild.textContent = n ? String(n) : '';
   }
 
@@ -1038,12 +1273,25 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
         ),
       ),
     );
+    const textItems = (doc ? sortTexts(textsOf(doc).filter((x) => x.text.trim())) : []).map((item) =>
+      h(
+        'li',
+        { class: 'rd-marks-item rd-text-item' },
+        h(
+          'button',
+          { type: 'button', 'data-color': item.color, onclick: () => showText(item.id) },
+          h('span', { class: 'rd-text-icon', 'aria-hidden': 'true' }, 'T'),
+          h('span', { class: 'rd-marks-body' }, h('span', { class: 'rd-marks-text' }, item.text), h('span', { class: 'rd-marks-where' }, t('reader.pageN', item.page))),
+        ),
+      ),
+    );
     marksList.replaceChildren(
       h('li', { class: 'rd-bm-actions' }, add),
       h('li', { class: 'rd-marks-section' }, `${t('reader.bookmarks.title')}${bookmarks.length ? ` · ${bookmarks.length}` : ''}`),
       ...(bookmarkItems.length ? bookmarkItems : [h('li', { class: 'rd-toc-empty' }, t('reader.bookmarks.none'))]),
       h('li', { class: 'rd-marks-section' }, `${t('reader.marks.title')}${marks.length ? ` · ${marks.length}` : ''}`),
       ...(markItems.length ? markItems : [h('li', { class: 'rd-toc-empty' }, t('reader.marks.none'))]),
+      ...(textItems.length ? [h('li', { class: 'rd-marks-section' }, `${t('reader.texts.title')} · ${textItems.length}`), ...textItems] : []),
     );
   }
 
@@ -1097,6 +1345,11 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     (e) => {
       const start = tap;
       tap = null;
+      // a press that placed or moved a text is not a tap on a mark
+      if (textPress) {
+        textPress = false;
+        return;
+      }
       if (!start || !reading?.controller?.markAt || performance.now() - start.at > 500 || Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) return;
       const sel = document.getSelection();
       if ((sel && !sel.isCollapsed && scroll.contains(sel.anchorNode)) || e.target.closest?.('a[data-target]')) return;
@@ -1115,7 +1368,10 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
       tocPanel.hidden = true;
       marksPanel.hidden = true;
     }
-    if (!e.target.closest('.rd-markpanel, .rd-selbar, .rd-head')) closeMark();
+    if (!e.target.closest('.rd-markpanel, .rd-selbar, .rd-head')) {
+      closeMark();
+      closeText();
+    }
   });
 
   // ---------- dropping files ----------

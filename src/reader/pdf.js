@@ -359,6 +359,51 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
     return true;
   }
 
+  // ---------- texts: words written on a page, over the page's own text (so they can be clicked) ----------
+
+  let written = []; // the texts on the pages (setTexts)
+  const textLayers = new Map(); // page number → its layer of texts
+  function paintTexts(activeId = null) {
+    for (const layer of textLayers.values()) layer.replaceChildren();
+    for (const item of written) {
+      const frame = pages[item.page - 1];
+      if (!frame) continue;
+      let layer = textLayers.get(item.page);
+      if (!layer) {
+        layer = document.createElement('div');
+        layer.className = 'pdf-texts';
+        frame.append(layer);
+        textLayers.set(item.page, layer);
+      }
+      const box = document.createElement('div');
+      box.className = `pdf-text${item.id === activeId ? ' active' : ''}${item.text.trim() ? '' : ' empty'}`;
+      box.dataset.text = item.id;
+      box.dataset.color = item.color;
+      box.textContent = item.text;
+      Object.assign(box.style, { left: `${item.x * 100}%`, top: `${item.y * 100}%`, width: `${item.w * 100}%`, fontSize: `calc(100cqw * ${item.size})` });
+      layer.append(box);
+    }
+  }
+  /** The page under a point of the screen, and the point on it as fractions of the page. */
+  function pointAt(x, y) {
+    for (const [i, frame] of pages.entries()) {
+      const f = frame.getBoundingClientRect();
+      if (x >= f.left && x <= f.right && y >= f.top && y <= f.bottom && f.width > 0) return { page: i + 1, x: (x - f.left) / f.width, y: (y - f.top) / f.height };
+    }
+    return null;
+  }
+  function goToText(id) {
+    const item = written.find((x) => x.id === id);
+    const index = (item?.page ?? 0) - 1;
+    if (!pages[index]) return false;
+    if (pager) pager.go(index);
+    else {
+      const f = pages[index].getBoundingClientRect();
+      host.scrollTop += f.top + item.y * f.height - viewTop() - host.clientHeight / 3;
+    }
+    return true;
+  }
+
   // ---------- finding words: every page's text, read a few pages at a time; matches as boxes like the marks ----------
 
   const texts = new Map(); // page number → Promise of { text, folded, items: [{ start, end, str, transform, width, height }], viewport }
@@ -561,6 +606,12 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
       return found;
     },
     goToMark,
+    setTexts(list = [], activeId = null) {
+      written = list;
+      paintTexts(activeId);
+    },
+    pointAt,
+    goToText,
     find,
     showFound,
     clearFind,
