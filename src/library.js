@@ -8,6 +8,7 @@ import { count, t } from './i18n.js';
 import { LEADINGS, READ_FONTS, READ_MODES, THEMES, TURNS } from './skins.js';
 import { MARK_COLORS, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, newBookmarkId, newMarkId, remapPdf, sortMarks } from './marks.js';
 import { openPageEditor } from './pageEditor.js';
+import { createFind } from './readerFind.js';
 
 /** A link from a note back to a place in a document: atlas:<document>#<mark>. */
 export const DOC_LINK_RE = /^atlas:(d-[a-z0-9]{6,40})(?:#(m-[a-z0-9]{4,40}))?$/;
@@ -85,6 +86,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   const viewButton = h('button', { type: 'button', class: 'tb-btn icon rd-size', onclick: () => toggleView() }, 'Aa');
   const tocButton = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => toggleToc() }, '☰');
   const moreButton = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => openMore() }, '⋯');
+  const findButton = h('button', { type: 'button', class: 'tb-btn icon rd-find-btn', onclick: () => finder.open() }, '⌕');
   const marksButton = h('button', { type: 'button', class: 'tb-btn icon rd-marks-btn', onclick: () => toggleMarks() }, '✎', h('span', { class: 'rd-marks-count' }));
   const prevButton = h('button', { type: 'button', class: 'rd-nav rd-nav-prev', onclick: () => reading?.controller?.prev() }, '‹');
   const nextButton = h('button', { type: 'button', class: 'rd-nav rd-nav-next', onclick: () => reading?.controller?.next() }, '›');
@@ -114,7 +116,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   const reader = h(
     'section',
     { class: 'reader', hidden: true },
-    h('header', { class: 'rd-head' }, readerBack, h('div', { class: 'rd-titles' }, title, subtitle), percent, viewButton, marksButton, tocButton, moreButton),
+    h('header', { class: 'rd-head' }, readerBack, h('div', { class: 'rd-titles' }, title, subtitle), percent, viewButton, findButton, marksButton, tocButton, moreButton),
     scroll,
     status,
     line,
@@ -126,6 +128,10 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     marksPanel,
     viewPanel,
   );
+
+  // Ctrl+F: a word or a phrase in the open document
+  const finder = createFind({ reader, getController: () => reading?.controller ?? null, onList: () => toggleToc(false) });
+  reader.append(finder.bar, finder.list);
 
   document.body.append(shelf, reader);
 
@@ -140,6 +146,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
       [readerBack, 'reader.back'],
       [viewButton, 'reader.viewTitle'],
       [tocButton, 'reader.toc'],
+      [findButton, 'reader.find.title'],
       [marksButton, 'reader.marks.list'],
       [moreButton, 'reader.more'],
       [prevButton, 'reader.prevPage'],
@@ -159,6 +166,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
       swatch.setAttribute('aria-label', swatch.title);
     }
     tocHead.textContent = t('reader.toc');
+    finder.localize();
   }
 
   const nameOf = (doc) => doc.title || doc.name;
@@ -370,6 +378,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     tocPanel.hidden = true;
     marksPanel.hidden = true;
     viewPanel.hidden = true;
+    finder.close({ keepText: false });
     hideSelBar();
     markPanel.hidden = true;
     openMarkId = null;
@@ -426,6 +435,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     if (!reading) return;
     closeMark();
     flush();
+    finder.close({ keepText: false });
     reading.closed = true;
     reading.controller?.close();
     reading = null;
@@ -540,6 +550,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   }
 
   function toggleView(show = viewPanel.hidden) {
+    finder.hideList();
     marksPanel.hidden = true;
     tocPanel.hidden = true;
     marksPanel.hidden = true;
@@ -577,6 +588,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   }
 
   function toggleToc(show = tocPanel.hidden) {
+    if (show) finder.hideList();
     viewPanel.hidden = true;
     marksPanel.hidden = true;
     tocPanel.hidden = !show;
@@ -1009,6 +1021,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   }
 
   function toggleMarks(show = marksPanel.hidden) {
+    finder.hideList();
     viewPanel.hidden = true;
     tocPanel.hidden = true;
     closeMark();
@@ -1103,6 +1116,14 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
       closeMark();
       return true;
     }
+    if (finder.listOpen()) {
+      finder.hideList();
+      return true;
+    }
+    if (finder.isOpen()) {
+      finder.close();
+      return true;
+    }
     if (!tocPanel.hidden || !marksPanel.hidden || !viewPanel.hidden) {
       tocPanel.hidden = true;
       marksPanel.hidden = true;
@@ -1139,6 +1160,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     else if (reading && mod && (e.code === 'Minus' || e.code === 'NumpadSubtract')) zoom(-1);
     else if (reading && mod && (e.code === 'Digit0' || e.code === 'Numpad0')) zoom(0);
     else if (reading?.controller && mod && e.code === 'KeyD') addBookmark();
+    else if (reading?.controller && mod && e.code === 'KeyF') finder.open();
+    else if (reading?.controller && e.key === 'F3' && !e.altKey) finder.step(e.shiftKey ? -1 : 1);
     else if (!reading && mod && e.code === 'KeyF') filter.focus();
     else handled = false;
     if (handled) {

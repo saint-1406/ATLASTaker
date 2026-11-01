@@ -11,6 +11,7 @@
 import { CLASSES, safeHref, TAGS } from './model.js';
 import { createPager } from './pager.js';
 import { MARK_COLORS } from '../marks.js';
+import { findIn, foldText, queryPattern, snippet } from './search.js';
 
 const BLOCKS = 'p, h1, h2, h3, h4, h5, h6, li, pre, figure, tr, dt, dd, hr';
 // a part's size in characters of text (a picture counts as a paragraph): a new chapter may start a
@@ -387,6 +388,112 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
     return true;
   }
 
+  // ---------- finding words: the whole text at once, matches painted as highlights like the marks ----------
+
+  let textIndex = null; // { text, folded, segments: [{ node, start, block, heading }] }, made at the first search
+  function indexText() {
+    if (textIndex) return textIndex;
+    let text = '';
+    const segments = [];
+    let heading = '';
+    let lastBlock = -2;
+    const walker = document.createTreeWalker(page, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!node.data) continue;
+      const block = blockOf(node);
+      if (block !== lastBlock) {
+        // blocks apart: a phrase may run on from one to the next, but words do not join
+        if (text) text += '\n\n';
+        lastBlock = block;
+        const h = /^H[1-6]$/.test(blocks[block]?.tagName) ? blocks[block] : null;
+        if (h) heading = h.textContent.replace(/\s+/g, ' ').trim();
+      }
+      segments.push({ node, start: text.length, block, heading });
+      text += node.data;
+    }
+    textIndex = { text, folded: foldText(text), segments };
+    return textIndex;
+  }
+  /** The segment an offset of the text falls in. */
+  function segmentAt(offset) {
+    const { segments } = textIndex;
+    let lo = 0;
+    let hi = segments.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (segments[mid].start <= offset) lo = mid;
+      else hi = mid - 1;
+    }
+    return segments[lo];
+  }
+
+  let found = []; // Range per match
+  let foundNow = -1;
+  function paintFound() {
+    if (!window.CSS?.highlights || typeof Highlight !== 'function') return;
+    if (found.length) CSS.highlights.set('atlas-find', new Highlight(...found));
+    else CSS.highlights.delete('atlas-find');
+    const now = found[foundNow];
+    if (now) {
+      const h = new Highlight(now);
+      h.priority = 1;
+      CSS.highlights.set('atlas-find-now', h);
+    } else CSS.highlights.delete('atlas-find-now');
+  }
+  function clearFind() {
+    found = [];
+    foundNow = -1;
+    paintFound();
+  }
+  /** Every match of a query: [{ before, text, after, place (block number), heading }]; { noText } when there are no words to look in. */
+  async function find(query) {
+    // the first search reads the whole book: let "searching" show first
+    if (!textIndex) await new Promise((resolve) => setTimeout(resolve, 0));
+    const { text, folded } = indexText();
+    clearFind();
+    if (!folded.text.trim()) return { hits: [], noText: true };
+    const hits = [];
+    for (const [s, e] of findIn(folded, queryPattern(query))) {
+      const a = segmentAt(s);
+      const b = segmentAt(e - 1);
+      const r = document.createRange();
+      try {
+        r.setStart(a.node, s - a.start);
+        r.setEnd(b.node, Math.min(b.node.data.length, e - b.start));
+      } catch {
+        continue;
+      }
+      found.push(r);
+      const [before, match, after] = snippet(text, s, e);
+      hits.push({ before, text: match, after, place: a.block, heading: a.heading });
+    }
+    paintFound();
+    return { hits };
+  }
+  /** Shows match `i` (its page, or the passage a third down the screen) and marks it as the current one. */
+  function showFound(i) {
+    const r = found[i];
+    if (!r) return false;
+    foundNow = i;
+    paintFound();
+    settling = false;
+    if (pager) {
+      const p = partOf(r.startContainer.parentElement);
+      if (p !== shown) {
+        showPart(p);
+        pager.relayout();
+      }
+      const box = r.getClientRects()[0] ?? r.getBoundingClientRect();
+      pager.go(pageAt(box.left + 1), { animate: false });
+    } else {
+      const box = r.getBoundingClientRect();
+      const view = host.getBoundingClientRect();
+      if (box.top < view.top + 40 || box.bottom > view.bottom - 40) host.scrollTop += box.top - view.top - host.clientHeight / 3;
+    }
+    report();
+    return true;
+  }
+
   const report = () => onPosition?.(current(), progress());
 
   function setMode(next, pos = current()) {
@@ -558,6 +665,9 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
       return null;
     },
     goToMark,
+    find,
+    showFound,
+    clearFind,
     /** Back to a place kept earlier (a bookmark). */
     goTo(pos) {
       if (settling) {
@@ -574,7 +684,7 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
       return { ...this.where(block), snippet: block.textContent.replace(/\s+/g, ' ').trim().slice(0, 160) };
     },
     close() {
-      for (const name of HIGHLIGHTS) window.CSS?.highlights?.delete(name);
+      for (const name of [...HIGHLIGHTS, 'atlas-find', 'atlas-find-now']) window.CSS?.highlights?.delete(name);
       resized.disconnect();
       pager?.destroy();
       host.classList.remove('paged');

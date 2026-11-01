@@ -3084,6 +3084,155 @@ textarea {
   outline: 2px solid var(--accent);
 }
 
+/* finding words: a bar under the reader's header, the matches as highlights (books) or boxes (PDF) */
+:root {
+  --find-hit: rgba(255, 170, 0, 0.42);
+  --find-now: rgba(255, 110, 0, 0.75);
+  --find-h: 48px;
+}
+::highlight(atlas-find) { background-color: var(--find-hit); }
+::highlight(atlas-find-now) { background-color: var(--find-now); color: #000; }
+
+.pdf-finds {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.pdf-found {
+  position: absolute;
+  background: var(--find-hit);
+  mix-blend-mode: multiply;
+  border-radius: 2px;
+}
+
+.pdf-found.now {
+  background: var(--find-now);
+  outline: 2px solid rgba(255, 110, 0, 0.9);
+}
+
+.rd-find {
+  position: absolute;
+  top: var(--titlebar-h);
+  right: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: min(460px, 100vw);
+  height: var(--find-h);
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--sheet-edge);
+  border-top: 0;
+  border-radius: 0 0 0 10px;
+  background: var(--bg-raised);
+  box-shadow: var(--shadow);
+}
+
+.rd-find[hidden] {
+  display: none;
+}
+
+.rd-find-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.rd-find-count {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 4px;
+  font: 11px var(--font-mono);
+  color: var(--ink-dim);
+}
+
+.rd-find-count.none {
+  color: var(--danger, #d0453a);
+}
+
+.rd-find .tb-btn.on {
+  color: var(--accent);
+}
+
+.rd-find-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  overflow: hidden;
+}
+
+.rd-find-progress[hidden] {
+  display: none;
+}
+
+.rd-find-progress i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 0.2s;
+}
+
+/* the panels make room for the bar while it is open */
+.reader.finding .rd-toc {
+  top: calc(var(--titlebar-h) + var(--find-h));
+}
+
+.reader.finding .rd-view {
+  top: calc(var(--titlebar-h) + var(--find-h) + 6px);
+}
+
+.rd-find-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rd-find-item button {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 8px 18px;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  font: 13px/1.4 var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+
+.rd-find-item button:hover,
+.rd-find-item button:focus-visible,
+.rd-find-item.now button {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+.rd-find-where {
+  font: 10.5px var(--font-mono);
+  letter-spacing: 0.03em;
+  color: var(--ink-dim);
+}
+
+.rd-find-snippet mark {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: var(--find-hit);
+  color: inherit;
+}
+
+.rd-find-item.now .rd-find-snippet mark {
+  background: var(--find-now);
+  color: #000;
+}
+
 .rd-quote:disabled {
   opacity: 0.6;
 }
