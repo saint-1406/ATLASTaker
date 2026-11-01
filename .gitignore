@@ -12,3 +12,6 @@ android/build/
 android/app/build/
 android/app/src/main/assets/www/
 android/local.properties
+# the Google sign-in client of the Windows app (CI writes it from a secret; see server/sync.js)
+server/google-client.json
+.dev-data2/

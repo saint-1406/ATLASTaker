@@ -63,4 +63,6 @@ dependencies {
     implementation 'androidx.webkit:webkit:1.12.1'
     // translation of a selected passage on the phone, offline once the language models are downloaded
     implementation 'com.google.mlkit:translate:17.0.3'
+    // sign-in with Google for sync (AuthorizationClient: access to the app's folder on Drive)
+    implementation 'com.google.android.gms:play-services-auth:21.2.0'
 }

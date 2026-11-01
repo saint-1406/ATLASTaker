@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STAGE = path.join(ROOT, 'out', 'stage');
 // src/marks.js: the rules for a document's marks, which the server checks too
-const APP_FILES = ['index.html', 'package.json', 'dist', 'assets', 'server', 'src/marks.js'];
+const APP_FILES = ['index.html', 'package.json', 'dist', 'assets', 'server', 'src/marks.js', 'src/sync'];
 
 if (!fs.existsSync(path.join(ROOT, 'dist', 'app.js'))) {
   console.error('Нет сборки интерфейса: сначала npm run build');

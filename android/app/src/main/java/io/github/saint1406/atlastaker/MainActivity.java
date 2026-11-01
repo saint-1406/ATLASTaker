@@ -33,6 +33,7 @@ import android.widget.Toast;
 import androidx.activity.ComponentActivity;
 import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.IntentSenderRequest;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
@@ -46,6 +47,11 @@ import com.google.mlkit.nl.translate.TranslateRemoteModel;
 import com.google.mlkit.nl.translate.Translation;
 import com.google.mlkit.nl.translate.Translator;
 import com.google.mlkit.nl.translate.TranslatorOptions;
+import com.google.android.gms.auth.api.identity.AuthorizationRequest;
+import com.google.android.gms.auth.api.identity.AuthorizationResult;
+import com.google.android.gms.auth.api.identity.Identity;
+import com.google.android.gms.common.api.ApiException;
+import com.google.android.gms.common.api.Scope;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -57,6 +63,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -69,7 +76,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * ATLAS on Android: the same page as the desktop app, its notes in the WebView's IndexedDB, served
  * from the app's own assets at https://appassets.androidplatform.net. The native side does what a
  * page cannot do by itself: take files other apps hand over ("Open with", "Share"), save files,
- * use the clipboard, follow the back button, colour the system bars.
+ * use the clipboard, follow the back button, colour the system bars, and sign in with Google for
+ * sync: access to the app's own folder on the user's Drive (src/sync/android.js runs the rounds).
  */
 public class MainActivity extends ComponentActivity {
     private static final String HOST = "appassets.androidplatform.net";
@@ -92,6 +100,12 @@ public class MainActivity extends ComponentActivity {
     private boolean dictating;
     private String dictationLanguage = "ru-RU";
     private int silentRounds; // listening rounds in a row that heard nothing: after a few, dictation ends
+    // Google sign-in for sync. Google knows this app by its package and signing key (the release key's
+    // SHA-1 is registered with the app's Android OAuth client), so a debug-signed build cannot sign in.
+    private static final List<Scope> SYNC_SCOPES = Arrays.asList(
+            new Scope("https://www.googleapis.com/auth/drive.appdata"), new Scope("email"), new Scope("openid"));
+    private ActivityResultLauncher<IntentSenderRequest> authorizer;
+    private String authorizeId; // the page's request waiting for the Google sheet
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -139,6 +153,21 @@ public class MainActivity extends ComponentActivity {
                 final boolean saved = ok;
                 runOnUiThread(() -> Toast.makeText(this, saved ? R.string.saved : R.string.not_saved, Toast.LENGTH_SHORT).show());
             });
+        });
+
+        authorizer = registerForActivityResult(new ActivityResultContracts.StartIntentSenderForResult(), result -> {
+            String id = authorizeId;
+            authorizeId = null;
+            if (result.getResultCode() != RESULT_OK || result.getData() == null) {
+                sendToken(id, null, "cancelled");
+                return;
+            }
+            try {
+                AuthorizationResult granted = Identity.getAuthorizationClient(this).getAuthorizationResultFromIntent(result.getData());
+                sendToken(id, granted.getAccessToken(), null);
+            } catch (ApiException e) {
+                sendToken(id, null, "Google " + e.getStatusCode());
+            }
         });
 
         microphone = registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
@@ -239,6 +268,45 @@ public class MainActivity extends ComponentActivity {
         if (recognizer != null) recognizer.destroy();
         if (web != null) web.destroy();
         super.onDestroy();
+    }
+
+    // ---------- sync: an access token for the app's folder on Google Drive ----------
+
+    /** interactive: may show Google's sheet (account, consent); otherwise answers "needs-login" instead. */
+    private void authorize(String id, boolean interactive) {
+        AuthorizationRequest request = AuthorizationRequest.builder().setRequestedScopes(SYNC_SCOPES).build();
+        Identity.getAuthorizationClient(this).authorize(request)
+                .addOnSuccessListener(result -> {
+                    if (!result.hasResolution()) {
+                        sendToken(id, result.getAccessToken(), null);
+                    } else if (!interactive) {
+                        sendToken(id, null, "needs-login");
+                    } else if (authorizeId != null || result.getPendingIntent() == null) {
+                        sendToken(id, null, "busy");
+                    } else {
+                        authorizeId = id;
+                        try {
+                            authorizer.launch(new IntentSenderRequest.Builder(result.getPendingIntent().getIntentSender()).build());
+                        } catch (RuntimeException e) {
+                            authorizeId = null;
+                            sendToken(id, null, "failed");
+                        }
+                    }
+                })
+                .addOnFailureListener(e -> sendToken(id, null, e instanceof ApiException ? "Google " + ((ApiException) e).getStatusCode() : "failed"));
+    }
+
+    private void sendToken(String id, String token, String error) {
+        if (id == null || web == null) return;
+        try {
+            JSONObject answer = new JSONObject();
+            answer.put("id", id);
+            if (token != null) answer.put("token", token);
+            else answer.put("error", error == null ? "failed" : error);
+            web.evaluateJavascript("window.__atlasSync && window.__atlasSync.token(" + answer + ")", null);
+        } catch (JSONException ignored) {
+            // nothing to say to the page
+        }
     }
 
     // ---------- dictation: the phone's speech recognition, one phrase at a time, again and again ----------
@@ -597,6 +665,12 @@ public class MainActivity extends ComponentActivity {
                     Toast.makeText(MainActivity.this, R.string.not_saved, Toast.LENGTH_SHORT).show();
                 }
             });
+        }
+
+        /** An access token for sync; the answer comes through window.__atlasSync.token({ id, token | error }). */
+        @JavascriptInterface
+        public void syncAuthorize(String id, boolean interactive) {
+            runOnUiThread(() -> authorize(id, interactive));
         }
 
         @JavascriptInterface

@@ -31,6 +31,7 @@ import {
   showBlocker,
 } from './overlays.js';
 import { fileNameFor, makeZip } from './backup.js';
+import { createSyncClient } from './sync/client.js';
 import welcomeText from './welcome.md';
 import welcomeBrowserText from './welcome-browser.md';
 import welcomeAndroidText from './welcome-android.md';
@@ -84,6 +85,7 @@ let library = null; // the shelf and the reader, where this build has a place fo
 let dictation = null; // speech to text at the cursor (dictation.js)
 const translator = createTranslator({ api, android }); // a selected passage, Russian ↔ English (translateCard.js)
 const phone = Boolean(android) || matchMedia('(pointer: coarse)').matches;
+let sync = null; // Google Drive sync (sync/client.js), where this build has it
 
 let markReady;
 const ready = new Promise((resolve) => {
@@ -214,6 +216,61 @@ async function boot() {
   setInterval(tickPace, 10_000);
   markReady();
   if (android) receiveIncoming();
+  sync = createSyncClient({
+    api,
+    h,
+    toast,
+    beforeRound: async () => {
+      library?.flush();
+      await flushSave();
+    },
+    openDocs: () => [library?.openDocId()].filter(Boolean),
+    afterRound: afterSync,
+  });
+  sync?.start();
+}
+
+/** A sync round brought notes or cards from another device: show them. */
+async function afterSync({ pulled, trashed, conflicts, docsChanged, first }) {
+  if (docsChanged) await library?.reload();
+  if (!pulled.length && !trashed.length && !conflicts.length) return;
+  if (first) {
+    // a device signing in for the first time: its untouched welcome note would sit next to the one the
+    // other devices already have; it goes to the trash (and, being untouched, off the Drive next round)
+    const welcomes = new Set(Object.values(WELCOME).flatMap((byKind) => Object.values(byKind)));
+    for (const note of [...notes.values()]) {
+      if (pulled.includes(note.id) || !welcomes.has(note.content) || (note.id === currentId && dirty)) continue;
+      await api.trash(note.id).catch(() => {});
+    }
+  }
+  const fresh = new Map((await api.list()).map((n) => [n.id, n]));
+  for (const [id, note] of fresh) {
+    const known = notes.get(id);
+    if (known && known.content === note.content) continue;
+    if (id === currentId && known) {
+      if (dirty) {
+        // typed here while the round ran: the text on screen stays, the incoming version becomes a note of its own
+        const copy = await api.create(note.content);
+        notes.set(copy.id, { ...copy, info: analyze(copy.content) });
+        continue;
+      }
+      const sel = editor.view.state.selection.main;
+      const fit = (v) => Math.min(v, note.content.length);
+      editor.view.dispatch({ changes: { from: 0, to: editor.view.state.doc.length, insert: note.content }, selection: { anchor: fit(sel.anchor), head: fit(sel.head) } });
+      dirty = false; // the change came from the disk, nothing to save
+      clearTimeout(saveTimer);
+      setSaveState('saved', note.updated, { quiet: true });
+    } else editorStates.delete(id);
+    notes.set(id, { ...known, ...note, info: analyze(note.content) });
+  }
+  for (const id of [...notes.keys()]) if (!fresh.has(id)) forget(id);
+  if (currentId && !notes.has(currentId)) {
+    currentId = null;
+    await openNote(newestId());
+  }
+  for (const { id } of conflicts) toast(t('sync.conflict', titleOf(notes.get(id))), { timeout: 8000 });
+  renderIndex();
+  refreshChrome();
 }
 
 /** Files another Android app handed over ("Open with" / "Share"): onto the shelf, the last one opened. */
@@ -1262,6 +1319,7 @@ function storageInfo() {
 function showSettings() {
   openSettings({
     getData: storageInfo,
+    getSync: () => sync?.section() ?? null,
     getPrefs: () => ({ ...prefs }),
     onChange(patch) {
       if ('fontScale' in patch) applyFontScale(patch.fontScale);

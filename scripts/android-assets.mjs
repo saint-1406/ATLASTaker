@@ -17,7 +17,14 @@ for (const built of ['app.js', 'reader.js', 'styles.css']) {
 
 fs.rmSync(WWW, { recursive: true, force: true });
 fs.mkdirSync(path.join(WWW, 'assets'), { recursive: true });
-fs.copyFileSync(path.join(ROOT, 'index.html'), path.join(WWW, 'index.html'));
+// the app talks to Google Drive from the page (sync, src/sync/android.js); the desktop page does not
+const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+const androidHtml = html.replace("connect-src 'self'", "connect-src 'self' https://www.googleapis.com");
+if (androidHtml === html) {
+  console.error('index.html: connect-src не найден, синхронизация на Android не сможет достучаться до Google Диска');
+  process.exit(1);
+}
+fs.writeFileSync(path.join(WWW, 'index.html'), androidHtml);
 // dist/translate.js (the opus-mt translator of the Windows app) stays out: the phone translates with ML Kit
 const translatorCode = path.join(ROOT, 'dist', 'translate.js');
 fs.cpSync(path.join(ROOT, 'dist'), path.join(WWW, 'dist'), { recursive: true, filter: (src) => path.resolve(src) !== translatorCode });

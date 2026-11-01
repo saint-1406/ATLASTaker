@@ -392,7 +392,7 @@ export function commandPalette({ notes, commands, onPick, onCreate, initial = ''
  * Ctrl+,: the look and the language of the app. Changes apply at once; getPrefs() and getData()
  * are read again after each one, so the dialog always shows what is on screen, in its language.
  */
-export function openSettings({ getPrefs, onChange, getData }) {
+export function openSettings({ getPrefs, onChange, getData, getSync }) {
   openDialog(
     (box, close) => {
       // the frame stays, its words and the body are redrawn: the body keeps its scroll position
@@ -500,6 +500,7 @@ export function openSettings({ getPrefs, onChange, getData }) {
           group(t('settings.accent'), accents, atlas ? h('div', { class: 'set-note' }, t('settings.atlasAccent')) : null),
           group(t('settings.size'), size),
           storage,
+          getSync?.() ?? null,
         );
         // keep keyboard focus on the control that was just used
         if (focused) body.querySelector(`[data-focus-key="${CSS.escape(focused)}"]`)?.focus();
