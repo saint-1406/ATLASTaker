@@ -32,6 +32,8 @@ const options = {
   loader: { '.woff2': 'file', '.woff': 'file', '.md': 'text' },
   assetNames: 'assets/[name]-[hash]',
   plugins: [workerAsText],
+  // the version the side menu's "Account" section shows
+  define: { __VERSION__: JSON.stringify(JSON.parse(fs.readFileSync('package.json', 'utf8')).version) },
   logLevel: 'info',
 };
 

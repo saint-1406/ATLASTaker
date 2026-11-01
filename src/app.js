@@ -23,7 +23,7 @@ import {
   openCommentDialog,
   confirmDialog,
   commandPalette,
-  openSettings,
+  settingsSection,
   openRestoreDialog,
   showImage,
   toast,
@@ -32,6 +32,8 @@ import {
 } from './overlays.js';
 import { fileNameFor, makeZip } from './backup.js';
 import { createSyncClient } from './sync/client.js';
+import { createSideMenu, sideGroup, sideItem, sideToggle } from './sidemenu.js';
+import { openAppearance } from './appearance.js';
 import welcomeText from './welcome.md';
 import welcomeBrowserText from './welcome-browser.md';
 import welcomeAndroidText from './welcome-android.md';
@@ -86,6 +88,8 @@ let dictation = null; // speech to text at the cursor (dictation.js)
 const translator = createTranslator({ api, android }); // a selected passage, Russian ↔ English (translateCard.js)
 const phone = Boolean(android) || matchMedia('(pointer: coarse)').matches;
 let sync = null; // Google Drive sync (sync/client.js), where this build has it
+let sideMenu = null; // the menu sliding in from the right (sidemenu.js)
+let readingTimer = 0;
 
 let markReady;
 const ready = new Promise((resolve) => {
@@ -191,19 +195,16 @@ async function boot() {
       phone,
       translator,
       getReading: () => normalizeReading(prefs),
-      onReading(patch) {
-        Object.assign(prefs, normalizeReading({ ...prefs, ...patch }));
-        api.setState(normalizeReading(prefs)).catch(() => {});
-      },
-      getTheme: () => prefs.theme,
-      onTheme: (theme) => setLook({ theme }),
+      onReading: setReading,
+      onCustomize: () => showAppearance({ pdf: library.openDocKind?.() === 'pdf' }),
+      onReaderColors: (bg, light) => (bg ? android?.setBars(bg, light) : applyBars()),
       onQuote: quoteToNote,
       onOpenNote: (id) => openNote(id),
       onLink: (url) => api.openExternal(url),
       onClose: () => editor.view.focus(),
     });
-    $('#btn-library').hidden = false;
   }
+  sideMenu = createSideMenu({ sections: menuSections(), onClose: () => editor.view.focus({ preventScroll: true }) });
   bindChrome();
   applyLook({ persist: false });
 
@@ -1221,7 +1222,6 @@ function applyLook({ persist = true } = {}) {
   if (PALETTES[prefs.theme]) root.dataset.palette = prefs.theme;
   else delete root.dataset.palette;
   root.dataset.accent = prefs.accent;
-  $('#btn-theme').textContent = theme === 'dark' ? '☀' : '☾';
   const c = copy();
   document.querySelectorAll('[data-copy]').forEach((el) => {
     el.textContent = c[el.dataset.copy];
@@ -1235,9 +1235,11 @@ function applyLook({ persist = true } = {}) {
     // only a convenience
   }
   if (persist) api.setState({ skin: prefs.skin, theme: prefs.theme, accent: prefs.accent }).catch(() => {});
-  // the phone's status and navigation bars take the page's colour
-  android?.setBars(getComputedStyle(root).getPropertyValue('--bg').trim(), theme === 'light');
+  applyBars();
   if (!editor) return;
+  // the reading theme "like the app" follows, and the menu shows the new choice
+  library?.restyle();
+  sideMenu?.refresh();
 
   outline.setCopy(c);
   setSaveState(lastSave.state, lastSave.at, { quiet: true });
@@ -1256,9 +1258,33 @@ function applyLook({ persist = true } = {}) {
   if (atlas.isOpen) atlas.render();
 }
 
+/** The phone's status and navigation bars take the page's colour. */
+function applyBars() {
+  android?.setBars(getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(), effectiveTheme() === 'light');
+}
+
 function setLook(patch) {
   Object.assign(prefs, normalizeLook({ ...prefs, ...patch }));
   applyLook();
+}
+
+/** How books are shown (skins.js: readMode, readTurn, readLook): kept a moment after the last change. */
+function setReading(patch) {
+  Object.assign(prefs, normalizeReading({ ...prefs, ...patch }));
+  clearTimeout(readingTimer);
+  readingTimer = setTimeout(() => api.setState(normalizeReading(prefs)).catch(() => {}), 300);
+}
+
+/** The full "Theme settings" screen for the reading theme (appearance.js). */
+function showAppearance({ pdf = false } = {}) {
+  openAppearance({
+    pdf,
+    getLook: () => normalizeReading(prefs).readLook,
+    setLook(readLook) {
+      setReading({ readLook });
+      library?.restyle();
+    },
+  });
 }
 
 function toggleTheme() {
@@ -1305,28 +1331,105 @@ function toggleFocus(on = !focusMode) {
   editor.view.focus();
 }
 
-/** Where the notes are and what to do with them, for the settings dialog (read again in a new language). */
+/** Where the notes are, for the settings section (read again in a new language). */
 function storageInfo() {
-  const actions = [
-    { text: t('settings.exportAll'), run: exportAll },
-    { text: t('settings.import'), run: importFiles },
-  ];
-  if (api.openNotesFolder) actions.push({ text: t('settings.openFolder'), run: () => api.openNotesFolder() });
-  if (api.openBackupsFolder) actions.push({ text: t('settings.backupsFolder'), run: () => api.openBackupsFolder() });
-  return { text: t(android ? 'settings.onPhone' : inBrowser ? 'settings.inBrowser' : 'settings.onDisk'), actions };
+  return { text: t(android ? 'settings.onPhone' : inBrowser ? 'settings.inBrowser' : 'settings.onDisk') };
 }
 
+/** Ctrl+, and the palette's "Settings": the menu, open on its settings. */
 function showSettings() {
-  openSettings({
-    getData: storageInfo,
-    getSync: () => sync?.section() ?? null,
-    getPrefs: () => ({ ...prefs }),
-    onChange(patch) {
-      if ('fontScale' in patch) applyFontScale(patch.fontScale);
-      else if ('lang' in patch) setLanguage(patch.lang);
-      else setLook(patch);
+  sideMenu?.open('settings');
+}
+
+const percentOf = (progress) => `${Math.round(Math.max(0, Math.min(1, progress || 0)) * 100)}%`;
+
+/**
+ * What the side menu shows, section by section (sidemenu.js). Each is drawn when shown, so it tells
+ * what is true now. `close(then)` slides the menu away and then does the thing.
+ */
+function menuSections() {
+  const c = () => copy();
+  return {
+    notes: (close) => [
+      sideGroup(
+        t('side.write'),
+        sideItem({ icon: '＋', text: c().newNote, kbd: 'Ctrl+N', run: () => close(() => createNote()) }),
+        sideItem({ icon: '▤', text: t('side.list'), kbd: 'Ctrl+B', run: () => close(toggleIndex) }),
+        sideItem({ icon: '⌕', text: t('side.find'), kbd: 'Ctrl+K', run: () => close(() => openPalette()) }),
+        isAtlas() ? sideItem({ icon: '▦', text: t('side.atlas'), kbd: 'Ctrl+M', run: () => close(toggleAtlas) }) : null,
+        sideToggle({ icon: '◎', text: t('side.focus'), on: focusMode, toggle: () => close(() => toggleFocus()) }),
+        sideItem({ icon: '◉', text: t('side.dictate'), kbd: 'Ctrl+Shift+D', run: () => close(toggleDictation) }),
+        sideItem({ icon: '🌐', text: t('side.translate'), kbd: 'Ctrl+Shift+X', run: () => close(() => translateSelection()) }),
+      ),
+      sideGroup(
+        t('side.files'),
+        sideItem({ icon: '⇩', text: t('side.saveCopy'), run: () => close(() => exportNote(currentId)) }),
+        sideItem({ icon: '⇊', text: t('side.exportAll'), run: () => close(exportAll) }),
+        sideItem({ icon: '⇡', text: t('side.import'), run: () => close(importFiles) }),
+        api.openNotesFolder ? sideItem({ icon: '▭', text: t('side.notesFolder'), run: () => close(() => api.openNotesFolder()) }) : null,
+        api.openBackupsFolder ? sideItem({ icon: '⟲', text: t('side.backupsFolder'), run: () => close(() => api.openBackupsFolder()) }) : null,
+      ),
+    ],
+    library: (close) => {
+      if (!library) return [h('p', { class: 'side-empty' }, t('side.noLibrary'))];
+      // the last book comes from storage: the card fills in a moment after the menu opens
+      const resume = h('div', { class: 'side-resume', hidden: true });
+      library.shelfSummary().then(({ count: total, last }) => {
+        if (!resume.isConnected) return;
+        resume.hidden = false;
+        if (!last) {
+          resume.replaceChildren(h('p', { class: 'side-empty' }, total ? t('side.openLibrary') : t('side.nothingYet')));
+          if (total) resume.hidden = true;
+          return;
+        }
+        resume.replaceChildren(
+          h(
+            'button',
+            { type: 'button', class: 'side-book', onclick: () => close(() => (flushSave(), library.readDoc(last.id))) },
+            h('span', { class: 'side-book-cover', 'aria-hidden': 'true' }, last.format.toUpperCase()),
+            h(
+              'span',
+              { class: 'side-text' },
+              h('span', { class: 'side-hint' }, t('side.continue')),
+              h('span', { class: 'side-label' }, last.name),
+              last.author ? h('span', { class: 'side-hint' }, last.author) : null,
+              h('span', { class: 'side-progress', 'aria-hidden': 'true' }, h('i', { style: `width: ${percentOf(last.progress)}` })),
+            ),
+            h('span', { class: 'side-kbd' }, percentOf(last.progress)),
+          ),
+        );
+      });
+      return [
+        resume,
+        sideGroup(
+          null,
+          sideItem({ icon: '▥', text: t('side.openLibrary'), kbd: 'Ctrl+O', run: () => close(() => openLibrary()) }),
+          sideItem({ icon: '⇡', text: t('side.addDocument'), hint: t('side.addDocumentHint'), run: () => close(() => openLibrary({ pick: true })) }),
+        ),
+        sideGroup(null, sideItem({ icon: 'Aa', text: t('side.readLook'), hint: t('side.readLookHint'), chevron: true, run: () => close(() => showAppearance()) })),
+      ];
     },
-  });
+    settings: (close) => [
+      sideGroup(
+        null,
+        sideItem({ icon: '◐', text: t('side.darkLight'), kbd: 'Ctrl+Shift+L', run: toggleTheme }),
+        sideItem({ icon: 'Aa', text: t('side.readLook'), hint: t('side.readLookHint'), chevron: true, run: () => close(() => showAppearance()) }),
+      ),
+      settingsSection({
+        getData: storageInfo,
+        getPrefs: () => ({ ...prefs }),
+        onChange(patch) {
+          if ('fontScale' in patch) applyFontScale(patch.fontScale);
+          else if ('lang' in patch) setLanguage(patch.lang);
+          else setLook(patch);
+        },
+      }),
+    ],
+    account: () => [
+      sync ? sync.section() : h('p', { class: 'side-empty' }, t('side.noSync')),
+      h('p', { class: 'side-version' }, t('side.version', typeof __VERSION__ === 'string' ? __VERSION__ : '')),
+    ],
+  };
 }
 
 // ---------- commands & keys ----------
@@ -1484,14 +1587,11 @@ function bindChrome() {
   $('#btn-dictate').addEventListener('click', toggleDictation);
   $('#btn-translate').addEventListener('pointerdown', (e) => e.preventDefault());
   $('#btn-translate').addEventListener('click', () => translateSelection());
-  $('#btn-library').addEventListener('click', () => {
-    closeIndexPanel();
-    flushSave();
-    openLibrary();
-  });
   $('#btn-find').addEventListener('click', () => openPalette());
-  $('#btn-theme').addEventListener('click', toggleTheme);
-  $('#btn-settings').addEventListener('click', showSettings);
+  $('#btn-menu').addEventListener('click', () => {
+    closeIndexPanel();
+    sideMenu.toggle();
+  });
   const filter = $('#index-filter');
   filter.addEventListener('input', renderIndex);
   filter.addEventListener('keydown', (e) => {

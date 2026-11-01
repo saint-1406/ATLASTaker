@@ -27,6 +27,8 @@ const STATE_RULES = {
   readTurn: (v) => ['flip', 'slide', 'stack', 'fade', 'none'].includes(v),
   readFont: (v) => v === 'serif' || v === 'sans',
   readLeading: (v) => ['tight', 'normal', 'loose'].includes(v),
+  // reading themes and their changes: the page checks every field (normalizeReadLook), here only the size
+  readLook: (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v) && JSON.stringify(v).length < 8000,
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

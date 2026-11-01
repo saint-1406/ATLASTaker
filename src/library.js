@@ -5,7 +5,8 @@
 
 import { h, toast, confirmDialog, showMenu, isOverlayOpen } from './overlays.js';
 import { count, t } from './i18n.js';
-import { LEADINGS, READ_FONTS, READ_MODES, THEMES, TURNS } from './skins.js';
+import { shownTheme } from './skins.js';
+import { drawQuickPanel, paintTheme, setDim } from './readLook.js';
 import { MARK_COLORS, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, MAX_TEXT_LENGTH, MAX_TEXTS, newBookmarkId, newMarkId, newTextId, remapPdf, remapTexts, sortMarks, sortTexts, TEXT_COLORS, TEXT_SIZES } from './marks.js';
 import { openPageEditor } from './pageEditor.js';
 import { createFind } from './readerFind.js';
@@ -41,13 +42,13 @@ function loadReader() {
 
 /**
  * api: the bridge (api.library holds the documents). getReading() / onReading(patch): how books are
- * shown (skins.js: readMode, readTurn, readFont, readLeading), kept by the app; getTheme() /
- * onTheme(theme): the app's theme, which the reader's view panel can change too. onQuote(doc, text,
- * where) → { id, title } of the note the quote went to; onOpenNote(id) shows a note; onLink(url)
- * opens a web link; onClose() runs when the shelf goes away. translator: translateCard.js, for the
- * selection bar's "Translate".
+ * shown (skins.js: readMode, readTurn, readLook), kept by the app; onCustomize() opens the full
+ * appearance screen; onReaderColors(bg, light) tells the page colour of the reading theme (null: the
+ * reader closed). onQuote(doc, text, where) → { id, title } of the note the quote went to;
+ * onOpenNote(id) shows a note; onLink(url) opens a web link; onClose() runs when the shelf goes away.
+ * translator: translateCard.js, for the selection bar's "Translate".
  */
-export function createLibrary({ api, phone = false, getReading, onReading, getTheme, onTheme, onQuote, onOpenNote, onLink, onClose, translator = null }) {
+export function createLibrary({ api, phone = false, getReading, onReading, onCustomize, onReaderColors, onQuote, onOpenNote, onLink, onClose, translator = null }) {
   const lib = api.library;
   let docs = [];
   let reading = null; // { doc, controller, closed }
@@ -144,6 +145,9 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   // Ctrl+F: a word or a phrase in the open document
   const finder = createFind({ reader, getController: () => reading?.controller ?? null, onList: () => toggleToc(false) });
   reader.append(finder.bar, finder.list);
+  // brightness: a dark veil over the whole reading page
+  const dim = h('div', { class: 'rd-dim', 'aria-hidden': 'true', hidden: true });
+  reader.append(dim);
 
   document.body.append(shelf, reader);
 
@@ -401,9 +405,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     setPlacing(false);
     textButton.hidden = doc.format !== 'pdf';
     const look = getReading();
-    reader.dataset.font = look.readFont;
-    reader.dataset.leading = look.readLeading;
     reader.dataset.format = doc.format;
+    applyReadLook();
     reader.classList.remove('is-paged');
     title.textContent = nameOf(doc);
     subtitle.textContent = doc.author || '';
@@ -466,6 +469,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     marksPanel.hidden = true;
     viewPanel.hidden = true;
     reader.classList.remove('is-paged');
+    onReaderColors?.(null);
     render();
     grid.querySelector('.lib-card')?.focus({ preventScroll: true });
   }
@@ -483,91 +487,59 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     if (!viewPanel.hidden) drawView();
   }
 
-  // ---------- the view panel: size, pages or scroll, page turn, font, spacing, theme ----------
+  // ---------- the quick panel "Themes and settings" (readLook.js) and the reading theme ----------
 
-  function choices(label, options, current, words, pick) {
-    return h(
-      'section',
-      { class: 'rdv-group' },
-      h('div', { class: 'set-label' }, label),
-      h(
-        'div',
-        { class: 'seg', role: 'radiogroup', 'aria-label': label },
-        options.map((option) =>
-          h('button', { type: 'button', class: 'seg-btn', role: 'radio', 'aria-checked': String(option === current), onclick: () => pick(option) }, words(option)),
-        ),
-      ),
-    );
+  const systemDark = matchMedia('(prefers-color-scheme: dark)');
+  systemDark.addEventListener('change', () => applyReadLook());
+  let layoutKey = '';
+
+  /** Paints the reader in its theme; a new font or spacing lays the open book out again. */
+  function applyReadLook() {
+    const look = getReading().readLook;
+    const style = paintTheme(reader, look, shownTheme(look, systemDark.matches));
+    setDim(dim, look.bright);
+    const key = JSON.stringify([style.font, style.bold, style.leading, style.letter, style.word, style.margin, style.justify]);
+    if (key !== layoutKey) {
+      layoutKey = key;
+      reading?.controller?.relayout();
+    }
+    if (!reader.hidden) {
+      const colours = getComputedStyle(reader);
+      onReaderColors?.(colours.getPropertyValue('--bg').trim(), colours.colorScheme === 'light');
+    }
   }
 
   function drawView() {
-    const look = getReading();
     const controller = reading?.controller;
-    const pdf = controller?.kind === 'pdf';
-    const sizeNote = !canZoom() && pdf ? h('div', { class: 'set-note' }, t('reader.pdfFit')) : null;
-    const size = h(
-      'section',
-      { class: 'rdv-group' },
-      h('div', { class: 'set-label' }, t('reader.size')),
-      h(
-        'div',
-        { class: 'set-size' },
-        h('button', { type: 'button', class: 'seg-btn', disabled: !canZoom() || null, 'aria-label': t('reader.smaller'), onclick: () => zoom(-1) }, 'A−'),
-        h('span', { class: 'set-size-value' }, `${Math.round((reading?.doc.scale || 1) * 100)}%`),
-        h('button', { type: 'button', class: 'seg-btn', disabled: !canZoom() || null, 'aria-label': t('reader.larger'), onclick: () => zoom(1) }, 'A+'),
-        h('button', { type: 'button', class: 'seg-btn seg-reset', disabled: !canZoom() || null, onclick: () => zoom(0) }, t('settings.reset')),
-      ),
-      sizeNote,
-    );
-    const themes = h(
-      'section',
-      { class: 'rdv-group' },
-      h('div', { class: 'set-label' }, t('reader.theme')),
-      h(
-        'div',
-        { class: 'rdv-themes', role: 'radiogroup', 'aria-label': t('reader.theme') },
-        THEMES.map((theme) =>
-          h(
-            'button',
-            { type: 'button', class: 'rdv-theme', role: 'radio', 'data-swatch': theme, 'aria-checked': String(getTheme() === theme), onclick: () => pickTheme(theme) },
-            h('span', { class: 'rdv-theme-chip', 'aria-hidden': 'true' }, 'Aa'),
-            h('span', { class: 'rdv-theme-name' }, t(`themes.${theme}`)),
-          ),
-        ),
-      ),
-    );
-    viewPanel.replaceChildren(
-      h('div', { class: 'rd-toc-head' }, t('reader.view')),
-      size,
-      choices(t('reader.mode'), READ_MODES, look.readMode, (m) => t(`reader.modes.${m}`), (readMode) => setReading({ readMode })),
-      look.readMode === 'pages' ? choices(t('reader.turn'), TURNS, look.readTurn, (k) => t(`reader.turns.${k}`), (readTurn) => setReading({ readTurn })) : null,
-      pdf ? null : choices(t('reader.font'), READ_FONTS, look.readFont, (f) => t(`reader.fonts.${f}`), (readFont) => setReading({ readFont })),
-      pdf ? null : choices(t('reader.leading'), LEADINGS, look.readLeading, (l) => t(`reader.leadings.${l}`), (readLeading) => setReading({ readLeading })),
-      themes,
-    );
+    drawQuickPanel(viewPanel, {
+      reading: getReading(),
+      pdf: controller?.kind === 'pdf',
+      canZoom: canZoom(),
+      onZoom: zoom,
+      onReading: setReading,
+      onBright: (value) => setDim(dim, value),
+      onCustomize: () => {
+        toggleView(false);
+        onCustomize?.();
+      },
+      onClose: () => toggleView(false),
+    });
   }
 
   /** A reading preference changed: the app keeps it, the open book shows it at once. */
-  function setReading(patch) {
+  function setReading(patch, { redraw = true } = {}) {
     onReading(patch);
     const controller = reading?.controller;
-    if ('readFont' in patch) reader.dataset.font = patch.readFont;
-    if ('readLeading' in patch) reader.dataset.leading = patch.readLeading;
+    if ('readLook' in patch) applyReadLook();
     if (controller) {
       if ('readMode' in patch) {
         controller.setMode(patch.readMode);
         reader.classList.toggle('is-paged', controller.paged);
       }
       if ('readTurn' in patch) controller.setTurn(patch.readTurn);
-      if ('readFont' in patch || 'readLeading' in patch) controller.relayout();
       showProgress(controller.progress());
     }
-    drawView();
-  }
-
-  function pickTheme(theme) {
-    onTheme(theme);
-    drawView();
+    if (redraw && !viewPanel.hidden) drawView();
   }
 
   function toggleView(show = viewPanel.hidden) {
@@ -1476,5 +1448,19 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     },
     /** The document open in the reader, if any: sync leaves it for later. */
     openDocId: () => (reading && !reading.closed ? reading.doc.id : null),
+    /** The side menu: how many documents, and the one read last ("continue reading"). */
+    async shelfSummary() {
+      await refresh();
+      const last = docs.filter((d) => d.opened).sort((a, b) => b.opened - a.opened)[0];
+      return { count: docs.length, last: last ? { id: last.id, name: nameOf(last), author: last.author || '', progress: last.progress || 0, format: last.format } : null };
+    },
+    async readDoc(id) {
+      await open();
+      await read(id);
+    },
+    /** The reading look changed outside the reader (the appearance screen): show it now. */
+    restyle: () => applyReadLook(),
+    /** "pdf", "book"…, or null when the reader is closed. */
+    openDocKind: () => (reading && !reading.closed ? (reading.controller?.kind ?? null) : null),
   };
 }
