@@ -37,7 +37,8 @@ export function createSyncClient({ api, beforeRound, openDocs, afterRound, h, to
       draw(true);
       try {
         await beforeRound();
-        const result = await api.sync.run({ skipDocs: openDocs() });
+        const first = !status.lastSync;
+        const result = { ...(await api.sync.run({ skipDocs: openDocs() })), first };
         if (!result.ok) {
           note = result.auth ? t('sync.expired') : result.offline ? t('sync.offline') : t('sync.failed', result.error);
           if (!quiet || result.auth) toast(note, { timeout: 7000 });

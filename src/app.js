@@ -227,9 +227,18 @@ async function boot() {
 }
 
 /** A sync round brought notes or cards from another device: show them. */
-async function afterSync({ pulled, trashed, conflicts, docsChanged }) {
+async function afterSync({ pulled, trashed, conflicts, docsChanged, first }) {
   if (docsChanged) await library?.reload();
   if (!pulled.length && !trashed.length && !conflicts.length) return;
+  if (first) {
+    // a device signing in for the first time: its untouched welcome note would sit next to the one the
+    // other devices already have; it goes to the trash (and, being untouched, off the Drive next round)
+    const welcomes = new Set(Object.values(WELCOME).flatMap((byKind) => Object.values(byKind)));
+    for (const note of [...notes.values()]) {
+      if (pulled.includes(note.id) || !welcomes.has(note.content) || (note.id === currentId && dirty)) continue;
+      await api.trash(note.id).catch(() => {});
+    }
+  }
   const fresh = new Map((await api.list()).map((n) => [n.id, n]));
   for (const [id, note] of fresh) {
     const known = notes.get(id);
