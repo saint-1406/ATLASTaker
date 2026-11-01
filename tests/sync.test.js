@@ -298,3 +298,13 @@ test('rewritten PDF lines sync like texts', async () => {
   assert.deepEqual(merged.edits.map((x) => x.id), ['e-bbbb']);
   assert.deepEqual(mergeCard({ opened: 1, edits: [edit('e-cccc')] }, { opened: 1 }, base).edits.map((x) => x.id), ['e-cccc']);
 });
+
+test('a card with no marks or bookmarks at all (null) merges without failing', async () => {
+  const { mergeCard, cardData } = await import('../src/sync/merge.js');
+  const bare = cardData({ name: 'a.pdf', format: 'pdf', opened: 1 }); // a card made without those lists
+  const other = { ...bare, marks: [{ id: 'm-aaaa', created: 1 }] };
+  const out = mergeCard(bare, other, null);
+  assert.deepEqual(out.marks.map((m) => m.id), ['m-aaaa']);
+  assert.deepEqual(out.bookmarks, []);
+  assert.deepEqual(mergeCard(other, bare, null).marks.map((m) => m.id), ['m-aaaa']);
+});

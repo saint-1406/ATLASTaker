@@ -29,6 +29,9 @@ const STATE_RULES = {
   readLeading: (v) => ['tight', 'normal', 'loose'].includes(v),
   // reading themes and their changes: the page checks every field (normalizeReadLook), here only the size
   readLook: (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v) && JSON.stringify(v).length < 8000,
+  // the person's picture (a small square JPEG, src/home.js shrinkPicture) and name
+  avatar: (v) => v === null || (typeof v === 'string' && v.length <= 200_000 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/.test(v)),
+  profileName: (v) => typeof v === 'string' && v.length <= 60,
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

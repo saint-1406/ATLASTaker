@@ -14,10 +14,13 @@ export function paintTheme(node, look, id) {
   return style;
 }
 
-/** Dims the page for a brightness under 1 (the phone's own brightness is not ours to change). */
+/**
+ * The brightness of the book's words: under 1 the text colour moves towards the page colour (a PDF's
+ * page is dimmed instead). Panels and the rest of the app keep the theme's colours. A CSS variable on
+ * the reader, so a page turn's picture of the page (pager.js) is dimmed too.
+ */
 export function setDim(node, bright) {
-  node.style.opacity = String(Math.max(0, Math.min(0.7, 1 - bright)));
-  node.hidden = bright >= 1;
+  node.style.setProperty('--rd-bright', String(Math.max(0, Math.min(1, bright))));
 }
 
 /** A slider's track is filled up to its thumb (styles.css reads --fill). */

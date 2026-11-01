@@ -147,9 +147,122 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   // Ctrl+F: a word or a phrase in the open document
   const finder = createFind({ reader, getController: () => reading?.controller ?? null, onList: () => toggleToc(false) });
   reader.append(finder.bar, finder.list);
-  // brightness: a dark veil over the whole reading page
-  const dim = h('div', { class: 'rd-dim', 'aria-hidden': 'true', hidden: true });
-  reader.append(dim);
+  // ---------- the action button: everything the header had, behind one button at the foot ----------
+  // The header is hidden while reading (its buttons stay, for the keys). The button is barely there
+  // until pressed; it opens on a press held a moment, so a page tap near it does not open it by chance.
+
+  const HOLD_MS = 380;
+  const fab = h(
+    'button',
+    { type: 'button', class: 'rd-fab', 'aria-haspopup': 'menu' },
+    h('span', { class: 'rd-fab-ring', 'aria-hidden': 'true' }),
+    h('span', { class: 'rd-fab-ico', 'aria-hidden': 'true' }, h('i'), h('i'), h('b')),
+  );
+  const sheet = h('div', { class: 'rd-acts', hidden: true, role: 'menu' });
+  reader.append(fab, sheet);
+
+  function closeSheet({ focus = false } = {}) {
+    if (sheet.hidden) return;
+    sheet.hidden = true;
+    fab.setAttribute('aria-expanded', 'false');
+    if (focus) fab.focus({ preventScroll: true });
+  }
+
+  function openSheet() {
+    if (!reading) return;
+    const { doc } = reading;
+    const pdf = doc.format === 'pdf';
+    closeMark();
+    closeText();
+    hideSelBar();
+    viewPanel.hidden = true;
+    tocPanel.hidden = true;
+    marksPanel.hidden = true;
+    const act = (run) => () => {
+      closeSheet();
+      run();
+    };
+    const row = (text, glyph, run, extra = {}) =>
+      h('button', { type: 'button', role: 'menuitem', class: 'rd-acts-row', onclick: act(run), ...extra }, h('span', { class: 'rd-acts-text' }, text), h('span', { class: 'rd-acts-ico', 'aria-hidden': 'true' }, glyph));
+    const round = (label, glyph, run, extra = {}) =>
+      h('button', { type: 'button', role: 'menuitem', class: 'rd-acts-round', title: label, 'aria-label': label, onclick: act(run), ...extra }, glyph);
+    const marks = marksOf(doc).length + bookmarksOf(doc).length + textsOf(doc).length;
+    sheet.replaceChildren(
+      h('div', { class: 'rd-acts-title' }, h('span', { class: 'rd-acts-name' }, nameOf(doc)), doc.author ? h('span', { class: 'rd-acts-sub' }, doc.author) : null),
+      row(`${t('reader.toc')} · ${t('library.progress', lastPct)}`, '☰', () => toggleToc(true)),
+      row(t('reader.fab.find'), '⌕', () => finder.open()),
+      row(t('appearance.quick'), 'AA', () => toggleView(true)),
+      h(
+        'div',
+        { class: 'rd-acts-rounds' },
+        round(t('reader.back'), '←', () => closeReader()),
+        round(t('reader.bookmarks.add'), '🔖', () => addBookmark()),
+        round(`${t('reader.marks.list')}${marks ? ` (${marks})` : ''}`, '✎', () => toggleMarks(true)),
+        pdf ? round(t('reader.texts.button'), 'T', () => setPlacing(true)) : null,
+        round(t('reader.more'), '⋯', () => openMore(fab)),
+      ),
+    );
+    sheet.hidden = false;
+    fab.setAttribute('aria-expanded', 'true');
+    sheet.querySelector('button')?.focus({ preventScroll: true });
+  }
+
+  // a held press opens the sheet; a short tap only says how
+  let hold = null;
+  fab.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!sheet.hidden) {
+      closeSheet();
+      return;
+    }
+    // one press can come as two events (touch emulated from a mouse): one hold only
+    if (hold) clearTimeout(hold.timer);
+    fab.classList.add('holding');
+    hold = {
+      timer: setTimeout(() => {
+        hold = null;
+        fab.classList.remove('holding');
+        navigator.vibrate?.(12);
+        openSheet();
+      }, HOLD_MS),
+    };
+  });
+  const release = (e) => {
+    if (!hold) return;
+    clearTimeout(hold.timer);
+    hold = null;
+    fab.classList.remove('holding');
+    if (e?.type === 'pointerup') toast(t('reader.fab.hold'), { timeout: 2000 });
+  };
+  fab.addEventListener('pointerup', release);
+  fab.addEventListener('pointercancel', release);
+  fab.addEventListener('pointerleave', release);
+  fab.addEventListener('contextmenu', (e) => e.preventDefault());
+  // keys are deliberate: Enter or Space opens at once
+  fab.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (sheet.hidden) openSheet();
+      else closeSheet();
+    }
+  });
+  fab.addEventListener('click', (e) => e.stopPropagation());
+  sheet.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSheet({ focus: true });
+    }
+  });
+  document.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (!sheet.hidden && !sheet.contains(e.target) && e.target !== fab && !fab.contains(e.target)) closeSheet();
+    },
+    true,
+  );
 
   document.body.append(shelf, reader);
 
@@ -168,6 +281,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       [marksButton, 'reader.marks.list'],
       [textButton, 'reader.texts.button'],
       [moreButton, 'reader.more'],
+      [fab, 'reader.fab.open'],
       [prevButton, 'reader.prevPage'],
       [nextButton, 'reader.nextPage'],
     ]) {
@@ -357,8 +471,10 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   // ---------- reading ----------
 
   /** How far into the book: the page number in page mode and in a PDF, a percentage when scrolling a book. */
+  let lastPct = 0; // how far into the book, for the action sheet
   function showProgress(value) {
     const pct = Math.round(Math.min(1, Math.max(0, value)) * 100);
+    lastPct = pct;
     const controller = reading?.controller;
     const pages = controller?.pages?.();
     const pdfPage = !pages && controller?.kind === 'pdf' ? controller.position().page : 0;
@@ -472,6 +588,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
 
   function closeReader() {
     if (!reading) return;
+    closeSheet();
     closeMark();
     closeText();
     setPlacing(false);
@@ -516,7 +633,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   function applyReadLook() {
     const look = getReading().readLook;
     const style = paintTheme(reader, look, shownTheme(look, systemDark.matches));
-    setDim(dim, look.bright);
+    setDim(reader, look.bright);
     const key = JSON.stringify([style.font, style.bold, style.leading, style.letter, style.word, style.margin, style.justify]);
     if (key !== layoutKey) {
       layoutKey = key;
@@ -536,7 +653,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       canZoom: canZoom(),
       onZoom: zoom,
       onReading: setReading,
-      onBright: (value) => setDim(dim, value),
+      onBright: (value) => setDim(reader, value),
       onCustomize: () => {
         toggleView(false);
         onCustomize?.();
@@ -1313,10 +1430,10 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
 
   const MIME = { odt: 'application/vnd.oasis.opendocument.text', rtf: 'application/rtf', cbz: 'application/vnd.comicbook+zip', pdf: 'application/pdf', epub: 'application/epub+zip', fb2: 'application/xml', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', md: 'text/markdown', txt: 'text/plain', html: 'text/html' };
 
-  function openMore() {
+  function openMore(anchor = null) {
     if (!reading?.controller) return;
     const { doc } = reading;
-    const r = moreButton.getBoundingClientRect();
+    const r = (anchor ?? moreButton).getBoundingClientRect();
     const items = [];
     if (doc.format === 'pdf') {
       items.push(
@@ -1329,7 +1446,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       );
     }
     items.push({ icon: '⤓', text: t('library.download'), run: downloadFile });
-    showMenu(Math.max(8, r.right - 260), r.bottom + 4, items);
+    // from the action sheet's button at the foot: the menu stands above it
+    showMenu(Math.max(8, r.right - 260), anchor ? innerHeight : r.bottom + 4, items);
   }
 
   const baseOf = (doc) => doc.name.replace(/\.[^.]+$/, '') || 'document';
@@ -1699,7 +1817,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     async shelfSummary() {
       await refresh();
       const last = docs.filter((d) => d.opened).sort((a, b) => b.opened - a.opened)[0];
-      return { count: docs.length, last: last ? { id: last.id, name: nameOf(last), author: last.author || '', progress: last.progress || 0, format: last.format } : null };
+      return { count: docs.length, last: last ? { id: last.id, name: nameOf(last), author: last.author || '', progress: last.progress || 0, format: last.format, cover: last.cover || null } : null };
     },
     async readDoc(id) {
       await open();

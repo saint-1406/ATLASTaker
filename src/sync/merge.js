@@ -97,9 +97,11 @@ export function cardSigs(card) {
 }
 
 /** Marks or bookmarks of two sides, by id: new ones from both stay, a removal wins over an untouched copy. */
-export function mergeItems(local = [], remote = [], base = {}) {
-  const l = new Map(local.map((m) => [m.id, m]));
-  const r = new Map(remote.map((m) => [m.id, m]));
+export function mergeItems(local, remote, base) {
+  // a card without marks or bookmarks has null there (cardData), not an empty list
+  base ??= {};
+  const l = new Map((Array.isArray(local) ? local : []).map((m) => [m.id, m]));
+  const r = new Map((Array.isArray(remote) ? remote : []).map((m) => [m.id, m]));
   const out = [];
   for (const id of new Set([...l.keys(), ...r.keys()])) {
     const a = l.get(id);

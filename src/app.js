@@ -40,6 +40,7 @@ import welcomeAndroidText from './welcome-android.md';
 import welcomeTextEn from './welcome-en.md';
 import welcomeBrowserTextEn from './welcome-browser-en.md';
 import welcomeAndroidTextEn from './welcome-android-en.md';
+import { avatarNode, drawHome, shrinkPicture } from './home.js';
 
 const $ = (sel) => document.querySelector(sel);
 const WELCOME = {
@@ -89,6 +90,8 @@ const translator = createTranslator({ api, android }); // a selected passage, Ru
 const phone = Boolean(android) || matchMedia('(pointer: coarse)').matches;
 let sync = null; // Google Drive sync (sync/client.js), where this build has it
 let sideMenu = null; // the menu sliding in from the right (sidemenu.js)
+const profile = { avatar: null, name: '' }; // the picture and the name the person gave (Account)
+const homeEl = h('section', { class: 'home', hidden: true }); // the main page (home.js)
 let readingTimer = 0;
 
 let markReady;
@@ -130,6 +133,8 @@ async function boot() {
   Object.assign(prefs, normalizeLook({ ...prefs, ...pickDefined(saved, ['skin', 'theme', 'accent']) }));
   if (typeof saved.sidebar === 'boolean') prefs.sidebar = saved.sidebar;
   if (typeof saved.fontScale === 'number') prefs.fontScale = saved.fontScale;
+  if (typeof saved.avatar === 'string') profile.avatar = saved.avatar;
+  if (typeof saved.profileName === 'string') profile.name = saved.profileName;
   Object.assign(prefs, normalizeReading(saved));
   // the language is settled once and stored, so it no longer follows the browser's afterwards
   const lang = pickLang({ saved: saved.lang, existing: Boolean(saved.welcomed), preferred: browserLanguages() });
@@ -216,6 +221,10 @@ async function boot() {
   if (api.ping) setInterval(ping, 20_000);
   setInterval(tickPace, 10_000);
   markReady();
+  // the app opens on the main page, where the person picks where to go
+  document.body.append(homeEl);
+  showAvatar();
+  await showHome();
   if (android) receiveIncoming();
   sync = createSyncClient({
     api,
@@ -1353,6 +1362,7 @@ function menuSections() {
     notes: (close) => [
       sideGroup(
         t('side.write'),
+        sideItem({ icon: '⌂', text: t('home.title'), run: () => close(() => showHome()) }),
         sideItem({ icon: '＋', text: c().newNote, kbd: 'Ctrl+N', run: () => close(() => createNote()) }),
         sideItem({ icon: '▤', text: t('side.list'), kbd: 'Ctrl+B', run: () => close(toggleIndex) }),
         sideItem({ icon: '⌕', text: t('side.find'), kbd: 'Ctrl+K', run: () => close(() => openPalette()) }),
@@ -1426,10 +1436,122 @@ function menuSections() {
       }),
     ],
     account: () => [
+      profileSection(),
       sync ? sync.section() : h('p', { class: 'side-empty' }, t('side.noSync')),
       h('p', { class: 'side-version' }, t('side.version', typeof __VERSION__ === 'string' ? __VERSION__ : '')),
     ],
   };
+}
+
+// ---------- the main page and the person's profile ----------
+
+/** The main page over everything: the book read last, the notes, the library. */
+async function showHome() {
+  closeIndexPanel();
+  sideMenu?.close?.();
+  const list = [...notes.values()].sort((a, b) => b.updated - a.updated).map((n) => ({ id: n.id, title: titleOf(n), updated: n.updated }));
+  const shelf = library ? await library.shelfSummary().catch(() => null) : null;
+  const leave = (then) => () => {
+    hideHome();
+    then();
+  };
+  drawHome(homeEl, {
+    profile,
+    notes: list,
+    shelf,
+    onMenu: () => sideMenu?.open('account'),
+    onNote: (id) => {
+      hideHome();
+      if (id && id !== currentId) openNote(id);
+      else editor.view.focus();
+    },
+    onNewNote: leave(() => createNote()),
+    onLibrary: leave(() => (library ? openLibrary() : toast(t('home.noLibrary')))),
+    onBook: (id) => {
+      hideHome();
+      flushSave();
+      library?.readDoc(id);
+    },
+    onAddBook: leave(() => (library ? openLibrary({ pick: true }) : toast(t('home.noLibrary')))),
+  });
+  homeEl.hidden = false;
+  document.body.classList.add('at-home');
+  homeEl.querySelector('.home-book, .home-tile')?.focus({ preventScroll: true });
+}
+
+function hideHome() {
+  if (homeEl.hidden) return;
+  homeEl.hidden = true;
+  document.body.classList.remove('at-home');
+}
+
+/** The menu button in the header is the person's avatar. */
+function showAvatar() {
+  const button = $('#btn-menu');
+  button.replaceChildren(avatarNode(profile, 28));
+  button.classList.add('tb-avatar');
+  if (!homeEl.hidden) homeEl.querySelector('.home-avatar')?.replaceChildren(avatarNode(profile, 36));
+}
+
+function saveProfile(patch) {
+  Object.assign(profile, patch);
+  api.setState({ ...('avatar' in patch ? { avatar: patch.avatar } : {}), ...('name' in patch ? { profileName: patch.name } : {}) }).catch((err) => toast(err.message));
+  showAvatar();
+}
+
+/** Account: the picture and the name, above the sync section. */
+function profileSection() {
+  const picture = h('span', { class: 'profile-pic' }, avatarNode(profile, 72));
+  const choose = () => {
+    const input = h('input', { type: 'file', accept: 'image/*' });
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        saveProfile({ avatar: await shrinkPicture(file) });
+        picture.replaceChildren(avatarNode(profile, 72));
+        remove.hidden = false;
+      } catch {
+        toast(t('profile.badPicture'));
+      }
+    });
+    input.click();
+  };
+  const remove = h(
+    'button',
+    {
+      type: 'button',
+      class: 'tb-btn',
+      hidden: !profile.avatar,
+      onclick: () => {
+        saveProfile({ avatar: null });
+        picture.replaceChildren(avatarNode(profile, 72));
+        remove.hidden = true;
+      },
+    },
+    t('profile.removePicture'),
+  );
+  const name = h('input', { class: 'field profile-name', type: 'text', maxlength: '60', placeholder: t('profile.namePlaceholder'), 'aria-label': t('profile.name') });
+  name.value = profile.name;
+  let nameTimer = 0;
+  name.addEventListener('input', () => {
+    clearTimeout(nameTimer);
+    nameTimer = setTimeout(() => {
+      saveProfile({ name: name.value.trim().slice(0, 60) });
+      picture.replaceChildren(avatarNode(profile, 72));
+    }, 400);
+  });
+  return h(
+    'div',
+    { class: 'profile' },
+    h('button', { type: 'button', class: 'profile-pic-btn', title: t('profile.choosePicture'), 'aria-label': t('profile.choosePicture'), onclick: choose }, picture),
+    h(
+      'div',
+      { class: 'profile-fields' },
+      name,
+      h('div', { class: 'profile-actions' }, h('button', { type: 'button', class: 'tb-btn', onclick: choose }, t('profile.choosePicture')), remove),
+    ),
+  );
 }
 
 // ---------- commands & keys ----------
@@ -1688,6 +1810,10 @@ window.__atlas = {
     }
     if (focusMode) {
       toggleFocus(false);
+      return true;
+    }
+    if (homeEl.hidden) {
+      showHome();
       return true;
     }
     return false;
