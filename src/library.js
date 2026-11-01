@@ -1163,5 +1163,12 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     back,
     onKey,
     flush,
+    /** Cards changed elsewhere (sync): read them again. */
+    async reload() {
+      await refresh();
+      if (!shelf.hidden) render();
+    },
+    /** The document open in the reader, if any: sync leaves it for later. */
+    openDocId: () => (reading && !reading.closed ? reading.doc.id : null),
   };
 }

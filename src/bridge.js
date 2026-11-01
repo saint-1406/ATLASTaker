@@ -77,6 +77,14 @@ function serverApi() {
     getState: () => call('GET', 'state'),
     setState: (patch) => call('PATCH', 'state', patch),
     ping: () => call('POST', 'ping'),
+    // Google Drive sync, run by the server (server/sync.js)
+    sync: {
+      status: () => call('GET', 'sync'),
+      signIn: () => call('POST', 'sync/signin'),
+      cancel: () => call('POST', 'sync/cancel'),
+      signOut: () => call('POST', 'sync/signout'),
+      run: (options) => call('POST', 'sync/run', options),
+    },
     openNotesFolder: () => call('POST', 'open-folder'),
     openBackupsFolder: () => call('POST', 'open-backups'),
     /** Puts text aside as a file in backups/несохранённое: { title, content, at, label }. */

@@ -220,6 +220,20 @@ export function createStore(dir) {
       return { updated: m.updated };
     },
 
+    /** A note as it came from another device (sync): created or overwritten, with its own times. */
+    async putSynced(id, content, { created, updated } = {}) {
+      const file = fileOf(id);
+      if (typeof content !== 'string') throw httpError(400, 'content должен быть строкой');
+      trashed.delete(id);
+      const n = bump(id);
+      await serial(id, () => (seq.get(id) === n ? atomicWrite(file, content, () => seq.get(id) === n) : false));
+      const m = noteMeta(id);
+      if (Number.isFinite(created)) m.created = created;
+      m.updated = Number.isFinite(updated) ? updated : Date.now();
+      scheduleMeta();
+      return { updated: m.updated };
+    },
+
     async setMeta(id, patch) {
       fileOf(id);
       if (trashed.has(id)) return;
@@ -256,6 +270,17 @@ export function createStore(dir) {
       const name = `a-${Date.now().toString(36)}${crypto.randomBytes(4).toString('hex')}.${ext}`;
       await atomicWrite(path.join(assetsDir, name), bytes);
       return name;
+    },
+
+    /** Names of all pictures (sync). */
+    async assetNames() {
+      return (await fsp.readdir(assetsDir)).filter((name) => ASSET_RE.test(name));
+    },
+
+    /** A picture from another device, under its own name (sync). */
+    async putAsset(name, bytes) {
+      if (typeof name !== 'string' || !ASSET_RE.test(name)) throw httpError(400, 'недопустимое имя картинки');
+      await atomicWrite(path.join(assetsDir, name), bytes);
     },
 
     assetFile(name) {

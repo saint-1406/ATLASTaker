@@ -31,6 +31,17 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      # sign-in with Google (sync): the desktop client's secret travels with the app, not in the repository
+      - name: Google client
+        shell: pwsh
+        env:
+          SECRET: ${{ secrets.GOOGLE_DESKTOP_CLIENT_SECRET }}
+        run: |
+          if ($env:SECRET) {
+            @{ client_secret = $env:SECRET } | ConvertTo-Json | Set-Content -Encoding utf8 server/google-client.json
+          } else {
+            "::warning::GOOGLE_DESKTOP_CLIENT_SECRET is not set: this build cannot sign in to Google (sync is off)"
+          }
       - run: node scripts/stage.mjs
 
       - name: Version

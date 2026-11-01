@@ -16,10 +16,11 @@ import { fileURLToPath } from 'node:url';
 import { createStore } from './store.js';
 import { createBackups } from './backups.js';
 import { createLibrary, MAX_DOC } from './library.js';
+import { callbackPage, createSync } from './sync.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
-const CODE_FILES = ['server/server.js', 'server/store.js', 'server/backups.js', 'server/library.js', 'src/marks.js', 'dist/app.js', 'dist/reader.js'];
+const CODE_FILES = ['server/server.js', 'server/store.js', 'server/backups.js', 'server/library.js', 'server/sync.js', 'src/sync/engine.js', 'src/sync/merge.js', 'src/sync/drive.js', 'src/marks.js', 'dist/app.js', 'dist/reader.js'];
 const readOrEmpty = (file) => {
   try {
     return fs.readFileSync(path.join(ROOT, file));
@@ -131,6 +132,7 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
   const store = createStore(notesDir);
   const backups = createBackups(dataDir, { version: VERSION, build: BUILD });
   const library = createLibrary(dataDir);
+  const sync = createSync({ dataDir, store, library });
   // before the page can change anything: the notes as the previous version left them
   await backups.atStart().catch((err) => console.error('Резервная копия не сделана:', err.message));
   const dailyTimer = setInterval(() => backups.daily().catch((err) => console.error('Резервная копия не сделана:', err.message)), 60 * 60 * 1000);
@@ -266,6 +268,26 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
       // unsaved text the page found at start and the user did not put back
       return send(res, 201, { name: await backups.keepDraft(await readJson(req)) });
     }
+    if (route === 'sync' && req.method === 'GET') return send(res, 200, sync.status());
+    if (route === 'sync/signin' && req.method === 'POST') return send(res, 200, sync.signIn(actualPort));
+    if (route === 'sync/cancel' && req.method === 'POST') {
+      sync.cancelSignIn();
+      return send(res, 204);
+    }
+    if (route === 'sync/signout' && req.method === 'POST') {
+      await sync.signOut();
+      return send(res, 204);
+    }
+    if (route === 'sync/run' && req.method === 'POST') {
+      const { skipDocs } = await readJson(req);
+      try {
+        return send(res, 200, { ok: true, ...(await sync.run({ skipDocs: Array.isArray(skipDocs) ? skipDocs.filter((id) => typeof id === 'string') : [] })) });
+      } catch (err) {
+        // Drive or Google said no, or there is no network: the page says so in the settings
+        if (!err.auth && !err.offline && err.status !== 502 && err.status !== 409) throw err;
+        return send(res, 200, { ok: false, error: err.message, auth: Boolean(err.auth || err.status === 409), offline: Boolean(err.offline) });
+      }
+    }
     if (route === 'ping' && req.method === 'POST') return send(res, 204);
     if (route === 'open-folder' && req.method === 'POST') {
       openFolder(notesDir);
@@ -285,6 +307,8 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
       if (host !== `127.0.0.1:${actualPort}` && host !== `localhost:${actualPort}`) throw new HttpError(421, 'unexpected host');
       const url = new URL(req.url ?? '/', `http://${host}`);
       if (url.pathname.startsWith('/api/')) await handleApi(req, res, url);
+      // Google sends the browser back here after sign-in; the one-time state is the check
+      else if (url.pathname === '/oauth/callback' && req.method === 'GET') send(res, 200, callbackPage(await sync.callback(url)), MIME['.html']);
       else await serveStatic(req, res, url);
     } catch (err) {
       const status = err.status ?? 500;

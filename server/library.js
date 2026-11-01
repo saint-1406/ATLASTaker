@@ -148,6 +148,33 @@ export function createLibrary(dataDir) {
       return doc;
     },
 
+    /** A card (and, when given, the file) as it came from another device (sync); the old file waits in .trash. */
+    async putSynced(id, data, bytes) {
+      if (typeof id !== 'string' || !DOC_ID_RE.test(id)) throw httpError(400, 'недопустимый id документа');
+      const known = Object.hasOwn(docs, id) ? docs[id] : null;
+      const format = known?.format ?? data?.format;
+      if (!DOC_FORMATS.includes(format)) throw httpError(415, 'такой формат библиотека не читает');
+      if (!known && !bytes?.length) throw httpError(400, 'нет файла документа');
+      const doc = known ?? { id, format, name: 'document', title: '', author: '', cover: null, size: 0, added: Date.now(), opened: 0, progress: 0, position: null, notesId: null, scale: 1, marks: [], bookmarks: [] };
+      if (bytes?.length) {
+        if (known) {
+          await fsp.copyFile(fileOf(doc), path.join(trashDir, `${id}-${Date.now()}.${format}`)).catch((err) => {
+            if (err.code !== 'ENOENT') throw err;
+          });
+        }
+        await atomicWrite(fileOf(doc), bytes);
+        doc.size = bytes.length;
+      }
+      if (data && typeof data === 'object') {
+        for (const [key, value] of Object.entries(data)) if (RULES[key]?.(value)) doc[key] = value;
+        if (typeof data.name === 'string' && data.name) doc.name = cleanName(data.name) || doc.name;
+        if (Number.isFinite(data.added) && data.added > 0) doc.added = data.added;
+      }
+      docs[id] = doc;
+      save();
+      return doc;
+    },
+
     async remove(id) {
       const doc = get(id);
       try {
