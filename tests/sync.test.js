@@ -288,3 +288,13 @@ test('texts on PDF pages sync like marks, and a card from an older app does not 
   const fresh = mergeCard({ opened: 1, texts: null }, { opened: 1, texts: [text('t-cccc')] }, null);
   assert.deepEqual(fresh.texts.map((x) => x.id), ['t-cccc']);
 });
+
+test('rewritten PDF lines sync like texts', async () => {
+  const { mergeCard, cardSigs } = await import('../src/sync/merge.js');
+  const edit = (id) => ({ id, page: 1, x: 0.1, y: 0.1, w: 0.3, h: 0.02, base: 0.115, size: 0.02, font: 'sans', bold: false, ink: '#000000', bg: '#ffffff', original: 'a', text: id, created: 1 });
+  const base = cardSigs({ edits: [edit('e-aaaa')] });
+  // written into the file on one device (the list emptied), a new one made on the other
+  const merged = mergeCard({ opened: 1, edits: [edit('e-aaaa'), edit('e-bbbb')] }, { opened: 1, edits: [] }, base);
+  assert.deepEqual(merged.edits.map((x) => x.id), ['e-bbbb']);
+  assert.deepEqual(mergeCard({ opened: 1, edits: [edit('e-cccc')] }, { opened: 1 }, base).edits.map((x) => x.id), ['e-cccc']);
+});

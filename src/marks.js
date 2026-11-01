@@ -229,3 +229,90 @@ export function remapTexts(texts = [], plan) {
   }
   return out;
 }
+
+// ---------- edits: a line of a PDF's own text, rewritten ----------
+//   { id, page, x, y, w, h, base, size, font, bold, ink, bg, original, text, created, edited }
+// x, y, w, h: the box of the original line (fractions of the page as shown), covered with the page's
+// colour (bg); base: where the new words stand (their baseline), size: the letter height as a fraction
+// of the page width; font: 'sans' | 'serif' | 'mono'. Shown over the page until written into the file.
+
+export const EDIT_FONTS = ['sans', 'serif', 'mono'];
+export const MAX_EDITS = 2000;
+const COLOR_RE = /^#[0-9a-f]{6}$/;
+
+export function newEditId() {
+  return `e-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function validEdit(item) {
+  const frac = (v) => num(v) && v >= -0.05 && v <= 1.05;
+  return (
+    Boolean(item) &&
+    typeof item === 'object' &&
+    typeof item.id === 'string' &&
+    /^e-[a-z0-9]{4,40}$/.test(item.id) &&
+    Number.isInteger(item.page) &&
+    item.page >= 1 &&
+    [item.x, item.y, item.base].every(frac) &&
+    num(item.w) &&
+    item.w > 0 &&
+    item.w <= 1.1 &&
+    num(item.h) &&
+    item.h > 0 &&
+    item.h <= 0.5 &&
+    num(item.size) &&
+    item.size > 0.001 &&
+    item.size <= 0.3 &&
+    EDIT_FONTS.includes(item.font) &&
+    typeof item.bold === 'boolean' &&
+    COLOR_RE.test(item.ink) &&
+    COLOR_RE.test(item.bg) &&
+    typeof item.original === 'string' &&
+    item.original.length <= MAX_TEXT_LENGTH &&
+    typeof item.text === 'string' &&
+    item.text.length <= MAX_TEXT_LENGTH &&
+    num(item.created) &&
+    (item.edited === undefined || num(item.edited))
+  );
+}
+
+export function validEdits(list) {
+  return Array.isArray(list) && list.length <= MAX_EDITS && list.every(validEdit) && new Set(list.map((x) => x.id)).size === list.length;
+}
+
+/**
+ * The line of text under a point, from a page's runs of text: [{ str, left, top, right, bottom, base,
+ * size, font, bold }] in the page's units as shown (y down). Runs on the same baseline, of about the same
+ * size and close enough to read as one phrase, make the line; a wide gap (another column) ends it.
+ */
+export function pickLine(runs, px, py) {
+  const hit = runs.find((r) => r.str.trim() && px >= r.left - r.size * 0.2 && px <= r.right + r.size * 0.2 && py >= r.top - r.size * 0.15 && py <= r.bottom + r.size * 0.15);
+  if (!hit) return null;
+  const same = runs
+    .filter((r) => r.str.length && Math.abs(r.base - hit.base) < hit.size * 0.35 && r.size > hit.size * 0.7 && r.size < hit.size * 1.4)
+    .sort((a, b) => a.left - b.left);
+  const at = same.indexOf(hit);
+  let lo = at;
+  let hi = at;
+  const close = (a, b) => b.left - a.right < hit.size * 1.6;
+  while (lo > 0 && close(same[lo - 1], same[lo])) lo--;
+  while (hi < same.length - 1 && close(same[hi], same[hi + 1])) hi++;
+  const parts = same.slice(lo, hi + 1);
+  let text = '';
+  parts.forEach((r, i) => {
+    const prev = parts[i - 1];
+    if (prev && r.left - prev.right > hit.size * 0.15 && !/\s$/.test(text) && !/^\s/.test(r.str)) text += ' ';
+    text += r.str;
+  });
+  return {
+    text: text.replace(/\s+/g, ' ').trim(),
+    left: Math.min(...parts.map((r) => r.left)),
+    right: Math.max(...parts.map((r) => r.right)),
+    top: Math.min(...parts.map((r) => r.top)),
+    bottom: Math.max(...parts.map((r) => r.bottom)),
+    base: hit.base,
+    size: hit.size,
+    font: hit.font,
+    bold: hit.bold,
+  };
+}

@@ -5,7 +5,7 @@
 import { baseName, detectFormat, FORMATS, loadBook } from './formats.js';
 import { renderBook } from './view.js';
 import { openPdf, pdfInfo } from './pdf.js';
-import { openPages, pdfWithMarks, rebuildPdf } from './pdfedit.js';
+import { applyEdits, openPages, pdfWithMarks, rebuildPdf } from './pdfedit.js';
 
 /** A small JPEG of a picture, as a data: URL a library card can show. */
 async function thumbnail(blob, width = 240) {
@@ -44,4 +44,4 @@ async function open(host, { name, bytes, format = detectFormat(name, bytes), ...
   return renderBook(host, await loadBook(name, bytes, format), options);
 }
 
-window.AtlasReader = { FORMATS, detectFormat, inspect, open, openPages, rebuildPdf, pdfWithMarks };
+window.AtlasReader = { FORMATS, detectFormat, inspect, open, openPages, rebuildPdf, pdfWithMarks, applyEdits };

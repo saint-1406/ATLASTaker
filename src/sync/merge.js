@@ -80,7 +80,7 @@ export function planNotes(local, remote, base) {
 
 /** Card fields that travel, in groups that change together. `opened` is the newest of both. */
 export const CARD_GROUPS = [['name'], ['format'], ['added'], ['title'], ['author'], ['cover'], ['position', 'progress'], ['notesId'], ['scale']];
-export const CARD_FIELDS = [...CARD_GROUPS.flat(), 'opened', 'marks', 'bookmarks', 'texts'];
+export const CARD_FIELDS = [...CARD_GROUPS.flat(), 'opened', 'marks', 'bookmarks', 'texts', 'edits'];
 
 const pick = (card, keys) => Object.fromEntries(keys.map((k) => [k, card?.[k] ?? null]));
 const groupKey = (keys) => keys.join('+');
@@ -93,7 +93,7 @@ export function cardSigs(card) {
   const fields = {};
   for (const keys of CARD_GROUPS) fields[groupKey(keys)] = sig(pick(card, keys));
   const items = (list) => Object.fromEntries((list ?? []).map((item) => [item.id, sig(item)]));
-  return { fields, marks: items(card?.marks), bookmarks: items(card?.bookmarks), texts: items(card?.texts) };
+  return { fields, marks: items(card?.marks), bookmarks: items(card?.bookmarks), texts: items(card?.texts), edits: items(card?.edits) };
 }
 
 /** Marks or bookmarks of two sides, by id: new ones from both stay, a removal wins over an untouched copy. */
@@ -125,7 +125,7 @@ export function mergeItems(local = [], remote = [], base = {}) {
  * that side; changed on both, the side where the book was opened last wins.
  */
 export function mergeCard(local, remote, base) {
-  const b = base ?? { fields: {}, marks: {}, bookmarks: {}, texts: {} };
+  const b = base ?? { fields: {}, marks: {}, bookmarks: {}, texts: {}, edits: {} };
   const localFirst = (local.opened ?? 0) >= (remote.opened ?? 0);
   const out = {};
   for (const keys of CARD_GROUPS) {
@@ -141,10 +141,12 @@ export function mergeCard(local, remote, base) {
   out.opened = Math.max(local.opened ?? 0, remote.opened ?? 0);
   out.marks = mergeItems(local.marks, remote.marks, b.marks);
   out.bookmarks = mergeItems(local.bookmarks, remote.bookmarks, b.bookmarks);
-  // texts came after 0.10.0: a card from an older app has none at all, which says nothing about removals
-  if (!Array.isArray(remote.texts)) out.texts = local.texts ?? [];
-  else if (!Array.isArray(local.texts)) out.texts = remote.texts;
-  else out.texts = mergeItems(local.texts, remote.texts, b.texts ?? {});
+  // texts and edits came after 0.10.0: a card from an older app has none at all, which says nothing about removals
+  for (const key of ['texts', 'edits']) {
+    if (!Array.isArray(remote[key])) out[key] = local[key] ?? [];
+    else if (!Array.isArray(local[key])) out[key] = remote[key];
+    else out[key] = mergeItems(local[key], remote[key], b[key] ?? {});
+  }
   return out;
 }
 

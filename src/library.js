@@ -6,7 +6,7 @@
 import { h, toast, confirmDialog, showMenu, isOverlayOpen } from './overlays.js';
 import { count, t } from './i18n.js';
 import { LEADINGS, READ_FONTS, READ_MODES, THEMES, TURNS } from './skins.js';
-import { MARK_COLORS, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, MAX_TEXT_LENGTH, MAX_TEXTS, newBookmarkId, newMarkId, newTextId, remapPdf, remapTexts, sortMarks, sortTexts, TEXT_COLORS, TEXT_SIZES } from './marks.js';
+import { MARK_COLORS, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, MAX_TEXT_LENGTH, MAX_TEXTS, newBookmarkId, newEditId, newMarkId, newTextId, remapPdf, remapTexts, sortMarks, sortTexts, TEXT_COLORS, TEXT_SIZES } from './marks.js';
 import { openPageEditor } from './pageEditor.js';
 import { createFind } from './readerFind.js';
 
@@ -399,6 +399,9 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     openMarkId = null;
     openTextId = null;
     setPlacing(false);
+    editing = false;
+    reader.classList.remove('editing-pdf');
+    editBar.hidden = true;
     textButton.hidden = doc.format !== 'pdf';
     const look = getReading();
     reader.dataset.font = look.readFont;
@@ -436,6 +439,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
       session.controller = controller;
       controller.setMarks?.(marksOf(doc));
       controller.setTexts?.(textsOf(doc));
+      controller.setEdits?.(editsOf(doc));
+      showEditBar();
       showMarkCount();
       reader.classList.toggle('is-paged', controller.paged);
       status.hidden = true;
@@ -455,6 +460,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     closeMark();
     closeText();
     setPlacing(false);
+    setEditing(false);
+    editBar.hidden = true;
     flush();
     finder.close({ keepText: false });
     reading.closed = true;
@@ -1096,6 +1103,228 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     true,
   );
 
+  // ---------- edits: a line of the PDF's own text, rewritten in place ----------
+
+  const editsOf = (doc) => (Array.isArray(doc.edits) ? doc.edits : (doc.edits = []));
+  let editing = false; // the mode: a tap on a line opens it for editing
+  let editField = null; // { input, finish(commit) } while a line is being typed into
+  let editsTimer = 0;
+  let editTap = null;
+
+  const editHint = h('span', { class: 'rd-editbar-hint' });
+  const editSave = h('button', { type: 'button', class: 'tb-btn accent', onclick: () => saveEditsToFile() });
+  const editDone = h('button', { type: 'button', class: 'tb-btn', onclick: () => setEditing(false) });
+  const editBar = h('div', { class: 'rd-editbar', hidden: true }, editHint, h('span', { class: 'rd-editbar-actions' }, editSave, editDone));
+  reader.append(editBar);
+
+  function showEditBar() {
+    const n = reading ? editsOf(reading.doc).length : 0;
+    editBar.hidden = !editing && !n;
+    editHint.textContent = editing ? t('reader.edit.hint') : t('reader.edit.unsaved', n);
+    editSave.textContent = t('reader.edit.save', n);
+    editSave.disabled = !n;
+    editDone.textContent = t(editing ? 'reader.edit.done' : 'reader.edit.again');
+    editDone.onclick = () => setEditing(!editing);
+  }
+
+  function saveEdits(session = reading) {
+    if (!session || session.closed) return;
+    session.controller?.setEdits?.(editsOf(session.doc));
+    showEditBar();
+    clearTimeout(editsTimer);
+    const { id } = session.doc;
+    const edits = editsOf(session.doc);
+    editsTimer = setTimeout(() => lib.update(id, { edits }).catch((err) => toast(t('reader.marks.failed', err.message))), 300);
+  }
+
+  function setEditing(on) {
+    if (!on) editField?.finish(true);
+    editing = Boolean(on) && reading?.doc.format === 'pdf';
+    reader.classList.toggle('editing-pdf', editing);
+    if (editing) {
+      setPlacing(false);
+      hideSelBar();
+      closeMark();
+      closeText();
+    }
+    showEditBar();
+  }
+
+  /** A field over a line of the page, typed into in place; the edit is kept when the field is left. */
+  function openEditField(session, frame, at, { edit = null } = {}) {
+    editField?.finish(true);
+    const input = h('input', { class: 'pdf-edit-input', type: 'text', spellcheck: 'false', 'aria-label': t('reader.edit.field') });
+    Object.assign(input.style, { left: `${at.x * 100}%`, top: `${at.y * 100}%`, width: `${Math.max(at.w ?? 0.3, 0.12) * 100}%` });
+    if (at.h) Object.assign(input.style, { height: `${at.h * 100}%`, fontSize: `${at.size * frame.clientWidth}px` });
+    frame.append(input);
+    // focused at once, in the tap itself: a phone shows its keyboard only then
+    input.focus({ preventScroll: true });
+    let line = edit;
+    let done = false;
+    const fit = (e) => {
+      Object.assign(input.style, { left: `${e.x * 100}%`, top: `${e.y * 100}%`, width: `${Math.max(e.w + 0.04, 0.12) * 100}%`, height: `${e.h * 100}%`, fontSize: `${e.size * frame.clientWidth}px`, fontFamily: '', color: e.ink, background: e.bg, fontWeight: e.bold ? '700' : '400' });
+      input.dataset.font = e.font;
+    };
+    if (edit) {
+      fit(edit);
+      input.value = edit.text;
+      session.controller?.setEdits?.(editsOf(session.doc), edit.id);
+    }
+    const finish = (commit) => {
+      if (done) return;
+      done = true;
+      editField = null;
+      input.remove();
+      if (session.closed) return;
+      const list = editsOf(session.doc);
+      const value = input.value.replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT_LENGTH);
+      if (commit && line) {
+        const known = list.includes(line);
+        if (value === line.original) {
+          // back to the words the page has: nothing to change
+          if (known) list.splice(list.indexOf(line), 1);
+        } else {
+          line.text = value;
+          line.edited = Date.now();
+          if (!known) list.push(line);
+        }
+      }
+      saveEdits(session);
+    };
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        finish(true);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        finish(false);
+      }
+    });
+    input.addEventListener('blur', () => setTimeout(() => finish(true), 0));
+    editField = { input, finish };
+    return {
+      /** The line found under the tap: the field takes its place, words and look. */
+      found(e) {
+        if (done) return;
+        line = e;
+        fit(e);
+        input.value = e.text;
+        input.setSelectionRange(input.value.length, input.value.length);
+      },
+      lost() {
+        if (!done) finish(false);
+      },
+    };
+  }
+
+  /** A tap in editing mode (or on a rewritten line): that line opens for editing. */
+  function editAt(clientX, clientY, target) {
+    const session = reading;
+    const controller = session?.controller;
+    if (!controller?.lineAt) return;
+    const old = target?.closest?.('.pdf-edit');
+    const frame = target?.closest?.('.pdf-page');
+    if (!frame) return;
+    if (old) {
+      const edit = editsOf(session.doc).find((e) => e.id === old.dataset.edit);
+      if (edit) {
+        openEditField(session, frame, edit, { edit });
+        return;
+      }
+    }
+    const at = controller.pointAt(clientX, clientY);
+    if (!at) return;
+    const field = openEditField(session, frame, { x: at.x, y: at.y - 0.01 });
+    controller
+      .lineAt(clientX, clientY)
+      .then((line) => {
+        if (!line || session.closed) {
+          field.lost();
+          if (!line) toast(t('reader.edit.noLine'));
+          return;
+        }
+        // a line rewritten before is opened again, not covered twice
+        const same = editsOf(session.doc).find((e) => e.page === line.page && Math.abs(e.base - line.base) < line.size * 0.5 && e.x < line.x + line.w && line.x < e.x + e.w);
+        if (same) {
+          field.lost();
+          openEditField(session, frame, same, { edit: same });
+          return;
+        }
+        field.found({ id: newEditId(), ...line, text: line.original, created: Date.now() });
+      })
+      .catch((err) => {
+        console.error(err);
+        field.lost();
+      });
+  }
+
+  async function saveEditsToFile({ quiet = false } = {}) {
+    const session = reading;
+    if (!session?.controller || session.doc.format !== 'pdf') return false;
+    editField?.finish(true);
+    const { doc } = session;
+    const edits = editsOf(doc);
+    if (!edits.length) return true;
+    clearTimeout(editsTimer);
+    flush();
+    if (!quiet) toast(t('reader.edit.saving'));
+    try {
+      const code = await loadReader();
+      const out = await code.applyEdits(await lib.bytes(doc.id), edits);
+      await lib.replace(doc.id, out);
+      const info = await code.inspect(doc.name, out).catch(() => null);
+      const patch = { edits: [], ...(info?.cover ? { cover: info.cover } : {}) };
+      Object.assign(doc, patch, { size: out.length });
+      await lib.update(doc.id, patch);
+    } catch (err) {
+      console.error(err);
+      toast(err.encrypted ? t('pages.encrypted') : t('reader.edit.failed', err.message));
+      return false;
+    }
+    if (quiet) return true;
+    toast(t('reader.edit.saved'));
+    const wasEditing = editing;
+    if (reading === session) {
+      await read(doc.id);
+      if (wasEditing) setEditing(true);
+    }
+    return true;
+  }
+
+  scroll.addEventListener(
+    'pointerdown',
+    (e) => {
+      editTap = null;
+      if (e.button !== 0 || !reading?.controller?.lineAt) return;
+      if (!editing && !e.target.closest?.('.pdf-edit')) return;
+      if (e.target.closest?.('.pdf-edit-input, .pdf-text')) return;
+      editTap = { x: e.clientX, y: e.clientY, at: performance.now() };
+      // no selection while picking lines, and the pager does not take the tap as a page turn
+      e.preventDefault();
+    },
+    true,
+  );
+  scroll.addEventListener(
+    'pointerup',
+    (e) => {
+      const start = editTap;
+      editTap = null;
+      if (!start || performance.now() - start.at > 600 || Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) return;
+      e.stopPropagation();
+      textPress = true;
+      editAt(e.clientX, e.clientY, document.elementFromPoint(e.clientX, e.clientY) ?? e.target);
+    },
+    true,
+  );
+  scroll.addEventListener(
+    'click',
+    (e) => {
+      if (editing && !e.target.closest?.('.pdf-edit-input')) e.stopPropagation();
+    },
+    true,
+  );
+
   // ---------- the file: download it, and a PDF's pages and marks ----------
 
   const MIME = { odt: 'application/vnd.oasis.opendocument.text', rtf: 'application/rtf', cbz: 'application/vnd.comicbook+zip', pdf: 'application/pdf', epub: 'application/epub+zip', fb2: 'application/xml', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', md: 'text/markdown', txt: 'text/plain', html: 'text/html' };
@@ -1109,7 +1338,9 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
       items.push(
         { icon: '▦', text: t('pages.edit'), run: editPages },
         { icon: 'T', text: t('reader.texts.add'), run: () => setPlacing(true) },
-        { icon: '⤓', text: t('pages.exportMarked'), disabled: !marksOf(doc).length && !textsOf(doc).length, title: marksOf(doc).length || textsOf(doc).length ? undefined : t('pages.noMarks'), run: exportMarked },
+        { icon: '✎', text: t(editing ? 'reader.edit.stop' : 'reader.edit.menu'), run: () => setEditing(!editing) },
+        ...(editsOf(doc).length ? [{ icon: '💾', text: t('reader.edit.save', editsOf(doc).length), run: () => saveEditsToFile() }] : []),
+        { icon: '⤓', text: t('pages.exportMarked'), disabled: !marksOf(doc).length && !textsOf(doc).length && !editsOf(doc).length, title: marksOf(doc).length || textsOf(doc).length || editsOf(doc).length ? undefined : t('pages.noMarks'), run: exportMarked },
         '-',
       );
     }
@@ -1136,7 +1367,9 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
     toast(t('pages.exporting'));
     try {
       const code = await loadReader();
-      const out = await code.pdfWithMarks(await lib.bytes(doc.id), marksOf(doc), { texts: textsOf(doc).filter((x) => x.text.trim()) });
+      // rewritten lines first, the marks over them
+      const bytes = await code.applyEdits(await lib.bytes(doc.id), editsOf(doc));
+      const out = await code.pdfWithMarks(bytes, marksOf(doc), { texts: textsOf(doc).filter((x) => x.text.trim()) });
       api.download(`${baseOf(doc)} ${t('pages.markedSuffix')}.pdf`, out, 'application/pdf');
     } catch (err) {
       console.error(err);
@@ -1147,6 +1380,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
   async function editPages() {
     const session = reading;
     if (!session?.controller || session.doc.format !== 'pdf') return;
+    // rewritten lines go into the file first: they belong to the pages as they are now
+    if (editsOf(session.doc).length && !(await saveEditsToFile({ quiet: true }))) return;
     const { doc } = session;
     flush();
     let code;

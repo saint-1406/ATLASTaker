@@ -2,8 +2,76 @@
 // with the reader's marks written in as real PDF highlights (with the comment as the note), so other
 // PDF programs show them too. pdf-lib writes; pdf.js (already here for reading) measures pages.
 
-import { PDFDocument, PDFHexString, PDFName, PDFNumber, PDFString, degrees } from 'pdf-lib';
+import { PDFDocument, PDFHexString, PDFName, PDFNumber, PDFString, degrees, rgb } from 'pdf-lib';
 import { closeDoc, loadPdf } from './pdf.js';
+import { fontBytes, readerBase } from './pdffonts.js';
+
+/** fontkit, from its own script the first time it is needed (the browser build has it in the page). */
+let fontkitCode = null;
+function loadFontkit() {
+  if (window.AtlasFontkit) return Promise.resolve(window.AtlasFontkit);
+  fontkitCode ??= new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = new URL('fontkit.js', readerBase).href;
+    script.onload = () => (window.AtlasFontkit ? resolve(window.AtlasFontkit) : reject(new Error('fontkit')));
+    script.onerror = () => {
+      fontkitCode = null;
+      script.remove();
+      reject(new Error('fontkit'));
+    };
+    document.head.append(script);
+  });
+  return fontkitCode;
+}
+
+const rgbOf = (hex) => rgb(...hex.match(/\w\w/g).map((h) => parseInt(h, 16) / 255));
+
+/**
+ * The document with rewritten lines written into its pages: each old line covered with the page's
+ * colour, the new words drawn over it as real text (in Noto, only the letters used), so they can be
+ * selected and found. The old words stay under the cover: this is not for hiding secrets.
+ */
+export async function applyEdits(bytes, edits) {
+  const live = edits.filter((e) => e && Number.isInteger(e.page));
+  if (!live.length) return bytes;
+  const shown = await loadPdf(bytes);
+  try {
+    const pdf = await loadForEdit(bytes);
+    pdf.registerFontkit(await loadFontkit());
+    const fonts = new Map();
+    const fontFor = async (e) => {
+      const key = `${e.font}:${e.bold}`;
+      // the whole font: pdf-lib's subsets lose letters in some viewers
+      if (!fonts.has(key)) fonts.set(key, pdf.embedFont(await fontBytes(e.font, e.bold), { subset: false }));
+      return fonts.get(key);
+    };
+    const pages = pdf.getPages();
+    for (const e of live) {
+      const page = pages[e.page - 1];
+      if (!page) continue;
+      const viewport = (await shown.getPage(e.page)).getViewport({ scale: 1 });
+      const vw = viewport.width;
+      const vh = viewport.height;
+      const toPdf = (fx, fy) => viewport.convertToPdfPoint(fx * vw, fy * vh);
+      // the cover, as in the reader (pdf.js coverOf)
+      const cx = e.x - e.size * 0.08;
+      const cw = e.w + e.size * 0.16;
+      const corners = [toPdf(cx, e.y), toPdf(cx + cw, e.y), toPdf(cx, e.y + e.h), toPdf(cx + cw, e.y + e.h)];
+      const xs = corners.map((p) => p[0]);
+      const ys = corners.map((p) => p[1]);
+      page.drawRectangle({ x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys), color: rgbOf(e.bg) });
+      if (!e.text) continue;
+      // the words run left to right as the page is shown, whatever the page's own rotation
+      const [px, py] = toPdf(e.x, e.base);
+      const [qx, qy] = toPdf(e.x + 0.1, e.base);
+      const angle = (Math.atan2(qy - py, qx - px) * 180) / Math.PI;
+      page.drawText(e.text, { x: px, y: py, size: e.size * vw, font: await fontFor(e), color: rgbOf(e.ink), rotate: degrees(angle) });
+    }
+    return await pdf.save();
+  } finally {
+    closeDoc(shown);
+  }
+}
 
 const COLORS = { yellow: [1, 0.84, 0.16], green: [0.36, 0.84, 0.47], blue: [0.38, 0.64, 1], pink: [1, 0.45, 0.75] };
 

@@ -21,7 +21,7 @@ const workerAsText = {
 };
 
 const options = {
-  entryPoints: { app: 'src/app.js', reader: 'src/reader/index.js', translate: 'src/translateModel.js', styles: 'src/styles.css' },
+  entryPoints: { app: 'src/app.js', reader: 'src/reader/index.js', fontkit: 'src/reader/fontkit.js', translate: 'src/translateModel.js', styles: 'src/styles.css' },
   bundle: true,
   outdir: 'dist',
   format: 'iife',
@@ -29,7 +29,7 @@ const options = {
   minify: !watch,
   sourcemap: watch ? 'inline' : false,
   legalComments: 'none',
-  loader: { '.woff2': 'file', '.woff': 'file', '.md': 'text' },
+  loader: { '.woff2': 'file', '.woff': 'file', '.ttf': 'file', '.md': 'text' },
   assetNames: 'assets/[name]-[hash]',
   plugins: [workerAsText],
   logLevel: 'info',

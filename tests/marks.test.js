@@ -104,3 +104,25 @@ test('after a PDF\'s pages change, texts follow their pages and stay on the page
   // turned: the corner moves with the page, the box still fits across it
   assert.ok(out[1].x + out[1].w <= 1 && out[1].y >= 0 && out[1].y <= 0.98);
 });
+
+test('a rewritten PDF line: well formed or refused', async () => {
+  const { newEditId, validEdit, validEdits } = await import('../src/marks.js');
+  const e = { id: newEditId(), page: 1, x: 0.1, y: 0.2, w: 0.5, h: 0.03, base: 0.225, size: 0.02, font: 'serif', bold: false, ink: '#111111', bg: '#ffffff', original: 'Old line', text: 'New line', created: 1 };
+  assert.ok(validEdit(e));
+  assert.ok(validEdits([e]));
+  assert.ok(!validEdits([e, e]));
+  for (const bad of [{ font: 'comic' }, { ink: 'red' }, { bg: '#fff' }, { bold: 'yes' }, { h: 0 }, { page: 0 }, { text: null }]) assert.ok(!validEdit({ ...e, ...bad }), JSON.stringify(bad));
+  assert.ok(validEdit({ ...e, text: '' }), 'an empty text removes the line');
+});
+
+test('the line under a point: runs on one baseline, a wide gap is another column', async () => {
+  const { pickLine } = await import('../src/marks.js');
+  const run = (str, left, right, base = 100, size = 12) => ({ str, left, right, base, top: base - size * 0.95, bottom: base + size * 0.28, size, font: 'sans', bold: false });
+  const runs = [run('Hello', 50, 80), run('world,', 83, 120), run('again', 124, 155), run('Column two', 300, 370), run('Next line', 50, 110, 116)];
+  const line = pickLine(runs, 90, 96);
+  assert.equal(line.text, 'Hello world, again');
+  assert.deepEqual([line.left, line.right, line.base], [50, 155, 100]);
+  assert.equal(pickLine(runs, 320, 96).text, 'Column two');
+  assert.equal(pickLine(runs, 60, 112).text, 'Next line');
+  assert.equal(pickLine(runs, 250, 96), null);
+});

@@ -6,7 +6,8 @@
 import { AnnotationMode, getDocument, PDFWorker, TextLayer } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import workerSource from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs';
 import { createPager } from './pager.js';
-import { mergeRects } from '../marks.js';
+import { mergeRects, pickLine } from '../marks.js';
+import { familyOf, loadFaces } from './pdffonts.js';
 import { findIn, foldText, MAX_HITS, queryPattern, snippet } from './search.js';
 
 let worker = null;
@@ -23,7 +24,8 @@ function sharedWorker() {
 
 export function loadPdf(bytes) {
   // pdf.js takes the buffer over: hand it a copy
-  return getDocument({ data: bytes.slice(), worker: sharedWorker(), useSystemFonts: true, enableXfa: false, stopAtErrors: false }).promise;
+  // fontExtraProperties: the fonts' own names reach the page, so a rewritten line can tell bold
+  return getDocument({ data: bytes.slice(), worker: sharedWorker(), useSystemFonts: true, enableXfa: false, stopAtErrors: false, fontExtraProperties: true }).promise;
 }
 
 export const closeDoc = (doc) => doc.loadingTask.destroy().catch(() => {});
@@ -404,6 +406,137 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
     return true;
   }
 
+  // ---------- edits: lines of the page's own text, rewritten; drawn in SVG so the words sit on the line ----------
+
+  let edits = [];
+  let hiddenEdit = null; // the edit being typed into: its field stands in its place
+  const editLayers = new Map(); // page number → its <svg>
+  const SVG = 'http://www.w3.org/2000/svg';
+  const svgEl = (name, attrs) => {
+    const el = document.createElementNS(SVG, name);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+    return el;
+  };
+  // the cover reaches a little past the old letters, which can overhang their box
+  const coverOf = (e) => ({ x: e.x - e.size * 0.08, y: e.y, w: e.w + e.size * 0.16, h: e.h });
+
+  function paintEdits() {
+    for (const layer of editLayers.values()) layer.replaceChildren();
+    for (const e of edits) {
+      const frame = pages[e.page - 1];
+      if (!frame || e.id === hiddenEdit) continue;
+      const ratio = Number(frame.dataset.ratio) || firstRatio;
+      const height = 1000 / ratio;
+      let layer = editLayers.get(e.page);
+      if (!layer) {
+        layer = svgEl('svg', { class: 'pdf-edits', viewBox: `0 0 1000 ${height}`, preserveAspectRatio: 'none' });
+        frame.append(layer);
+        editLayers.set(e.page, layer);
+      }
+      layer.setAttribute('viewBox', `0 0 1000 ${height}`);
+      const c = coverOf(e);
+      const g = svgEl('g', { class: 'pdf-edit', 'data-edit': e.id });
+      g.append(svgEl('rect', { x: c.x * 1000, y: c.y * height, width: c.w * 1000, height: c.h * height, fill: e.bg }));
+      if (e.text) {
+        const text = svgEl('text', { x: e.x * 1000, y: e.base * height, fill: e.ink, 'font-size': e.size * 1000, 'font-weight': e.bold ? 700 : 400, 'xml:space': 'preserve' });
+        text.style.fontFamily = familyOf(e.font);
+        text.textContent = e.text;
+        g.append(text);
+      }
+      layer.append(g);
+    }
+  }
+
+  /** Average colour of a canvas's pixels in a box, the darkest of them too. */
+  function sample(canvas, x0, y0, x1, y1) {
+    const w = Math.max(1, Math.round(x1 - x0));
+    const h = Math.max(1, Math.round(y1 - y0));
+    const data = canvas.getContext('2d', { willReadFrequently: true }).getImageData(Math.round(x0), Math.round(y0), w, h).data;
+    let dark = null;
+    let darkest = Infinity;
+    // the commonest colour: pixels grouped by a coarse key, then the exact average of the biggest group
+    const groups = new Map(); // key → [count, r, g, b]
+    for (let i = 0; i < data.length; i += 4) {
+      const [r, g, b] = [data[i], data[i + 1], data[i + 2]];
+      const lum = r * 0.3 + g * 0.59 + b * 0.11;
+      if (lum < darkest) {
+        darkest = lum;
+        dark = [r, g, b];
+      }
+      const key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+      const sum = groups.get(key) ?? [0, 0, 0, 0];
+      sum[0]++;
+      sum[1] += r;
+      sum[2] += g;
+      sum[3] += b;
+      groups.set(key, sum);
+    }
+    let best = null;
+    for (const sum of groups.values()) if (!best || sum[0] > best[0]) best = sum;
+    best ??= [1, 255, 255, 255];
+    const common = [best[1], best[2], best[3]].map((v) => Math.round(v / best[0]));
+    return { common, dark: dark ?? [0, 0, 0] };
+  }
+  const hex = (rgb) => `#${rgb.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+
+  /**
+   * The line of the page's text under a point of the screen, ready to be rewritten:
+   * { page, x, y, w, h, base, size, font, bold, ink, bg, original } (see marks.js), or null.
+   */
+  async function lineAt(clientX, clientY) {
+    const at = pointAt(clientX, clientY);
+    if (!at) return null;
+    const content = await pageText(at.page);
+    const { viewport } = content;
+    if (!viewport) return null;
+    const page = await doc.getPage(at.page);
+    const runs = [];
+    for (const item of content.items) {
+      if (!item.str) continue;
+      const [a, b, c, d, x, y] = item.transform;
+      const along = Math.hypot(a, b) || 1;
+      const size = item.height || Math.hypot(c, d) || 1;
+      const w = item.width || size * item.str.length * 0.5;
+      const [x0, y0] = viewport.convertToViewportPoint(x, y);
+      const [x1, y1] = viewport.convertToViewportPoint(x + (a / along) * w, y + (b / along) * w);
+      // only lines that read left to right as the page is shown
+      if (x1 <= x0 || Math.abs(y1 - y0) > size * 0.2) continue;
+      let bold = false;
+      try {
+        bold = /bold|black|heavy|semibold|demi/i.test(page.commonObjs.get(item.fontName)?.name ?? '');
+      } catch {
+        // the font is not loaded yet: regular
+      }
+      const font = /mono|courier/i.test(item.font) ? 'mono' : /serif/i.test(item.font) && !/sans/i.test(item.font) ? 'serif' : 'sans';
+      runs.push({ str: item.str, left: x0, right: x1, base: y0, top: y0 - size * 0.95, bottom: y0 + size * 0.28, size, font, bold });
+    }
+    const line = pickLine(runs, at.x * viewport.width, at.y * viewport.height);
+    if (!line?.text) return null;
+    const vw = viewport.width;
+    const vh = viewport.height;
+    const pad = line.size * 0.08;
+    const box = { x: line.left / vw, y: (line.top - pad) / vh, w: (line.right - line.left) / vw, h: (line.bottom - line.top + pad * 2) / vh };
+    let ink = [0, 0, 0];
+    let bg = [255, 255, 255];
+    // colours come from the page as drawn: wait for a drawing still going on (it starts all white)
+    const entry = drawn.get(at.page);
+    await entry?.task?.promise?.catch(() => {});
+    const canvas = drawn.get(at.page)?.canvas;
+    if (canvas?.width && !drawn.get(at.page)?.cancelled) {
+      const sx = canvas.width;
+      const sy = canvas.height;
+      ink = sample(canvas, box.x * sx, box.y * sy, (box.x + box.w) * sx, (box.y + box.h) * sy).dark;
+      // the page's colour: just above the line
+      const strip = (line.size / vh) * 0.3 * sy;
+      bg = sample(canvas, box.x * sx, Math.max(0, box.y * sy - strip), (box.x + box.w) * sx, Math.max(1, box.y * sy)).common;
+    }
+    const lum = ([r, g, b]) => r * 0.3 + g * 0.59 + b * 0.11;
+    // words that would not stand out from the page (a page caught half drawn): dark on light, or light on dark
+    if (Math.abs(lum(ink) - lum(bg)) < 60) ink = lum(bg) > 128 ? [0, 0, 0] : [255, 255, 255];
+    await loadFaces();
+    return { page: at.page, ...box, base: line.base / vh, size: line.size / vw, font: line.font, bold: line.bold, ink: hex(ink), bg: hex(bg), original: line.text };
+  }
+
   // ---------- finding words: every page's text, read a few pages at a time; matches as boxes like the marks ----------
 
   const texts = new Map(); // page number → Promise of { text, folded, items: [{ start, end, str, transform, width, height }], viewport }
@@ -419,7 +552,7 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
           for (const item of content.items) {
             if (typeof item.str !== 'string') continue;
             const font = content.styles?.[item.fontName]?.fontFamily || 'sans-serif';
-            items.push({ start: text.length, end: text.length + item.str.length, str: item.str, transform: item.transform, width: item.width, height: item.height, font });
+            items.push({ start: text.length, end: text.length + item.str.length, str: item.str, transform: item.transform, width: item.width, height: item.height, font, fontName: item.fontName });
             text += item.str;
             if (item.hasEOL) text += '\n';
           }
@@ -612,6 +745,14 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
     },
     pointAt,
     goToText,
+    lineAt,
+    /** Rewritten lines over the pages; `hidden` is the one being typed into. */
+    setEdits(list = [], hidden = null) {
+      edits = list;
+      hiddenEdit = hidden;
+      if (list.length) loadFaces().then(paintEdits);
+      paintEdits();
+    },
     find,
     showFound,
     clearFind,

@@ -47,16 +47,20 @@ const common = {
   target: ['chrome120'],
   outdir: path.join(ROOT, 'out', 'browser', 'parts'),
 };
-const [js, readerJs, css] = await Promise.all([
+const [js, readerJs, css, fontkitJs] = await Promise.all([
   esbuild.build({ ...common, entryPoints: [path.join(ROOT, 'src', 'app.js')], format: 'iife', loader: { '.md': 'text' } }),
-  esbuild.build({ ...common, entryPoints: [path.join(ROOT, 'src', 'reader', 'index.js')], format: 'iife', plugins: [workerAsText] }),
+  // the fonts for rewritten PDF lines (src/reader/pdffonts.js) go in as data: URLs
+  esbuild.build({ ...common, entryPoints: [path.join(ROOT, 'src', 'reader', 'index.js')], format: 'iife', loader: { '.ttf': 'dataurl' }, plugins: [workerAsText] }),
   esbuild.build({ ...common, entryPoints: [path.join(ROOT, 'src', 'styles.css')], plugins: [trimFonts] }),
+  // fontkit (fonts into PDFs, for rewritten lines): a page opened from a file loads no script later
+  esbuild.build({ ...common, entryPoints: [path.join(ROOT, 'src', 'reader', 'fontkit.js')], format: 'iife' }),
 ]);
 
 // An inline script must not contain "</script", or the HTML parser would end it early.
 const inline = (text) => text.replace(/<\/script/gi, '<\\/script');
 const script = inline(js.outputFiles[0].text);
 const reader = inline(readerJs.outputFiles[0].text);
+const fontkit = inline(fontkitJs.outputFiles[0].text);
 const style = css.outputFiles[0].text.replace(/<\/style/gi, '<\\/style');
 const hash = (text) => `'sha256-${crypto.createHash('sha256').update(text, 'utf8').digest('base64')}'`;
 const icon = fs.readFileSync(path.join(ROOT, 'assets', 'icon.png')).toString('base64');
@@ -65,7 +69,7 @@ const icon = fs.readFileSync(path.join(ROOT, 'assets', 'icon.png')).toString('ba
 // page may not talk to the network at all.
 const csp = [
   "default-src 'none'",
-  `script-src ${hash(script)} ${hash(reader)}`,
+  `script-src ${hash(script)} ${hash(reader)} ${hash(fontkit)}`,
   'worker-src blob:',
   "style-src 'unsafe-inline'",
   'font-src data:',
@@ -84,7 +88,7 @@ swap(/<meta http-equiv="Content-Security-Policy"[^>]*>/, `<meta http-equiv="Cont
 swap(/<link rel="icon"[^>]*>/, `<link rel="icon" href="data:image/png;base64,${icon}">`);
 swap(/<link rel="stylesheet" href="dist\/styles\.css">/, `<style>${style}</style>`);
 // the reader first, so window.AtlasReader is there before the app looks for it
-swap(/<script src="dist\/app\.js"><\/script>/, `<script>${reader}</script>\n  <script>${script}</script>`);
+swap(/<script src="dist\/app\.js"><\/script>/, `<script>${fontkit}</script>\n  <script>${reader}</script>\n  <script>${script}</script>`);
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, html);
