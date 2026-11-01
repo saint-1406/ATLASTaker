@@ -4,6 +4,7 @@
 // The library (documents to read) has the same two homes: library/ on disk, or IndexedDB.
 
 import { t } from './i18n.js';
+import { createAndroidSync } from './sync/android.js';
 
 const token = document.querySelector('meta[name="atlas-token"]')?.content ?? '';
 const onServer = location.protocol.startsWith('http') && token !== '' && !token.startsWith('__');
@@ -178,6 +179,7 @@ function browserApi() {
 
   return {
     kind: 'browser',
+    idb: opened, // for sync on Android (sync/android.js)
     async saveAsset(blob) {
       if (!IMAGE_TYPES[blob.type]) throw new Error(t('image.wrongType'));
       const name = newAssetName(blob.type);
@@ -437,3 +439,8 @@ export const api = {
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   },
 };
+
+// Google Drive sync on Android: the page runs the rounds, the app signs in
+if (android && typeof android.syncAuthorize === 'function' && api.idb) {
+  api.sync = createAndroidSync({ android, opened: api.idb, library: api.library });
+}
