@@ -10,7 +10,7 @@ import { atomicWrite, ID_RE } from './store.js';
 import { validBookmarks, validMarks } from '../src/marks.js';
 
 export const DOC_ID_RE = /^d-[a-z0-9]{6,40}$/;
-export const DOC_FORMATS = ['pdf', 'epub', 'fb2', 'docx', 'md', 'txt', 'html'];
+export const DOC_FORMATS = ['pdf', 'epub', 'fb2', 'docx', 'odt', 'rtf', 'md', 'txt', 'html', 'cbz', 'img'];
 export const MAX_DOC = 300 * 1024 * 1024;
 const COVER_RE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/;
 

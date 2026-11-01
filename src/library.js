@@ -12,7 +12,7 @@ import { openPageEditor } from './pageEditor.js';
 /** A link from a note back to a place in a document: atlas:<document>#<mark>. */
 export const DOC_LINK_RE = /^atlas:(d-[a-z0-9]{6,40})(?:#(m-[a-z0-9]{4,40}))?$/;
 
-const ACCEPT = '.pdf,.epub,.fb2,.zip,.docx,.doc,.md,.markdown,.txt,.text,.html,.htm,.xhtml,.rtf,.odt';
+const ACCEPT = '.pdf,.epub,.fb2,.zip,.docx,.doc,.odt,.rtf,.md,.markdown,.txt,.text,.html,.htm,.xhtml,.cbz,.jpg,.jpeg,.png,.webp,.gif,.bmp';
 const MAX_SIZE = 300 * 1024 * 1024;
 const BOOK_SCALE = { min: 0.7, max: 2.2, step: 0.1 };
 // keys that turn a page in page mode: forward, back, or (space) forward unless Shift is held
@@ -827,7 +827,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, getTh
 
   // ---------- the file: download it, and a PDF's pages and marks ----------
 
-  const MIME = { pdf: 'application/pdf', epub: 'application/epub+zip', fb2: 'application/xml', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', md: 'text/markdown', txt: 'text/plain', html: 'text/html' };
+  const MIME = { odt: 'application/vnd.oasis.opendocument.text', rtf: 'application/rtf', cbz: 'application/vnd.comicbook+zip', pdf: 'application/pdf', epub: 'application/epub+zip', fb2: 'application/xml', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', md: 'text/markdown', txt: 'text/plain', html: 'text/html' };
 
   function openMore() {
     if (!reading?.controller) return;

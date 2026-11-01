@@ -7,8 +7,9 @@ import { attr, children, find, findAll, parseXml, textOf } from './xml.js';
 import { decodeText, el, htmlBlocks, plain, safeHref } from './model.js';
 import { fb2Book } from './fb2.js';
 import { docxBook, imageType } from './docx.js';
+import { comicBook, comicPages, imageBook, odtBook, pictureType, rtfBook } from './extra.js';
 
-export const FORMATS = ['pdf', 'epub', 'fb2', 'docx', 'md', 'txt', 'html'];
+export const FORMATS = ['pdf', 'epub', 'fb2', 'docx', 'odt', 'rtf', 'md', 'txt', 'html', 'cbz', 'img'];
 
 const extOf = (name) => {
   const lower = String(name ?? '').toLowerCase();
@@ -20,14 +21,15 @@ export const baseName = (name) => String(name ?? '').replace(/\.fb2\.zip$/i, '')
 
 /**
  * The format of a file, from its first bytes and its name: one of FORMATS, or "unknown:<what>" for
- * a kind ATLAS knows but cannot read (an old .doc, .rtf, .odt).
+ * a kind ATLAS knows but cannot read (an old .doc).
  */
 export function detectFormat(name, bytes) {
   const ext = extOf(name);
   const head = String.fromCharCode(...bytes.subarray(0, 8));
   if (head.startsWith('%PDF')) return 'pdf';
   if (bytes[0] === 0xd0 && bytes[1] === 0xcf && bytes[2] === 0x11 && bytes[3] === 0xe0) return 'unknown:doc';
-  if (head.startsWith('{\\rtf')) return 'unknown:rtf';
+  if (head.startsWith('{\\rtf')) return 'rtf';
+  if (pictureType(bytes)) return 'img';
   if (isZip(bytes)) {
     let zip;
     try {
@@ -38,7 +40,8 @@ export function detectFormat(name, bytes) {
     if (zip.has('META-INF/container.xml')) return 'epub';
     if (zip.has('word/document.xml')) return 'docx';
     if (zip.names.some((n) => n.toLowerCase().endsWith('.fb2'))) return 'fb2';
-    if (zip.has('content.xml')) return 'unknown:odt';
+    if (zip.has('content.xml')) return 'odt';
+    if (comicPages(zip).length) return 'cbz';
     return 'unknown:zip';
   }
   const start = new TextDecoder('latin1').decode(bytes.subarray(0, 2048));
@@ -57,6 +60,10 @@ export async function loadBook(name, bytes, format = detectFormat(name, bytes)) 
     book = fb2Book(decodeText(data));
   } else if (format === 'epub') book = await epubBook(openZip(bytes));
   else if (format === 'docx') book = await docxBook(openZip(bytes));
+  else if (format === 'odt') book = await odtBook(openZip(bytes));
+  else if (format === 'cbz') book = await comicBook(openZip(bytes));
+  else if (format === 'rtf') book = rtfBook(bytes);
+  else if (format === 'img') book = imageBook(bytes);
   else if (format === 'md') book = markdownBook(decodeText(bytes));
   else if (format === 'html') book = htmlBook(decodeText(bytes));
   else if (format === 'txt') book = textBook(decodeText(bytes));

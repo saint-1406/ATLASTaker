@@ -8,6 +8,7 @@ import { detectFormat, loadBook } from '../src/reader/formats.js';
 import { crc32 } from '../src/backup.js';
 
 const utf8 = (s) => new TextEncoder().encode(s);
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
 
 /** A zip with every file deflated (the way real EPUB and DOCX files are packed). */
 function zip(files) {
@@ -126,7 +127,7 @@ test('text: BOM, declared encoding, clean UTF-8, else Windows-1251', () => {
 test('formats are told apart by their bytes first, then the name', () => {
   assert.equal(detectFormat('x.bin', utf8('%PDF-1.7\n')), 'pdf');
   assert.equal(detectFormat('old.doc', new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0, 0, 0, 0])), 'unknown:doc');
-  assert.equal(detectFormat('a.rtf', utf8('{\\rtf1\\ansi')), 'unknown:rtf');
+  assert.equal(detectFormat('a.rtf', utf8('{\\rtf1\\ansi')), 'rtf');
   assert.equal(detectFormat('book', utf8('<?xml version="1.0"?><FictionBook xmlns="x">')), 'fb2');
   assert.equal(detectFormat('README.md', utf8('# Hi')), 'md');
   assert.equal(detectFormat('page', utf8('<!DOCTYPE html><html>')), 'html');
@@ -134,7 +135,10 @@ test('formats are told apart by their bytes first, then the name', () => {
   assert.equal(detectFormat('x.epub', zip({ mimetype: 'application/epub+zip', 'META-INF/container.xml': '<container/>' })), 'epub');
   assert.equal(detectFormat('x.docx', zip({ 'word/document.xml': '<w:document/>' })), 'docx');
   assert.equal(detectFormat('x.fb2.zip', zip({ 'book.fb2': '<FictionBook/>' })), 'fb2');
-  assert.equal(detectFormat('x.odt', zip({ 'content.xml': '<x/>' })), 'unknown:odt');
+  assert.equal(detectFormat('x.odt', zip({ 'content.xml': '<x/>' })), 'odt');
+  assert.equal(detectFormat('x.cbz', zip({ 'p10.jpg': PNG, 'p2.jpg': PNG })), 'cbz');
+  assert.equal(detectFormat('photo', PNG), 'img');
+  assert.equal(detectFormat('x.zip', zip({ 'a.txt': 'hi' })), 'unknown:zip');
 });
 
 const FB2 = `<?xml version="1.0" encoding="windows-1251"?>
@@ -323,4 +327,58 @@ test('an HTML page keeps its words and loses everything active', async () => {
 
 test('el() keeps only known classes and sane spans', () => {
   assert.deepEqual(el('td', { class: 'evil', colspan: '2;x', rowspan: '3' }).attrs, { rowspan: '3' });
+});
+
+
+test('RTF: paragraphs, headings, bold and italic, Cyrillic in a code page and as \\u', async () => {
+  const bytes = Uint8Array.from(
+    String.raw`{\rtf1\ansi\ansicpg1251\deff0{\fonttbl{\f0\fcharset204 Times New Roman;}}{\colortbl;\red0\green0\blue0;}{\info{\title \'cf\'f0\'e8\'e2\'e5\'f2}{\author Lev}}
+{\*\generator Riched20;}\pard\outlinelevel0\b \'c3\'eb\'e0\'e2\'e0 1\b0\par
+\pard \'dd\'f2\'ee {\i \'ea\'f3\'f0\'f1\'e8\'e2}, \u1072?\u1073? end\line next\par
+{\pict\pngblip 89504e47}\pard Last\par}`,
+    (c) => c.charCodeAt(0) & 0xff,
+  );
+  const book = await loadBook('a.rtf', bytes, 'rtf');
+  assert.equal(book.title, 'Привет');
+  assert.equal(book.author, 'Lev');
+  assert.equal(book.blocks[0].tag, 'h1');
+  assert.equal(plain(book.blocks[0]), 'Глава 1');
+  assert.equal(plain(book.blocks[1]), 'Это курсив, аб end\nnext');
+  assert.ok(JSON.stringify(book.blocks[1]).includes('"tag":"em"'));
+  assert.equal(plain(book.blocks[2]), 'Last');
+  assert.equal(book.blocks.length, 3, 'tables of fonts and colours, pictures and generator are not text');
+});
+
+test('ODT: headings, styled spans, lists, tables, title from meta.xml', async () => {
+  const content = `<?xml version="1.0"?>
+<office:document-content xmlns:office="o" xmlns:text="t" xmlns:style="s" xmlns:fo="f" xmlns:table="tb">
+ <office:automatic-styles>
+  <style:style style:name="T1" style:family="text"><style:text-properties fo:font-weight="bold"/></style:style>
+ </office:automatic-styles>
+ <office:body><office:text>
+  <text:h text:outline-level="2">Раздел</text:h>
+  <text:p>Обычный <text:span text:style-name="T1">жирный</text:span><text:s text:c="2"/>текст<text:line-break/>дальше</text:p>
+  <text:list><text:list-item><text:p>один</text:p></text:list-item><text:list-item><text:p>два</text:p></text:list-item></text:list>
+  <table:table><table:table-row><table:table-cell><text:p>A</text:p></table:table-cell><table:table-cell><text:p>B</text:p></table:table-cell></table:table-row></table:table>
+ </office:text></office:body>
+</office:document-content>`;
+  const meta = '<office:document-meta xmlns:office="o" xmlns:dc="d"><office:meta><dc:title>Отчёт</dc:title><dc:creator>Эльман</dc:creator></office:meta></office:document-meta>';
+  const book = await loadBook('a.odt', zip({ mimetype: 'application/vnd.oasis.opendocument.text', 'content.xml': content, 'meta.xml': meta }), 'odt');
+  assert.equal(book.title, 'Отчёт');
+  assert.deepEqual(book.blocks.map((b) => b.tag), ['h2', 'p', 'ul', 'table']);
+  assert.equal(plain(book.blocks[1]), 'Обычный жирный  текст\nдальше');
+  assert.ok(JSON.stringify(book.blocks[1]).includes('"tag":"strong"'));
+  assert.deepEqual(book.blocks[2].children.map(plain), ['один', 'два']);
+  assert.deepEqual(book.toc.map((e) => e.text), ['Раздел']);
+});
+
+test('CBZ: pages in natural name order, the first is the cover; a picture is a one-page book', async () => {
+  const book = await loadBook('c.cbz', zip({ 'p10.png': PNG, 'p2.png': PNG, 'p1.png': PNG, '__MACOSX/._p1.png': PNG, 'ComicInfo.xml': '<ComicInfo><Series>Saga</Series><Number>3</Number><Writer>BKV</Writer></ComicInfo>' }), 'cbz');
+  assert.deepEqual(book.blocks.map((b) => b.children[0].attrs.ref), ['p1.png', 'p2.png', 'p10.png']);
+  assert.equal(book.cover, 'p1.png');
+  assert.equal(book.title, 'Saga #3');
+  assert.equal(book.author, 'BKV');
+  const photo = await loadBook('scan.png', PNG, 'img');
+  assert.equal(photo.title, 'scan');
+  assert.equal(photo.resources.get('page').type, 'image/png');
 });
