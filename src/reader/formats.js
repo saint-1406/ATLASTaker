@@ -114,9 +114,12 @@ async function epubBook(zip) {
   const chapterOf = new Map(spine.map((item, i) => [item.path, i]));
   const wanted = new Set();
 
+  // all the chapters unpack at once: one after another, each waited for the browser's inflater in turn
+  const texts = await Promise.all(spine.map((item) => zip.read(item.path)));
   const blocks = [];
   for (const [i, item] of spine.entries()) {
-    const doc = parseXml(decodeText(await zip.read(item.path)));
+    const doc = parseXml(decodeText(texts[i]));
+    texts[i] = null;
     const ctx = {
       id: (raw) => `c${i}-${raw}`,
       image(src) {
@@ -143,13 +146,8 @@ async function epubBook(zip) {
   const cover = coverItem && imageType(coverItem.path) && zip.has(coverItem.path) ? coverItem.path : null;
   if (cover) wanted.add(cover);
   const resources = new Map();
-  for (const path of wanted) {
-    try {
-      resources.set(path, { type: imageType(path), bytes: await zip.read(path) });
-    } catch {
-      // a missing picture: the text still reads
-    }
-  }
+  const pictures = await Promise.all([...wanted].map((path) => zip.read(path).catch(() => null))); // a missing picture: the text still reads
+  [...wanted].forEach((path, i) => pictures[i] && resources.set(path, { type: imageType(path), bytes: pictures[i] }));
   return {
     title: textOf(find(meta, 'title')),
     author: findAll(meta, ['creator']).map((c) => textOf(c).trim()).filter(Boolean).join(', '),

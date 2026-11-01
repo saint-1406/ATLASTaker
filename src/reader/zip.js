@@ -1,7 +1,10 @@
 // Reads .zip archives — EPUB, DOCX and zipped FB2 are all zips. The central directory says where each
 // file sits; stored files are sliced out, deflated ones go through the browser's DecompressionStream.
 
+import pako from 'pako'; // already in the reader for pdf-lib
+
 const LIMIT = 256 * 1024 * 1024; // no single file inside a book unpacks bigger than this (zip bombs)
+const SMALL = 64 * 1024; // packed size below which a file is unpacked at once (see read)
 
 const u16 = (b, at) => b[at] | (b[at + 1] << 8);
 const u32 = (b, at) => (b[at] | (b[at + 1] << 8) | (b[at + 2] << 16) | (b[at + 3] << 24)) >>> 0;
@@ -68,6 +71,15 @@ export function openZip(bytes) {
     const start = local + 30 + u16(bytes, local + 26) + u16(bytes, local + 28);
     const data = bytes.subarray(start, start + entry.compressed);
     if (entry.method === 0) return data;
+    // a small file unpacks right here: the browser's stream costs more in setting up than in work, and
+    // an EPUB is hundreds of them. Deflate grows a file at most ~1000 times, so this stays under LIMIT.
+    if (entry.method === 8 && data.length < SMALL) {
+      try {
+        return pako.inflateRaw(data);
+      } catch {
+        throw new Error(`zip: ${name} is damaged`);
+      }
+    }
     if (entry.method === 8) return inflate(data);
     throw new Error(`zip: ${name} is packed in an unknown way (${entry.method})`);
   }
