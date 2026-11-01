@@ -7,6 +7,7 @@ import { android, api, rescue } from './bridge.js';
 import { createLibrary } from './library.js';
 import { createEditor, insertComment, insertCodeBlock, insertDictation, pasteText, codeLanguageAt, showDictationPreview, urlAt } from './editor.js';
 import { createDictation } from './dictation.js';
+import { createTranslator } from './translateCard.js';
 import { analyze, imageRefs } from './markdown.js';
 import { commentTarget, commentsUnder, formatStamp } from './comments.js';
 import { normalizeLook, normalizeReading, PALETTES, toneOf } from './skins.js';
@@ -81,6 +82,8 @@ let atlas;
 let outline;
 let library = null; // the shelf and the reader, where this build has a place for documents
 let dictation = null; // speech to text at the cursor (dictation.js)
+const translator = createTranslator({ api, android }); // a selected passage, Russian ↔ English (translateCard.js)
+const phone = Boolean(android) || matchMedia('(pointer: coarse)').matches;
 
 let markReady;
 const ready = new Promise((resolve) => {
@@ -183,7 +186,8 @@ async function boot() {
   if (api.library) {
     library = createLibrary({
       api,
-      phone: Boolean(android) || matchMedia('(pointer: coarse)').matches,
+      phone,
+      translator,
       getReading: () => normalizeReading(prefs),
       onReading(patch) {
         Object.assign(prefs, normalizeReading({ ...prefs, ...patch }));
@@ -781,6 +785,37 @@ function refreshChrome() {
 function onSelectionChange(update) {
   showCursorStatus(update.state);
   schedulePositionSave();
+  // on a phone a long press shows the phone's own copy bar: "Translate" floats over the text instead
+  if (phone) $('#btn-translate').hidden = update.state.selection.main.empty;
+}
+
+/** The selection in the note, in the translation card; "To note" puts the translation under it. */
+function translateSelection(view = editor.view) {
+  const sel = view.state.selection.main;
+  if (sel.empty) {
+    toast(t('translate.nothingSelected'));
+    return;
+  }
+  const text = view.state.sliceDoc(sel.from, sel.to);
+  const start = view.coordsAtPos(sel.from);
+  const end = view.coordsAtPos(sel.to);
+  const rect = start && end ? { left: start.left, top: start.top, bottom: Math.max(start.bottom, end.bottom) } : null;
+  const noteId = currentId;
+  translator.open({
+    text,
+    rect,
+    toNote: {
+      title: t('translate.toNoteEditor'),
+      run(translation) {
+        if (currentId !== noteId) return;
+        const v = editor.view;
+        const line = v.state.doc.lineAt(Math.min(sel.to, v.state.doc.length));
+        const insert = `\n\n${translation}`;
+        v.dispatch({ changes: { from: line.to, insert }, selection: { anchor: line.to + insert.length }, scrollIntoView: true });
+        v.focus();
+      },
+    },
+  });
 }
 
 function showCursorStatus(state) {
@@ -951,6 +986,7 @@ function openEditorMenu(event, view) {
       title: inCode ? t('comment.inCode') : undefined,
       run: () => requestComment(view, line.number),
     },
+    { icon: '🌐', text: t('menu.translate'), kbd: 'Ctrl+Shift+X', disabled: sel.empty, run: () => translateSelection(view) },
     '-',
     { icon: '✂', text: t('menu.cut'), kbd: 'Ctrl+X', disabled: sel.empty, run: () => cutSelection(view) },
     { icon: '⧉', text: t('menu.copy'), kbd: 'Ctrl+C', disabled: sel.empty, run: () => copySelection(view) },
@@ -1264,6 +1300,7 @@ function commandList() {
     { icon: '⇊', title: t('commands.exportAll'), keywords: 'backup download резервная копия архив экспорт zip', run: exportAll },
     { icon: '⇡', title: t('commands.import'), keywords: 'import upload files импорт загрузить файлы', run: importFiles },
     { icon: '◉', title: t('commands.dictate'), kbd: 'Ctrl+Shift+D', keywords: 'dictate voice speech microphone диктовка голос речь микрофон', run: toggleDictation },
+    { icon: '🌐', title: t('commands.translate'), kbd: 'Ctrl+Shift+X', keywords: 'translate translation english russian перевод перевести английский русский', run: () => translateSelection() },
   ];
   if (isAtlas()) list.splice(1, 0, { icon: '▦', title: t('commands.atlas'), kbd: 'Ctrl+M', keywords: 'atlas map archipelago карта архипелаг', run: toggleAtlas });
   if (library) {
@@ -1315,6 +1352,12 @@ function toggleAtlas() {
 }
 
 function onGlobalKey(e) {
+  if (e.key === 'Escape' && translator.isOpen()) {
+    e.preventDefault();
+    e.stopPropagation();
+    translator.close();
+    return;
+  }
   if (library?.isOpen()) {
     library.onKey(e);
     return;
@@ -1344,6 +1387,7 @@ function onGlobalKey(e) {
   else if (code === 'KeyM' && isAtlas()) toggleAtlas();
   else if (code === 'KeyB' && !shiftKey) toggleIndex();
   else if (code === 'KeyD' && shiftKey) toggleDictation();
+  else if (code === 'KeyX' && shiftKey) translateSelection();
   else if (code === 'KeyO' && !shiftKey && library) {
     flushSave();
     openLibrary();
@@ -1380,6 +1424,8 @@ function bindChrome() {
   // the button must not take the focus (and the cursor) away from the text
   $('#btn-dictate').addEventListener('pointerdown', (e) => e.preventDefault());
   $('#btn-dictate').addEventListener('click', toggleDictation);
+  $('#btn-translate').addEventListener('pointerdown', (e) => e.preventDefault());
+  $('#btn-translate').addEventListener('click', () => translateSelection());
   $('#btn-library').addEventListener('click', () => {
     closeIndexPanel();
     flushSave();
@@ -1492,5 +1538,7 @@ window.__atlas = {
   incoming: () => receiveIncoming(),
   /** Android: what the phone's speech recognition heard (see dictation.js). */
   dictation: (event) => dictation?.receive(event),
+  /** Android: ML Kit's answer to a translation (see translate.js). */
+  translate: (event) => translator.receive(event),
   toggleDictation: () => toggleDictation(),
 };

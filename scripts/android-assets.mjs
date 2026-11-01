@@ -18,7 +18,9 @@ for (const built of ['app.js', 'reader.js', 'styles.css']) {
 fs.rmSync(WWW, { recursive: true, force: true });
 fs.mkdirSync(path.join(WWW, 'assets'), { recursive: true });
 fs.copyFileSync(path.join(ROOT, 'index.html'), path.join(WWW, 'index.html'));
-fs.cpSync(path.join(ROOT, 'dist'), path.join(WWW, 'dist'), { recursive: true });
+// dist/translate.js (the opus-mt translator of the Windows app) stays out: the phone translates with ML Kit
+const translatorCode = path.join(ROOT, 'dist', 'translate.js');
+fs.cpSync(path.join(ROOT, 'dist'), path.join(WWW, 'dist'), { recursive: true, filter: (src) => path.resolve(src) !== translatorCode });
 fs.copyFileSync(path.join(ROOT, 'assets', 'icon.png'), path.join(WWW, 'assets', 'icon.png'));
 
 const size = (dir) => fs.readdirSync(dir, { withFileTypes: true }).reduce((n, e) => n + (e.isDirectory() ? size(path.join(dir, e.name)) : fs.statSync(path.join(dir, e.name)).size), 0);

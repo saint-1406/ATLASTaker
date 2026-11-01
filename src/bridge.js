@@ -87,6 +87,26 @@ function serverApi() {
       const res = await fetchOk('/api/assets', { method: 'POST', headers: { 'Content-Type': blob.type, 'X-Atlas-Token': token }, body: blob });
       return (await res.json()).name;
     },
+    /** The translator's model files (server/translate.js): which are missing, and fetching one with its progress. */
+    translate: {
+      status: (paths) => call('POST', 'translate/status', { paths }),
+      async download(path, onBytes) {
+        const res = await fetchOk('/api/translate/download', {
+          method: 'POST',
+          cache: 'no-store',
+          headers: { 'Content-Type': 'application/json', 'X-Atlas-Token': token },
+          body: JSON.stringify({ path }),
+        });
+        const reader = res.body.getReader();
+        let bytes = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          bytes += value.length;
+          onBytes?.(bytes);
+        }
+      },
+    },
     assetUrl: async (name) => `/note-assets/${enc(name)}`,
     async readAsset(name) {
       return new Uint8Array(await (await fetchOk(`/note-assets/${enc(name)}`)).arrayBuffer());

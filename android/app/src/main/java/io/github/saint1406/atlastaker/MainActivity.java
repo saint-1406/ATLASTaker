@@ -38,6 +38,15 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.webkit.WebViewAssetLoader;
 
+import com.google.android.gms.tasks.Tasks;
+import com.google.mlkit.common.model.DownloadConditions;
+import com.google.mlkit.common.model.RemoteModelManager;
+import com.google.mlkit.nl.translate.TranslateLanguage;
+import com.google.mlkit.nl.translate.TranslateRemoteModel;
+import com.google.mlkit.nl.translate.Translation;
+import com.google.mlkit.nl.translate.Translator;
+import com.google.mlkit.nl.translate.TranslatorOptions;
+
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -47,8 +56,11 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -65,6 +77,8 @@ public class MainActivity extends ComponentActivity {
     private static final long MAX_INCOMING = 300L * 1024 * 1024;
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private final ExecutorService translating = Executors.newSingleThreadExecutor();
+    private final Map<String, Translator> translators = new HashMap<>(); // "ru-en" → ML Kit's translator
     private final List<JSONObject> incoming = new ArrayList<>();
     private final AtomicInteger counter = new AtomicInteger();
     private WebView web;
@@ -217,6 +231,11 @@ public class MainActivity extends ComponentActivity {
     @Override
     protected void onDestroy() {
         io.shutdown();
+        translating.shutdownNow();
+        synchronized (translators) {
+            for (Translator translator : translators.values()) translator.close();
+            translators.clear();
+        }
         if (recognizer != null) recognizer.destroy();
         if (web != null) web.destroy();
         super.onDestroy();
@@ -343,6 +362,100 @@ public class MainActivity extends ComponentActivity {
             event.put("text", text == null ? "" : text);
             if (code != null) event.put("code", code);
             web.evaluateJavascript("window.__atlas && window.__atlas.dictation && window.__atlas.dictation(" + event + ")", null);
+        } catch (JSONException ignored) {
+            // nothing to say to the page
+        }
+    }
+
+    // ---------- translation: ML Kit, on the phone (src/translate.js asks, window.__atlas.translate hears) ----------
+
+    /** "ru", "en" → ML Kit's language, or null for one it does not know. */
+    private static String mlkitLanguage(String tag) {
+        return tag == null ? null : TranslateLanguage.fromLanguageTag(tag);
+    }
+
+    private Translator translatorFor(String from, String to) {
+        String key = from + "-" + to;
+        synchronized (translators) {
+            Translator translator = translators.get(key);
+            if (translator == null) {
+                TranslatorOptions options = new TranslatorOptions.Builder().setSourceLanguage(from).setTargetLanguage(to).build();
+                translator = Translation.getClient(options);
+                translators.put(key, translator);
+            }
+            return translator;
+        }
+    }
+
+    /** "ready" when both languages' models are on the phone, "download" when one is missing. Off the main thread. */
+    private String translateState(String fromTag, String toTag) {
+        String from = mlkitLanguage(fromTag);
+        String to = mlkitLanguage(toTag);
+        if (from == null || to == null) return "unavailable";
+        try {
+            Set<TranslateRemoteModel> have = Tasks.await(RemoteModelManager.getInstance().getDownloadedModels(TranslateRemoteModel.class));
+            List<String> languages = new ArrayList<>();
+            for (TranslateRemoteModel model : have) languages.add(model.getLanguage());
+            return languages.contains(from) && languages.contains(to) ? "ready" : "download";
+        } catch (Exception e) {
+            return "unavailable";
+        }
+    }
+
+    /** Downloads the models a direction needs (once; the person agreed in the page). */
+    private void translatePrepare(String id, String fromTag, String toTag) {
+        String from = mlkitLanguage(fromTag);
+        String to = mlkitLanguage(toTag);
+        if (from == null || to == null) {
+            sendTranslation(id, null, "failed");
+            return;
+        }
+        translating.execute(() -> {
+            try {
+                Tasks.await(translatorFor(from, to).downloadModelIfNeeded(new DownloadConditions.Builder().build()));
+                sendTranslation(id, new JSONArray(), null);
+            } catch (Exception e) {
+                sendTranslation(id, null, "download");
+            }
+        });
+    }
+
+    /** Translates the pieces (a JSON array of strings) one by one; the answer is an array of the same length. */
+    private void translate(String id, String fromTag, String toTag, String piecesJson) {
+        String from = mlkitLanguage(fromTag);
+        String to = mlkitLanguage(toTag);
+        if (from == null || to == null) {
+            sendTranslation(id, null, "failed");
+            return;
+        }
+        translating.execute(() -> {
+            try {
+                if (!"ready".equals(translateState(fromTag, toTag))) {
+                    sendTranslation(id, null, "no-model");
+                    return;
+                }
+                Translator translator = translatorFor(from, to);
+                JSONArray pieces = new JSONArray(piecesJson == null ? "[]" : piecesJson);
+                JSONArray out = new JSONArray();
+                for (int i = 0; i < pieces.length(); i++) out.put(Tasks.await(translator.translate(pieces.optString(i, ""))));
+                sendTranslation(id, out, null);
+            } catch (Exception e) {
+                sendTranslation(id, null, "failed");
+            }
+        });
+    }
+
+    private void sendTranslation(String id, JSONArray texts, String code) {
+        try {
+            JSONObject event = new JSONObject();
+            event.put("id", id == null ? "" : id);
+            event.put("ok", code == null);
+            if (texts != null) event.put("texts", texts);
+            if (code != null) event.put("code", code);
+            String script = "window.__atlas && window.__atlas.translate && window.__atlas.translate(" + event + ")";
+            runOnUiThread(() -> {
+                if (web != null) web.evaluateJavascript(script, null);
+            });
         } catch (JSONException ignored) {
             // nothing to say to the page
         }
@@ -508,6 +621,24 @@ public class MainActivity extends ComponentActivity {
             runOnUiThread(() -> {
                 if (dictating) MainActivity.this.stopDictation("end", null);
             });
+        }
+
+        /** "ready", "download" or "unavailable" for a direction ("ru", "en"). */
+        @JavascriptInterface
+        public String translateState(String from, String to) {
+            return MainActivity.this.translateState(from, to);
+        }
+
+        /** Downloads a direction's language models; the answer comes through window.__atlas.translate({ id, ok }). */
+        @JavascriptInterface
+        public void translatePrepare(String id, String from, String to) {
+            MainActivity.this.translatePrepare(id, from, to);
+        }
+
+        /** pieces: a JSON array of strings; the answer: window.__atlas.translate({ id, ok, texts } or { id, ok: false, code }). */
+        @JavascriptInterface
+        public void translate(String id, String from, String to, String pieces) {
+            MainActivity.this.translate(id, from, to, pieces);
         }
 
         @JavascriptInterface

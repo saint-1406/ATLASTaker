@@ -1,6 +1,7 @@
 // Bundles the renderer into dist/: app.js (the notes: app code, CodeMirror with its languages),
-// reader.js (the library's reader with pdf.js, loaded only when a document is opened), styles.css
-// with the fonts. Served by the local server and packed into the Android app.
+// reader.js (the library's reader with pdf.js, loaded only when a document is opened), translate.js
+// (the opus-mt translator, loaded the first time the Windows app translates), styles.css with the
+// fonts. Served by the local server and packed into the Android app (all but translate.js).
 import * as esbuild from 'esbuild';
 import fs from 'node:fs';
 
@@ -20,7 +21,7 @@ const workerAsText = {
 };
 
 const options = {
-  entryPoints: { app: 'src/app.js', reader: 'src/reader/index.js', styles: 'src/styles.css' },
+  entryPoints: { app: 'src/app.js', reader: 'src/reader/index.js', translate: 'src/translateModel.js', styles: 'src/styles.css' },
   bundle: true,
   outdir: 'dist',
   format: 'iife',

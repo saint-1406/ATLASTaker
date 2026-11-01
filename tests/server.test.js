@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { acquireLock, BUILD, createAtlasServer, VERSION } from '../server/server.js';
@@ -224,5 +224,22 @@ test('the page may start the pdf.js worker from a blob: URL, and nothing else ch
   const { app } = await start(t);
   const csp = (await fetch(app.url)).headers.get('content-security-policy');
   assert.match(csp, /worker-src blob:/);
-  assert.match(csp, /script-src 'self'(;|$)/);
+  // scripts only from the app itself; WebAssembly may compile (the translator's models), JavaScript may not be eval'd
+  assert.match(csp, /script-src 'self' 'wasm-unsafe-eval'(;|$)/);
+  assert.match(csp, /connect-src 'self'(;|$)/);
+});
+
+test('the translator’s files: only the allowed ones, only with the token, served once downloaded', async (t) => {
+  const { app, call, dataDir } = await start(t);
+  assert.equal((await call('POST', 'translate/download', { path: 'hf/Xenova/opus-mt-ru-en/config.json' }, { 'X-Atlas-Token': 'wrong' })).status, 403);
+  assert.equal((await call('POST', 'translate/download', { path: '../../notes/x.md' })).status, 404);
+  assert.deepEqual(await (await call('POST', 'translate/status', { paths: ['notes/x.md'] })).json(), { missing: [], sizes: {} });
+  const config = 'translate-files/hf/Xenova/opus-mt-ru-en/config.json';
+  assert.equal((await fetch(`${app.url}${config}`)).status, 404, 'nothing is fetched from the static path');
+  mkdirSync(path.join(dataDir, 'translate', 'hf', 'Xenova', 'opus-mt-ru-en'), { recursive: true });
+  writeFileSync(path.join(dataDir, 'translate', 'hf', 'Xenova', 'opus-mt-ru-en', 'config.json'), '{}');
+  const served = await fetch(`${app.url}${config}`);
+  assert.equal(served.status, 200);
+  assert.match(served.headers.get('content-type'), /application\/json/);
+  assert.equal((await fetch(`${app.url}translate-files/hf/Xenova/opus-mt-ru-en/vocab.json`)).status, 404);
 });
