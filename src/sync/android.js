@@ -96,6 +96,11 @@ export function createAndroidSync({ android, opened, library }) {
       await request((await store('notes', 'readwrite')).put(note));
       return note;
     },
+    async setNoteFolder(id, folder) {
+      const notes = await store('notes', 'readwrite');
+      const note = await request(notes.get(id));
+      if (note) await request(notes.put({ ...note, folder }));
+    },
     async trashNote(id) {
       const t = (await opened).transaction(['notes', 'trash'], 'readwrite');
       const note = await request(t.objectStore('notes').get(id));

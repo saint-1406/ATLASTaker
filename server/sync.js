@@ -78,6 +78,7 @@ function diskSide(store, library) {
     putNote: ({ id, content, created, updated }) => store.putSynced(id, content, { created, updated }),
     createNote: (content) => store.create(content),
     trashNote: (id) => store.trash(id),
+    setNoteFolder: (id, folder) => store.setMeta(id, { folder }),
     docs: async () => library.list(),
     async fileHash(doc) {
       const file = library.file(doc.id);
