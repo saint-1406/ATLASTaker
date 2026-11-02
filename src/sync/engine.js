@@ -57,11 +57,12 @@ function cleanIndex(raw) {
 /**
  * Runs one sync. `base` is what the previous round left (emptyBase() the first time); the result
  * carries the next one, to be kept by the caller. `skipDocs`: ids of documents open right now — they
- * wait for the next round. Returns { base, pulled, trashed, conflicts, docsChanged, sent, received }.
+ * wait for the next round. Returns { base, pulled, trashed, conflicts, docsChanged, skippedDocs, sent,
+ * received }; skippedDocs: [{ id, title, error }], documents this device would not take this time.
  */
 export async function syncOnce({ local, drive, base: oldBase, skipDocs = [], now = Date.now() }) {
   const base = { ...emptyBase(), ...(oldBase ?? {}) };
-  const result = { pulled: [], trashed: [], conflicts: [], docsChanged: false, sent: 0, received: 0 };
+  const result = { pulled: [], trashed: [], conflicts: [], docsChanged: false, skippedDocs: [], sent: 0, received: 0 };
 
   // what is on Drive; of two files with one name (two devices at the same moment) the newer counts
   const files = (await drive.list()).sort((a, b) => String(a.modifiedTime).localeCompare(String(b.modifiedTime)));
@@ -206,6 +207,17 @@ export async function syncOnce({ local, drive, base: oldBase, skipDocs = [], now
     next.docs[id] = { card, file, fileTime, format: data.format };
     nextBase.docs[id] = { card, file, sigs: cardSigs(data) };
   };
+  // A document this device refuses (its library says no) waits for the next round instead of stopping
+  // this one: the notes and the other documents still go through, and the index still gets written.
+  const takeDoc = async (id, data, bytes) => {
+    try {
+      await local.putDoc(id, data, bytes);
+      return true;
+    } catch (err) {
+      result.skippedDocs.push({ id, title: data?.title || data?.name || '', error: err.message });
+      return false;
+    }
+  };
   const sendDoc = async (id, data, withFile) => {
     if (withFile) await upload(`doc-${id}.${data.format}`, await local.docBytes(id), 'application/octet-stream');
     await upload(`card-${id}.json`, JSON.stringify(data), MIME.json);
@@ -232,7 +244,7 @@ export async function syncOnce({ local, drive, base: oldBase, skipDocs = [], now
           if (bytes) ({ file, fileTime } = r);
         }
         if (bytes || sig(merged) !== meta.card) {
-          await local.putDoc(id, merged, bytes);
+          if (!(await takeDoc(id, merged, bytes))) break;
           result.docsChanged = true;
         }
         if (step.file === 'push') await upload(`doc-${id}.${merged.format}`, await local.docBytes(id), 'application/octet-stream');
@@ -249,7 +261,7 @@ export async function syncOnce({ local, drive, base: oldBase, skipDocs = [], now
         const bytes = raw === null ? null : await download(`doc-${id}.${r.format}`, false);
         if (!bytes) break; // half-written by another device: next time
         const data = cardData(JSON.parse(raw));
-        await local.putDoc(id, data, bytes);
+        if (!(await takeDoc(id, data, bytes))) break;
         result.docsChanged = true;
         remember(id, data, r.file, r.fileTime);
         break;

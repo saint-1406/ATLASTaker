@@ -98,7 +98,8 @@ function fakeDrive() {
   };
 }
 
-function fakeDevice() {
+/** refuse(id): documents this device's library will not take (as the Windows one refused an empty file). */
+function fakeDevice({ refuse = () => false } = {}) {
   const notes = new Map();
   const docs = new Map();
   const docFiles = new Map();
@@ -129,6 +130,7 @@ function fakeDevice() {
     fileHash: async (doc) => ({ hash: await hashBytes(docFiles.get(doc.id)), time: 1 }),
     docBytes: async (id) => docFiles.get(id),
     async putDoc(id, data, bytes) {
+      if (refuse(id)) throw new Error('refused');
       docs.set(id, { ...(docs.get(id) ?? {}), ...structuredClone(data), id });
       if (bytes) docFiles.set(id, bytes);
     },
@@ -252,6 +254,28 @@ test('a deleted note leaves the other device too, and does not come back', async
   assert.deepEqual([...pc.notes.keys()], ['n-keep01']);
   assert.deepEqual([...phone.notes.keys()], ['n-keep01']);
   assert.equal(drive.named('note-n-temp01.md').length, 0);
+});
+
+test('an empty document arrives as it is, and one this device refuses does not stop the round', async () => {
+  const drive = fakeDrive();
+  const phone = fakeDevice();
+  const pc = fakeDevice({ refuse: (id) => id === 'd-bad001' });
+  phone.note('n-phone1', '# From the phone');
+  phone.docs.set('d-empty1', book('d-empty1', { format: 'txt', name: 'empty.txt' }));
+  phone.docFiles.set('d-empty1', new Uint8Array(0));
+  phone.docs.set('d-bad001', book('d-bad001', { title: 'Refused' }));
+  phone.docFiles.set('d-bad001', new Uint8Array([5]));
+  await phone.sync(drive);
+
+  pc.note('n-pc0001', '# From the PC');
+  const r = await pc.sync(drive);
+  assert.deepEqual(r.skippedDocs, [{ id: 'd-bad001', title: 'Refused', error: 'refused' }]);
+  assert.equal(pc.docFiles.get('d-empty1')?.length, 0, 'the empty file came as an empty file, not as nothing');
+  assert.ok(pc.notes.has('n-phone1'));
+  await phone.sync(drive);
+  assert.ok(phone.notes.has('n-pc0001'), 'the index was written: the PC’s note reached the phone');
+  assert.ok(phone.docs.has('d-bad001'), 'the refused document stays where it was');
+  assert.deepEqual((await pc.sync(drive)).skippedDocs.map((d) => d.id), ['d-bad001'], 'and is tried again next round');
 });
 
 test('an open document waits for the next round', async () => {

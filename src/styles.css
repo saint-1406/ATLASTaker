@@ -5964,10 +5964,16 @@ textarea {
   --tk-meta: #6b5f8a;
 }
 
-:root[data-palette="cream"][data-accent="violet"],
-:root[data-palette="cream"][data-accent="lime"] {
+:root[data-palette="cream"][data-accent="violet"] {
   --accent: #4b3b7c;
   --accent-text: #4b3b7c;
+  --accent-ink: #ffffff;
+}
+
+/* lime on paper: a deep leaf green that still reads as lime, and white on it stays legible */
+:root[data-palette="cream"][data-accent="lime"] {
+  --accent: #56750f;
+  --accent-text: #4a650c;
   --accent-ink: #ffffff;
 }
 
@@ -5986,11 +5992,16 @@ textarea {
   --code-bg: #1f1a27;
 }
 
-:root[data-skin="cozy"][data-theme="dark"][data-accent="violet"],
+:root[data-skin="cozy"][data-theme="dark"][data-accent="violet"] {
+  --accent: #9a8fd0;
+  --accent-text: #aaa1d8;
+  --accent-ink: #15122a;
+}
+
 :root[data-skin="cozy"][data-theme="dark"][data-accent="lime"] {
-  --accent: #9d8af0;
-  --accent-text: #b9aaff;
-  --accent-ink: #120d24;
+  --accent: #a9c45a;
+  --accent-text: #b4cb72;
+  --accent-ink: #151a06;
 }
 
 /* the cosy look's chrome: softer bars, rounder buttons */
@@ -7458,4 +7469,193 @@ body.typing .dictate:not(.listening) {
 .rd-toc-item.level-3 button,
 .rd-toc-item.level-4 button {
   padding-left: calc(20px + 2.2em + 28px);
+}
+
+/* ---------- 0.15: calmer — the device's own font, a dark that is dark, nothing decorative ---------- */
+
+/* the cosy look speaks in the device's font (Roboto on a phone, Segoe UI on Windows), with tighter corners */
+:root[data-skin="cozy"] {
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  --radius: 12px;
+  --radius-sm: 9px;
+}
+
+/* the dark: near-black graphite and warm grey text that does not glare; no violet in the paper */
+:root[data-skin="cozy"][data-theme="dark"]:not([data-palette]) {
+  --bg: #141413;
+  --bg-raised: #1c1b1a;
+  --bg-hover: rgba(240, 232, 220, 0.045);
+  --ink: #d2cdc5;
+  --ink-soft: #aba59c;
+  --ink-dim: #807b74;
+  --ink-faint: #4a4743;
+  --hairline: rgba(240, 232, 220, 0.07);
+  --sheet-edge: rgba(240, 232, 220, 0.1);
+  --active-line: rgba(240, 232, 220, 0.025);
+  --code-bg: #191918;
+  --code-edge: rgba(240, 232, 220, 0.07);
+}
+
+/* headings in the text's colour; the accent is kept for what can be pressed and for progress */
+:root[data-skin="cozy"] :is(.home-brand, .home-section-head h2, .notes-heading) {
+  color: var(--ink);
+}
+
+:root[data-skin="cozy"] .home-kicker {
+  color: var(--ink-dim);
+}
+
+/* cards: a hairline, no lift; covers without a picture are plain, not a gradient */
+:root[data-skin="cozy"] .home-card {
+  border-color: var(--hairline);
+  border-radius: 14px;
+}
+
+:root[data-skin="cozy"] :is(.home-card, .home-cover, .home-mini-cover, .home-cat, .home-note, .lib-pocket-cover, .lib-cover, .tabbar) {
+  box-shadow: none;
+}
+
+:root[data-skin="cozy"] :is(.home-cover-blank, .lib-cover-blank) {
+  background: color-mix(in srgb, var(--ink) 6%, var(--bg-raised));
+}
+
+:root[data-skin="cozy"] .home-cover-blank {
+  color: var(--ink-dim);
+}
+
+/* the tab bar sits on the bottom edge, as a phone's own bars do, instead of floating over the page */
+:root[data-skin="cozy"] .tabbar {
+  right: 0;
+  bottom: 0;
+  left: 0;
+  max-width: none;
+  padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+  border: 0;
+  border-top: 1px solid var(--hairline);
+  border-radius: 0;
+  background: var(--bg);
+  backdrop-filter: none;
+}
+
+/* the play button: a drawn triangle, centred in its circle */
+.home-play {
+  padding: 0;
+}
+
+.home-play-icon {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+.home-play-icon svg {
+  display: block;
+  width: 46%;
+  height: 46%;
+}
+
+/* the library's header: a smaller heading with room around the count; round buttons stay round;
+   the search is an icon until it is wanted, then the field takes the heading's place */
+.lib-head :is(.lib-back, .lib-search-btn, .lib-add) {
+  flex: none;
+}
+
+.lib-search-btn svg {
+  width: 17px;
+  height: 17px;
+}
+
+.lib-head.searching .lib-search-btn {
+  font-size: 20px;
+}
+
+.lib-head:not(.searching) .lib-filter,
+.lib-head.searching .lib-heading {
+  display: none;
+}
+
+.lib-head.searching .lib-filter {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+:root[data-skin="cozy"] .lib-head {
+  gap: 10px;
+}
+
+:root[data-skin="cozy"] .lib-heading {
+  gap: 10px;
+  font-size: 22px;
+}
+
+:root[data-skin="cozy"] .lib-count {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+/* the notes screen: a new note leads the folder row and stays put while the folders scroll beside it */
+.notes-chip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.lib-chip.notes-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.notes-chip-row .lib-chips.notes-chips {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0 -18px 0 0;
+  padding: 4px 18px 6px 0;
+}
+
+.notes-chips .lib-chip.add {
+  border-style: dashed;
+  color: var(--ink-dim);
+}
+
+/* Android, while a book is open: the page runs under the status and navigation bars, which hide and come
+   back with the reading chrome. MainActivity puts where they appear in --sys-insets; transparent borders
+   keep the reader's text and buttons clear of them while its colour runs underneath, so nothing moves. */
+.reader {
+  border: 0 solid transparent;
+  border-width: var(--sys-insets, 0px);
+}
+
+/* on a phone the add button is only its "+": a circle like its neighbours, not a squeezed pill */
+@media (max-width: 620px) {
+  .lib-head .tb-btn.lib-add {
+    width: auto;
+    aspect-ratio: 1;
+    padding: 0;
+    justify-content: center;
+  }
+}
+
+/* the field's own clearing cross would stand next to ours, which clears and closes */
+.lib-head .lib-filter::-webkit-search-cancel-button {
+  display: none;
+}
+
+/* fields speak like the rest of the cosy look, not in the code font; note cards lie flat like the others */
+:root[data-skin="cozy"] .field {
+  font-family: var(--font-ui);
+  font-size: 14px;
+}
+
+:root[data-skin="cozy"] .notes-card {
+  border-radius: 14px;
+  box-shadow: none;
 }

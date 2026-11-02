@@ -241,6 +241,7 @@ async function boot() {
       onReading: setReading,
       onCustomize: () => showAppearance({ pdf: library.openDocKind?.() === 'pdf' }),
       onReaderColors: (bg, light) => (bg ? android?.setBars(bg, light) : applyBars()),
+      onSystemBars: (reading, shown) => android?.setReading?.(reading, shown),
       onQuote: quoteToNote,
       onOpenNote: (id) => {
         hideNotes();
@@ -566,7 +567,7 @@ async function openNoteNow(id, { transition = 'reveal', origin } = {}) {
 
   currentId = id;
   note.blankAtOpen = !note.content.trim();
-  editor.view.setState(editorStates.get(id) ?? editor.makeState(note.content, savedSelection(note)));
+  editor.show(editorStates.get(id) ?? editor.makeState(note.content, savedSelection(note)));
   editor.localize(); // a kept state may still speak the language it was made in
   dirty = false;
   setSaveState('saved', note.updated, { quiet: true });

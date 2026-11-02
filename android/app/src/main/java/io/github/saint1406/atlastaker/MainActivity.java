@@ -20,6 +20,7 @@ import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.util.Base64;
 import android.view.Window;
+import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -35,7 +36,10 @@ import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.IntentSenderRequest;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.webkit.WebViewAssetLoader;
 
@@ -106,6 +110,12 @@ public class MainActivity extends ComponentActivity {
             new Scope("https://www.googleapis.com/auth/drive.appdata"), new Scope("email"), new Scope("openid"));
     private ActivityResultLauncher<IntentSenderRequest> authorizer;
     private String authorizeId; // the page's request waiting for the Google sheet
+    // A book is open in the page: the page then runs under the status and navigation bars, and they hide
+    // until the reading chrome comes up (a tap in the middle of the book). --sys-insets tells the page
+    // where they appear, so showing them moves no text (applyReading).
+    private boolean reading;
+    private boolean barsShown = true;
+    private String sysInsets = "";
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -226,6 +236,10 @@ public class MainActivity extends ComponentActivity {
 
         web.addJavascriptInterface(new Bridge(), "AtlasAndroid");
         setContentView(web);
+        ViewCompat.setOnApplyWindowInsetsListener(web, (view, insets) -> {
+            tellInsets(insets);
+            return ViewCompat.onApplyWindowInsets(view, insets);
+        });
 
         // Back closes what is open in the page (a dialog, the reader, the shelf, the notes list);
         // with nothing left to close, ATLAS goes to the background and keeps its place
@@ -246,6 +260,48 @@ public class MainActivity extends ComponentActivity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         receive(intent);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // another app may have brought the bars back
+        if (reading) applyReading();
+    }
+
+    /**
+     * While a book is open the window runs under the system bars (and into a camera cutout), so the page
+     * keeps one size whether they show or not; outside a book everything is as it always was.
+     */
+    private void applyReading() {
+        Window window = getWindow();
+        WindowCompat.setDecorFitsSystemWindows(window, !reading);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            WindowManager.LayoutParams attrs = window.getAttributes();
+            attrs.layoutInDisplayCutoutMode = reading
+                    ? WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                    : WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
+            window.setAttributes(attrs);
+        }
+        WindowInsetsControllerCompat bars = WindowCompat.getInsetsController(window, window.getDecorView());
+        bars.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        if (reading && !barsShown) bars.hide(WindowInsetsCompat.Type.systemBars());
+        else bars.show(WindowInsetsCompat.Type.systemBars());
+        ViewCompat.requestApplyInsets(web);
+    }
+
+    /** Where the bars (and the keyboard) sit, in CSS pixels, as top right bottom left; zero outside a book. */
+    private void tellInsets(WindowInsetsCompat insets) {
+        Insets bars = reading
+                ? insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout())
+                : Insets.NONE;
+        int keyboard = reading ? insets.getInsets(WindowInsetsCompat.Type.ime()).bottom : 0;
+        float px = getResources().getDisplayMetrics().density;
+        String css = Math.round(bars.top / px) + "px " + Math.round(bars.right / px) + "px "
+                + Math.round(Math.max(bars.bottom, keyboard) / px) + "px " + Math.round(bars.left / px) + "px";
+        if (css.equals(sysInsets)) return;
+        sysInsets = css;
+        web.evaluateJavascript("document.documentElement.style.setProperty('--sys-insets','" + css + "')", null);
     }
 
     @Override
@@ -731,6 +787,17 @@ public class MainActivity extends ComponentActivity {
             if (clip == null || clip.getItemCount() == 0) return "";
             CharSequence text = clip.getItemAt(0).coerceToText(MainActivity.this);
             return text == null ? "" : text.toString();
+        }
+
+        /** A book is open (or not), and its chrome is up (or not): the system bars follow (applyReading). */
+        @JavascriptInterface
+        public void setReading(boolean on, boolean shown) {
+            runOnUiThread(() -> {
+                if (reading == on && barsShown == shown) return;
+                reading = on;
+                barsShown = shown;
+                applyReading();
+            });
         }
 
         /** The status and navigation bars take the page's background; light icons on dark, dark on light. */

@@ -44,7 +44,10 @@ export function createSyncClient({ api, beforeRound, openDocs, afterRound, h, to
           if (!quiet || result.auth) toast(note, { timeout: 7000 });
           return result;
         }
-        note = '';
+        // a document this device would not take: the round still went through, it waits for the next one
+        const skipped = result.skippedDocs ?? [];
+        note = skipped.length ? t('sync.skipped', skipped.map((d) => d.title || d.id)) : '';
+        if (note && !quiet) toast(note, { timeout: 7000 });
         await afterRound(result);
         if (!quiet && !result.pulled.length && !result.trashed.length) toast(t('sync.done'), { timeout: 2500 });
         else if (result.pulled.length) toast(t('sync.pulled', count(result.pulled.length, 'note')), { timeout: 3500 });

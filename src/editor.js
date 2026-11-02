@@ -579,6 +579,16 @@ export function createEditor({
   return {
     view,
     makeState: (doc, selection) => EditorState.create({ doc, selection, extensions: withLanguage() }),
+    /**
+     * Puts another note into the view. On Android, CodeMirror hands the text to the keyboard through an
+     * EditContext, and setState leaves that holding the previous note: the keyboard then edits text that
+     * is not on screen, and its letters never reach the note. The context is refilled here (CodeMirror
+     * 6.43 has no public way to do it; on other platforms there is no context and this does nothing).
+     */
+    show(state) {
+      view.setState(state);
+      view.observer?.editContext?.reset(view.state);
+    },
     /** Puts the open note's editor into the current language (a kept state may carry the previous one). */
     localize() {
       const wanted = languageExtensions();

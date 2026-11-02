@@ -49,7 +49,7 @@ function loadReader() {
  * onOpenNote(id) shows a note; onLink(url) opens a web link; onClose() runs when the shelf goes away.
  * translator: translateCard.js, for the selection bar's "Translate".
  */
-export function createLibrary({ api, phone = false, getReading, onReading, onCustomize, onReaderColors, onQuote, onOpenNote, onLink, onClose, translator = null }) {
+export function createLibrary({ api, phone = false, getReading, onReading, onCustomize, onReaderColors, onSystemBars, onQuote, onOpenNote, onLink, onClose, translator = null }) {
   const lib = api.library;
   let docs = [];
   let reading = null; // { doc, controller, closed }
@@ -76,11 +76,14 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   const shelfBack = h('button', { type: 'button', class: 'tb-btn icon lib-back', onclick: () => (activeShelf !== null ? showAllBooks() : close()) }, '←');
   const addLabel = h('span', { class: 'lib-add-text' });
   const addButton = h('button', { type: 'button', class: 'tb-btn accent lib-add', onclick: pickFiles }, h('span', { 'aria-hidden': 'true' }, '＋'), addLabel);
+  // the search is an icon until it is wanted: then the field takes the heading's place, and × puts it away
+  const searchButton = h('button', { type: 'button', class: 'tb-btn icon lib-search-btn', onclick: () => setSearching(!head.classList.contains('searching')) });
+  const head = h('header', { class: 'lib-head' }, shelfBack, h('h2', { class: 'lib-heading' }, heading, counter), filter, searchButton, addButton);
   const dropHint = h('div', { class: 'lib-drop', 'aria-hidden': 'true' });
   const shelf = h(
     'section',
     { class: 'library', hidden: true },
-    h('header', { class: 'lib-head' }, shelfBack, h('h2', { class: 'lib-heading' }, heading, counter), filter, addButton),
+    head,
     h('div', { class: 'lib-body' }, chips, pockets, looseHead, grid, emptyNote),
     dropHint,
   );
@@ -239,7 +242,12 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   let chromeTimer = 0;
   function showChrome() {
     reader.classList.add('chrome-on');
+    systemBars();
     holdChrome();
+  }
+  /** A phone's own bars (clock, battery) hide while a book is read and come back with the chrome. */
+  function systemBars() {
+    onSystemBars?.(!reader.hidden, reader.classList.contains('chrome-on'));
   }
   /** Something was touched: the chrome stays another few seconds (not while a menu or a panel is open). */
   function holdChrome() {
@@ -254,6 +262,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     clearTimeout(chromeTimer);
     closeSheet();
     reader.classList.remove('chrome-on');
+    systemBars();
   }
   let centreTap = null;
   scroll.addEventListener('pointerdown', (e) => {
@@ -305,6 +314,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     heading.textContent = t('library.myBooks');
     filter.placeholder = t('library.find');
     filter.setAttribute('aria-label', t('library.find'));
+    labelSearch();
     addLabel.textContent = t('library.add');
     addButton.title = t('library.addTitle');
     for (const [button, key] of [
@@ -427,7 +437,30 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   function showAllBooks() {
     activeShelf = null;
     filter.value = '';
+    setSearching(false);
     render();
+  }
+
+  function setSearching(on) {
+    head.classList.toggle('searching', on);
+    labelSearch();
+    if (on) filter.focus();
+    else if (filter.value) {
+      filter.value = '';
+      render();
+    }
+  }
+
+  /** The search button: a magnifier, or × while the field is open. */
+  function labelSearch() {
+    const on = head.classList.contains('searching');
+    const label = t(on ? 'library.findClose' : 'library.find');
+    searchButton.title = label;
+    searchButton.setAttribute('aria-label', label);
+    if (on) searchButton.textContent = '×';
+    else
+      searchButton.innerHTML =
+        '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="m10.4 10.4 3.6 3.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
   }
 
   async function loadShelves() {
@@ -827,6 +860,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       render();
     }
     reader.hidden = false;
+    systemBars(); // before the book is laid out: the page takes the whole screen first, then the text
     tocPanel.hidden = true;
     marksPanel.hidden = true;
     viewPanel.hidden = true;
@@ -907,6 +941,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     reading.controller?.close();
     reading = null;
     reader.hidden = true;
+    systemBars();
     hideSelBar();
     tocPanel.hidden = true;
     marksPanel.hidden = true;
@@ -2103,6 +2138,10 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       closeReader();
       return true;
     }
+    if (!shelf.hidden && head.classList.contains('searching')) {
+      setSearching(false);
+      return true;
+    }
     // inside a section, back leads to all the books first, then out of the library
     if (!shelf.hidden && activeShelf !== null) {
       showAllBooks();
@@ -2120,12 +2159,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     if (isOverlayOpen()) return;
     const mod = (e.ctrlKey || e.metaKey) && !e.altKey;
     let handled = true;
-    if (e.key === 'Escape') {
-      if (e.target === filter && filter.value) {
-        filter.value = '';
-        render();
-      } else back();
-    } else if (mod && e.code === 'KeyO') close();
+    if (e.key === 'Escape') back();
+    else if (mod && e.code === 'KeyO') close();
     else if (reading?.controller?.paged && !mod && !e.altKey && !e.target.closest?.('input, textarea, .rd-view, .rd-toc, .rd-markpanel') && PAGE_KEYS[e.key] !== undefined) {
       if (PAGE_KEYS[e.key] === 'shift-aware') (e.shiftKey ? reading.controller.prev : reading.controller.next)();
       else if (PAGE_KEYS[e.key] > 0) reading.controller.next();

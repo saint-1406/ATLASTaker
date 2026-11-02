@@ -413,6 +413,7 @@ const ru = {
     expired: 'Google просит войти снова (пока приложение в тестовом режиме Google — раз в 7 дней).',
     offline: 'Нет связи с Google — синхронизируем, когда появится интернет.',
     failed: (reason) => `Не удалось синхронизировать: ${reason}`,
+    skipped: (titles) => `Не получилось взять с Диска: ${[titles].flat().map((x) => `«${x}»`).join(', ')}. Попробую в следующий раз, остальное синхронизировано.`,
     unavailable: 'В этой сборке вход через Google не настроен.',
   },
   editor: {
@@ -474,6 +475,7 @@ const ru = {
     add: 'Добавить',
     addTitle: 'Добавить документы: PDF, EPUB, FB2, DOCX, ODT, RTF, Markdown, TXT, HTML, комиксы CBZ, картинки',
     find: 'Найти книгу',
+    findClose: 'Закрыть поиск (Esc)',
     empty: 'Здесь будут книги и документы для чтения. Добавьте PDF, EPUB, FB2, DOCX, ODT, RTF, Markdown или текст — кнопкой «Добавить» или перетащите файлы сюда.',
     emptyPhone: 'Здесь будут книги и документы для чтения. Нажмите «Добавить» или откройте файл в другом приложении через «Поделиться → ATLAS».',
     drop: 'Отпустите — документы лягут на полку',
@@ -1100,6 +1102,7 @@ const en = {
     expired: 'Google asks you to sign in again (every 7 days while the app is in Google’s testing mode).',
     offline: 'Can’t reach Google — will sync once you are online.',
     failed: (reason) => `Sync failed: ${reason}`,
+    skipped: (titles) => `Could not take from Drive: ${[titles].flat().map((x) => `“${x}”`).join(', ')}. Will try again next time; everything else is synced.`,
     unavailable: 'Google sign-in is not set up in this build.',
   },
   editor: {
@@ -1161,6 +1164,7 @@ const en = {
     add: 'Add',
     addTitle: 'Add documents: PDF, EPUB, FB2, DOCX, ODT, RTF, Markdown, TXT, HTML, CBZ comics, pictures',
     find: 'Find a book',
+    findClose: 'Close search (Esc)',
     empty: 'Books and documents to read will live here. Add a PDF, EPUB, FB2, DOCX, ODT, RTF, Markdown or text file with “Add”, or drop files here.',
     emptyPhone: 'Books and documents to read will live here. Tap “Add”, or open a file in another app and choose “Share → ATLAS”.',
     drop: 'Let go to put the documents on the shelf',

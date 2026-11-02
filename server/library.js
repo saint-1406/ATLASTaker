@@ -161,9 +161,10 @@ export function createLibrary(dataDir) {
       const known = Object.hasOwn(docs, id) ? docs[id] : null;
       const format = known?.format ?? data?.format;
       if (!DOC_FORMATS.includes(format)) throw httpError(415, 'такой формат библиотека не читает');
-      if (!known && !bytes?.length) throw httpError(400, 'нет файла документа');
+      // an empty file is still a file: another device has it, and it is kept as it came
+      if (!known && !bytes) throw httpError(400, 'нет файла документа');
       const doc = known ?? { id, format, name: 'document', title: '', author: '', cover: null, size: 0, added: Date.now(), opened: 0, progress: 0, position: null, notesId: null, scale: 1, marks: [], bookmarks: [], texts: [], edits: [] };
-      if (bytes?.length) {
+      if (bytes) {
         if (known) {
           await fsp.copyFile(fileOf(doc), path.join(trashDir, `${id}-${Date.now()}.${format}`)).catch((err) => {
             if (err.code !== 'ENOENT') throw err;

@@ -22,6 +22,19 @@ android {
         targetSdk 34
         versionCode parts[0] * 10000 + parts[1] * 100 + parts[2]
         versionName pkg.version
+        // ML Kit's translator brings its engine for four kinds of processor; phones are ARM, 64- or 32-bit.
+        // x86 is for emulators (and Intel phones that never reached Android 8)
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a'
+        }
+    }
+
+    // the engine's libraries go into the APK compressed (stored as they are, they made it 67 MB): a
+    // smaller download, unpacked once when the app is installed
+    packaging {
+        jniLibs {
+            useLegacyPackaging true
+        }
     }
 
     signingConfigs {

@@ -14,6 +14,16 @@ export function avatarNode({ avatar, name }, size = 32) {
   return node;
 }
 
+/**
+ * The play triangle, drawn: the ▶ character comes out in each phone's own font (or as an emoji) and off
+ * centre. Its middle sits a hair right of the circle's, which is where the eye puts a triangle's centre.
+ */
+function playIcon() {
+  const node = h('span', { class: 'home-play-icon', 'aria-hidden': 'true' });
+  node.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8.6 5.6v12.8c0 .6.7 1 1.2.6l9.6-6.4a.7.7 0 0 0 0-1.2L9.8 5c-.5-.4-1.2 0-1.2.6Z" fill="currentColor"/></svg>';
+  return node;
+}
+
 /** A picture the person picked, made small and square (a JPEG data: URL), for the avatar. */
 export async function shrinkPicture(file, size = 160) {
   const bitmap = await createImageBitmap(file);
@@ -90,11 +100,11 @@ export function drawHome(root, ctx) {
             h('span', { class: 'home-card-title' }, last.name),
             last.author ? h('span', { class: 'home-card-sub' }, last.author) : null,
             // the streak sits in the text, under the author: it used to float over long titles
-            reading.streak ? h('span', { class: 'home-streak', title: t('home.streakTitle') }, h('span', { 'aria-hidden': 'true' }, '🔥 '), t('home.streak', reading.streak)) : null,
+            reading.streak ? h('span', { class: 'home-streak', title: t('home.streakTitle') }, t('home.streak', reading.streak)) : null,
             h('span', { class: 'home-progress-row' }, h('span', { class: 'home-progress', 'aria-hidden': 'true' }, h('i', { style: `width: ${pct(last.progress)}` })), h('span', { class: 'home-pct' }, pct(last.progress))),
           ),
         ),
-        h('button', { type: 'button', class: 'home-play', title: t('home.continue'), 'aria-label': t('home.continue'), onclick: () => ctx.onBook(last.id) }, h('span', { 'aria-hidden': 'true' }, '▶')),
+        h('button', { type: 'button', class: 'home-play', title: t('home.continue'), 'aria-label': t('home.continue'), onclick: () => ctx.onBook(last.id) }, playIcon()),
       )
     : h(
         'button',
@@ -110,7 +120,7 @@ export function drawHome(root, ctx) {
     h(
       'span',
       { class: 'home-goal-text' },
-      h('span', { class: 'home-goal-head' }, h('span', { class: 'home-goal-ico', 'aria-hidden': 'true' }, '◎'), t('home.goal')),
+      h('span', { class: 'home-goal-head' }, t('home.goal')),
       h('span', { class: 'home-goal-what' }, t('home.goalWhat', reading.goal)),
       h(
         'span',
@@ -119,7 +129,6 @@ export function drawHome(root, ctx) {
         h('span', { class: 'home-goal-count' }, t('home.goalCount', Math.floor(reading.today), reading.goal)),
       ),
     ),
-    h('span', { class: 'home-goal-art', 'aria-hidden': 'true' }, reading.today >= reading.goal ? '🏆' : '☕'),
   );
 
   const recentBooks = (shelf?.recent ?? []).slice(0, 10);
@@ -182,7 +191,7 @@ export function drawHome(root, ctx) {
         { class: 'home-top' },
         h('button', { type: 'button', class: 'home-avatar', title: t('chrome.menuKey'), 'aria-label': t('chrome.menu'), onclick: () => ctx.onMenu() }, avatarNode(profile, 40)),
       ),
-      h('p', { class: 'home-hello' }, greeting(profile.name), h('span', { class: 'home-spark', 'aria-hidden': 'true' }, ' ✦')),
+      h('p', { class: 'home-hello' }, greeting(profile.name)),
       h('h1', { class: 'home-brand' }, 'ATLAS'),
       h('p', { class: 'home-tagline' }, t('home.tagline')),
     ),

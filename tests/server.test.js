@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { acquireLock, BUILD, createAtlasServer, VERSION } from '../server/server.js';
@@ -218,6 +218,14 @@ test('the library\'s cards survive a restart', async (t) => {
   const [card] = second.library.list();
   assert.equal(card.title, 'Привет');
   assert.deepEqual(card.position, { at: 4, frac: 0 });
+});
+
+test('a document synced from another device arrives even when its file is empty', async (t) => {
+  const { app } = await start(t);
+  const doc = await app.library.putSynced('d-empty00001', { format: 'txt', name: 'empty.txt' }, Buffer.alloc(0));
+  assert.equal(doc.size, 0);
+  assert.equal(readFileSync(app.library.file(doc.id)).length, 0, 'the empty file is on disk, so the next round can read it');
+  await assert.rejects(app.library.putSynced('d-nofile0001', { format: 'txt' }, null), /нет файла документа/, 'with no file at all it still waits');
 });
 
 test('the page may start the pdf.js worker from a blob: URL, and nothing else changes', async (t) => {
