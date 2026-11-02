@@ -567,7 +567,7 @@ const ru = {
     pageOf: (n, total) => `${n} / ${total}`,
     pdfFit: 'По страницам PDF вписывается в экран целиком',
     more: 'Файл: скачать, страницы PDF',
-    fab: { open: 'Меню: оглавление, поиск, темы (нажмите и подержите)', hold: 'Нажмите и подержите, чтобы открыть меню', find: 'Искать в книге' },
+    fab: { open: 'Меню: оглавление, поиск, темы', find: 'Искать в книге' },
     find: {
       title: 'Найти в документе (Ctrl+F)',
       placeholder: 'Найти слово или фразу',
@@ -1227,7 +1227,7 @@ const en = {
     pageOf: (n, total) => `${n} / ${total}`,
     pdfFit: 'In pages, a PDF page fits the screen whole',
     more: 'File: download, PDF pages',
-    fab: { open: 'Menu: contents, search, themes (press and hold)', hold: 'Press and hold to open the menu', find: 'Search in the book' },
+    fab: { open: 'Menu: contents, search, themes', find: 'Search in the book' },
     find: {
       title: 'Find in document (Ctrl+F)',
       placeholder: 'Find a word or phrase',

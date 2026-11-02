@@ -708,12 +708,21 @@ function onDocChange(update) {
     return;
   }
   notePace(update);
+  markTyping();
   dirty = true;
   setSaveState('pending');
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flushSave, SAVE_DELAY);
   clearTimeout(analysisTimer);
   analysisTimer = setTimeout(refreshAnalysis, 160);
+}
+
+/** While the person types, the microphone steps out of the way (styles.css: body.typing). */
+let typingTimer = 0;
+function markTyping() {
+  document.body.classList.add('typing');
+  clearTimeout(typingTimer);
+  typingTimer = setTimeout(() => document.body.classList.remove('typing'), 1800);
 }
 
 /** Saves the open note if it changed. Resolves true once the disk has it (or there was nothing to save). */
@@ -1225,6 +1234,12 @@ function applyLanguage({ persist = true } = {}) {
   if (!editor) return;
   editor.localize();
   renderPace();
+  // everything drawn in the old language is drawn again
+  renderIndex();
+  sideMenu?.refresh();
+  library?.relocalize();
+  if (!homeEl.hidden) showHome();
+  else updateTabs();
 }
 
 function setLanguage(lang) {

@@ -1,6 +1,7 @@
 // Which kind of document a file is, and how each kind (except PDF, which pdf.js draws page by page)
 // becomes a book: { format, title, author, cover, blocks, resources, toc }.
 
+import { lookOf, parseBookCss } from './bookcss.js';
 import { Lexer } from 'marked';
 import { isZip, joinPath, openZip } from './zip.js';
 import { attr, children, find, findAll, parseXml, textOf } from './xml.js';
@@ -116,11 +117,23 @@ async function epubBook(zip) {
 
   // all the chapters unpack at once: one after another, each waited for the browser's inflater in turn
   const texts = await Promise.all(spine.map((item) => zip.read(item.path)));
+  // the book's stylesheets, each read once: what its classes mean for italics, bold and layout
+  const sheets = new Map(); // path → Promise of Map class → look
+  const sheet = (path) => {
+    if (!sheets.has(path)) sheets.set(path, zip.has(path) ? zip.text(path).then((css) => parseBookCss(css)).catch(() => new Map()) : Promise.resolve(new Map()));
+    return sheets.get(path);
+  };
   const blocks = [];
   for (const [i, item] of spine.entries()) {
     const doc = parseXml(decodeText(texts[i]));
     texts[i] = null;
+    const rules = new Map();
+    for (const link of findAll(doc, ['link'])) {
+      if (/stylesheet/i.test(link.attrs.rel ?? '') && link.attrs.href && !/^[a-z]+:/i.test(link.attrs.href)) for (const [k, v] of await sheet(joinPath(item.path, link.attrs.href))) rules.set(k, { ...(rules.get(k) ?? {}), ...v });
+    }
+    for (const style of findAll(doc, ['style'])) parseBookCss(textOf(style), rules);
     const ctx = {
+      look: (attrs) => lookOf(attrs, rules),
       id: (raw) => `c${i}-${raw}`,
       image(src) {
         if (!src || /^[a-z]+:/i.test(src)) return null;

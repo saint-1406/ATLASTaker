@@ -6832,3 +6832,220 @@ textarea {
   flex-wrap: wrap;
   gap: 6px;
 }
+
+/* ---------- 0.14: the main page fits any phone; the avatar is one clean circle; shadows barely there ---------- */
+
+/* grid columns and items may shrink below their longest word: long titles cut, nothing pushes past the screen */
+.home-body,
+.home-notes {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.home-body > *,
+.home-notes > li,
+.home-section > * {
+  min-width: 0;
+}
+
+.home-note {
+  overflow: hidden;
+}
+
+.home-note-title {
+  display: block;
+  min-width: 0;
+}
+
+/* sizes follow the screen: a small phone gets smaller covers and type */
+.home-hero {
+  padding-right: clamp(14px, 5vw, 22px);
+  padding-left: clamp(14px, 5vw, 22px);
+}
+
+.home-body {
+  padding-right: clamp(12px, 4.5vw, 18px);
+  padding-left: clamp(12px, 4.5vw, 18px);
+}
+
+.home-art {
+  width: clamp(120px, 40vw, 230px);
+}
+
+.home-hello,
+.home-tagline {
+  max-width: 58%;
+  font-size: clamp(13px, 3.8vw, 16px);
+}
+
+.home-brand {
+  font-size: clamp(38px, 13vw, 72px);
+}
+
+.home-book {
+  padding: clamp(10px, 3vw, 14px);
+}
+
+.home-book-open {
+  gap: clamp(10px, 3.5vw, 16px);
+}
+
+.home-cover {
+  width: clamp(60px, 20vw, 92px);
+  height: auto;
+  aspect-ratio: 92 / 132;
+}
+
+.home-card-text {
+  padding-right: clamp(52px, 15vw, 68px);
+}
+
+.home-card-title {
+  font-size: clamp(16px, 4.8vw, 21px);
+}
+
+.home-play {
+  right: clamp(10px, 3vw, 16px);
+  bottom: clamp(10px, 3vw, 16px);
+  width: clamp(42px, 12vw, 52px);
+  height: clamp(42px, 12vw, 52px);
+}
+
+.home-goal {
+  padding: clamp(12px, 3.5vw, 16px) clamp(12px, 4vw, 18px);
+}
+
+.home-goal-art {
+  font-size: clamp(24px, 8vw, 34px);
+}
+
+.home-mini,
+.home-mini-cover {
+  width: clamp(92px, 28vw, 128px);
+}
+
+.home-mini-cover {
+  height: auto;
+  aspect-ratio: 128 / 180;
+}
+
+.home-books,
+.home-cats {
+  margin-right: calc(-1 * clamp(12px, 4.5vw, 18px));
+  margin-left: calc(-1 * clamp(12px, 4.5vw, 18px));
+  padding-right: clamp(12px, 4.5vw, 18px);
+  padding-left: clamp(12px, 4.5vw, 18px);
+}
+
+/* the avatar: the button is exactly the picture, no ring or square behind it */
+.tb-btn.tb-avatar,
+.home-avatar {
+  display: grid;
+  place-items: center;
+  width: auto;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  box-shadow: none;
+  line-height: 0;
+}
+
+.avatar {
+  display: grid;
+  vertical-align: middle;
+  line-height: 1;
+}
+
+.avatar img {
+  display: block;
+  border-radius: 50%;
+}
+
+/* shadows: a hairline and the faintest lift, no glow (a glow reads as a stain on a phone) */
+:root[data-skin="cozy"] {
+  --shadow: 0 1px 2px color-mix(in srgb, var(--ink) 6%, transparent), 0 0 0 1px var(--hairline);
+  --lift: 0 1px 3px color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+:root[data-skin="cozy"] :is(.home-card, .home-cover, .home-mini-cover, .home-cat, .home-note, .lib-pocket-cover, .lib-cover, .rd-fab, .rd-acts-row, .rd-acts-round, .tabbar) {
+  box-shadow: var(--lift);
+}
+
+:root[data-skin="cozy"] .home-play {
+  box-shadow: none;
+}
+
+/* reading: only the text; a tap in the middle brings the button, the page number and the arrows back */
+.reader .rd-fab,
+.reader .rd-pct,
+.reader .rd-nav,
+.reader .rd-line {
+  transition: opacity 0.25s ease;
+}
+
+.reader:not(.chrome-on) :is(.rd-fab, .rd-pct, .rd-nav, .rd-line) {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.reader.chrome-on .rd-fab {
+  opacity: 1;
+}
+
+/* the microphone in the notes: small and faint; gone while typing, back a moment after */
+.dictate {
+  width: 38px;
+  height: 38px;
+  right: 14px;
+  opacity: 0.4;
+  box-shadow: none;
+  transition: opacity 0.2s, color 0.15s, border-color 0.15s, background-color 0.15s;
+}
+
+.dictate svg {
+  width: 17px;
+  height: 17px;
+}
+
+.dictate:hover,
+.dictate:focus-visible,
+.dictate.listening {
+  opacity: 1;
+}
+
+body.typing .dictate:not(.listening) {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* a book's own layout and emphasis, carried over from its CSS (reader/bookcss.js) */
+.reader-book .rd-ta-right {
+  text-align: right;
+}
+
+.reader-book .rd-ta-center {
+  text-align: center;
+}
+
+.reader-book .rd-in-1 {
+  margin-left: 9%;
+}
+
+.reader-book .rd-in-2 {
+  margin-left: 20%;
+}
+
+.reader-book .rd-in-3 {
+  margin-left: 32%;
+}
+
+.reader-book em {
+  font-style: italic;
+}
+
+/* the rows of covers and sections snap to their first item with the page's margin kept */
+.home-books,
+.home-cats {
+  scroll-padding-inline: clamp(12px, 4.5vw, 18px);
+}

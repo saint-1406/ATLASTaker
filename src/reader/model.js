@@ -9,14 +9,21 @@ export const TAGS = new Set([
   'table', 'tbody', 'tr', 'td', 'th', 'hr', 'figure', 'figcaption', 'em', 'strong', 'u', 's', 'sup', 'sub',
   'code', 'a', 'span', 'br', 'img',
 ]);
-export const CLASSES = new Set(['epigraph', 'poem', 'stanza', 'verse', 'author', 'subtitle', 'cite', 'gap', 'notes', 'task']);
+// the last five carry a book's own layout over (bookcss.js): a line aligned right or centred, indented 1..3 steps
+export const CLASSES = new Set(['epigraph', 'poem', 'stanza', 'verse', 'author', 'subtitle', 'cite', 'gap', 'notes', 'task', 'ta-right', 'ta-center', 'in-1', 'in-2', 'in-3']);
 const BLOCKS = new Set(['section', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'pre', 'ul', 'ol', 'dl', 'table', 'hr', 'figure']);
+
+import { blockClasses } from './bookcss.js';
 
 export function el(tag, attrs = {}, children = []) {
   const clean = {};
   for (const [key, value] of Object.entries(attrs)) {
     if (value == null || value === '') continue;
-    if (key === 'class' && !CLASSES.has(value)) continue;
+    if (key === 'class') {
+      const kept = String(value).split(/\s+/).filter((c) => CLASSES.has(c));
+      if (kept.length) clean.class = kept.join(' ');
+      continue;
+    }
     if ((key === 'colspan' || key === 'rowspan') && !/^[1-9]\d{0,2}$/.test(String(value))) continue;
     clean[key] = String(value);
   }
@@ -96,7 +103,7 @@ const textOf = (node) => (typeof node === 'string' ? node : node.children.map(te
  * ctx: { image(src) → ref | null, link(href) → href | null, id(raw) → id } — how this document's
  * pictures, links and anchors map onto the book.
  */
-export function htmlBlocks(nodes, ctx) {
+export function htmlBlocks(nodes, ctx, outer = null) {
   const out = [];
   let run = [];
   let pendingId = null;
@@ -106,7 +113,7 @@ export function htmlBlocks(nodes, ctx) {
     return id;
   };
   const flush = () => {
-    if (hasText(run)) out.push(el('p', { id: takeId() }, trimRun(run)));
+    if (hasText(run)) out.push(styled(el('p', { id: takeId() }, trimRun(run)), outer));
     run = [];
   };
   for (const node of nodes) {
@@ -119,7 +126,7 @@ export function htmlBlocks(nodes, ctx) {
     const id = node.attrs.id ? ctx.id(node.attrs.id) : null;
     if (CONTAINERS.has(name)) {
       flush();
-      const inner = htmlBlocks(node.children, ctx);
+      const inner = htmlBlocks(node.children, ctx, mergeLook(outer, ctx.look?.(node.attrs)));
       // a container's anchor goes to its first block
       if (id && inner[0] && !inner[0].attrs.id) inner[0].attrs.id = id;
       else if (id) pendingId = id;
@@ -130,6 +137,7 @@ export function htmlBlocks(nodes, ctx) {
     if (block !== undefined) {
       flush();
       if (block) {
+        if (block.tag === 'p' || HEADINGS.has(block.tag)) styled(block, mergeLook(outer, ctx.look?.(node.attrs)));
         if (pendingId && !block.attrs.id) block.attrs.id = takeId();
         out.push(block);
       }
@@ -232,8 +240,36 @@ function htmlInline(node, ctx) {
     const href = node.attrs.href ? ctx.link(node.attrs.href) : null;
     return href ? [el('a', { href, id }, kids)] : wrap(kids);
   }
-  if (INLINE[name]) return [el(INLINE[name], { id }, kids)];
+  if (INLINE[name]) return lookInline([el(INLINE[name], { id }, kids)], ctx.look?.(node.attrs));
   // a block inside running text (bad HTML, or a <p> in a <span>): keep its words apart
   if (BLOCKS.has(name) || CONTAINERS.has(name) || name === 'li') return [' ', ...wrap(kids), ' '];
-  return wrap(kids);
+  return lookInline(wrap(kids), ctx.look?.(node.attrs));
+}
+
+// ---------- a book's own emphasis and layout (bookcss.js) ----------
+
+/** A container's look, carried down to the blocks inside: its own settings over the outer ones. */
+function mergeLook(outer, own) {
+  if (!own) return outer;
+  if (!outer) return own;
+  return { ...outer, ...own, indent: Math.max(outer.indent ?? 0, own.indent ?? 0), align: own.align ?? outer.align };
+}
+
+/** Words in italics, bold or underlined by a class or a style, as the reader's own tags. */
+function lookInline(kids, look) {
+  if (!look) return kids;
+  let out = kids;
+  if (look.underline) out = [el('u', {}, out)];
+  if (look.bold) out = [el('strong', {}, out)];
+  if (look.italic) out = [el('em', {}, out)];
+  return out;
+}
+
+/** A paragraph or heading with its look: alignment and indent as classes, emphasis around its words. */
+function styled(block, look) {
+  if (!look) return block;
+  const cls = blockClasses(look);
+  if (cls) block.attrs.class = [block.attrs.class, cls].filter(Boolean).join(' ');
+  if (look.italic || look.bold || look.underline) block.children = lookInline(block.children, { ...look, bold: look.bold && block.tag === 'p' });
+  return block;
 }

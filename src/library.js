@@ -4,7 +4,7 @@
 // The reader's code (dist/reader.js, with pdf.js) is loaded the first time it is needed.
 
 import { h, toast, confirmDialog, showMenu, isOverlayOpen, openDialog } from './overlays.js';
-import { count, t } from './i18n.js';
+import { count, STRINGS, t } from './i18n.js';
 import { addShelf, groupShelves, isShelf, renameShelf, shelfList } from './shelves.js';
 import { shownTheme } from './skins.js';
 import { drawQuickPanel, paintTheme, setDim } from './readLook.js';
@@ -73,7 +73,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   const filter = h('input', { class: 'field lib-filter', type: 'search', spellcheck: 'false' });
   const heading = h('span', { class: 'lib-heading-text' });
   const counter = h('span', { class: 'lib-count' });
-  const shelfBack = h('button', { type: 'button', class: 'tb-btn icon lib-back', onclick: () => close() }, '←');
+  const shelfBack = h('button', { type: 'button', class: 'tb-btn icon lib-back', onclick: () => (activeShelf !== null ? showAllBooks() : close()) }, '←');
   const addLabel = h('span', { class: 'lib-add-text' });
   const addButton = h('button', { type: 'button', class: 'tb-btn accent lib-add', onclick: pickFiles }, h('span', { 'aria-hidden': 'true' }, '＋'), addLabel);
   const dropHint = h('div', { class: 'lib-drop', 'aria-hidden': 'true' });
@@ -155,10 +155,10 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   const finder = createFind({ reader, getController: () => reading?.controller ?? null, onList: () => toggleToc(false) });
   reader.append(finder.bar, finder.list);
   // ---------- the action button: everything the header had, behind one button at the foot ----------
-  // The header is hidden while reading (its buttons stay, for the keys). The button is barely there
-  // until pressed; it opens on a press held a moment, so a page tap near it does not open it by chance.
+  // The header is hidden while reading (its buttons stay, for the keys). While reading only the text
+  // shows: a tap in the middle of the screen brings the button and the page number back, and they hide
+  // again after a few seconds untouched (chrome below).
 
-  const HOLD_MS = 380;
   const fab = h(
     'button',
     { type: 'button', class: 'rd-fab', 'aria-haspopup': 'menu' },
@@ -169,6 +169,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   reader.append(fab, sheet);
 
   function closeSheet({ focus = false } = {}) {
+    if (!sheet.hidden) holdChrome?.();
     if (sheet.hidden) return;
     sheet.hidden = true;
     fab.setAttribute('aria-expanded', 'false');
@@ -214,39 +215,62 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     sheet.querySelector('button')?.focus({ preventScroll: true });
   }
 
-  // a held press opens the sheet; a short tap only says how
-  let hold = null;
+  // a tap on the button opens the sheet, another closes it
   fab.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
-    if (!sheet.hidden) {
-      closeSheet();
-      return;
-    }
-    // one press can come as two events (touch emulated from a mouse): one hold only
-    if (hold) clearTimeout(hold.timer);
-    fab.classList.add('holding');
-    hold = {
-      timer: setTimeout(() => {
-        hold = null;
-        fab.classList.remove('holding');
-        navigator.vibrate?.(12);
-        openSheet();
-      }, HOLD_MS),
-    };
   });
-  const release = (e) => {
-    if (!hold) return;
-    clearTimeout(hold.timer);
-    hold = null;
-    fab.classList.remove('holding');
-    if (e?.type === 'pointerup') toast(t('reader.fab.hold'), { timeout: 2000 });
-  };
-  fab.addEventListener('pointerup', release);
-  fab.addEventListener('pointercancel', release);
-  fab.addEventListener('pointerleave', release);
+  fab.addEventListener('pointerup', (e) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    if (sheet.hidden) openSheet();
+    else closeSheet();
+  });
   fab.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // ---------- the reading chrome: hidden while reading, back for a while on a tap in the middle ----------
+
+  const CHROME_MS = 5000;
+  let chromeTimer = 0;
+  function showChrome() {
+    reader.classList.add('chrome-on');
+    holdChrome();
+  }
+  /** Something was touched: the chrome stays another few seconds (not while a menu or a panel is open). */
+  function holdChrome() {
+    clearTimeout(chromeTimer);
+    chromeTimer = setTimeout(() => {
+      const busy = !sheet.hidden || !tocPanel.hidden || !marksPanel.hidden || !viewPanel.hidden || !markPanel.hidden || finder.isOpen() || editing;
+      if (busy) holdChrome();
+      else hideChrome();
+    }, CHROME_MS);
+  }
+  function hideChrome() {
+    clearTimeout(chromeTimer);
+    closeSheet();
+    reader.classList.remove('chrome-on');
+  }
+  let centreTap = null;
+  scroll.addEventListener('pointerdown', (e) => {
+    centreTap = e.button === 0 ? { x: e.clientX, y: e.clientY, at: performance.now() } : null;
+  });
+  scroll.addEventListener('pointerup', (e) => {
+    const start = centreTap;
+    centreTap = null;
+    if (!start || !reading?.controller || performance.now() - start.at > 450 || Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) return;
+    const sel = document.getSelection();
+    if (sel && !sel.isCollapsed && scroll.contains(sel.anchorNode)) return;
+    if (e.target.closest?.('a, .pdf-text, .pdf-edit, .pdf-mark, .rd-mark, input, textarea') || reader.classList.contains('placing-text') || editing) return;
+    // the middle of the screen: the edges turn pages (pager.js)
+    const r = scroll.getBoundingClientRect();
+    const fx = (e.clientX - r.left) / r.width;
+    if (fx < 0.3 || fx > 0.7) return;
+    if (reader.classList.contains('chrome-on')) hideChrome();
+    else showChrome();
+  });
+  for (const node of [fab, sheet]) node.addEventListener('pointerdown', holdChrome);
+
   // keys are deliberate: Enter or Space opens at once
   fab.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -396,10 +420,19 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
 
   // ---------- sections ----------
 
+  function showAllBooks() {
+    activeShelf = null;
+    filter.value = '';
+    render();
+  }
+
   async function loadShelves() {
     try {
       const state = (await api.getState?.()) ?? {};
-      if (Array.isArray(state.shelves)) shelves = state.shelves;
+      if (Array.isArray(state.shelves)) {
+        shelves = state.shelves;
+        await translateStartingShelves();
+      }
       else {
         // a first look at the library: a few genres and one for papers, to sort into or rename
         shelves = [...t('library.defaultShelves')];
@@ -407,6 +440,28 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       }
     } catch {
       shelves = [];
+    }
+  }
+
+  /**
+   * The sections a library starts with carry the names of the language it started in: after a switch,
+   * those still untouched take the new language's names (the books in them follow).
+   */
+  async function translateStartingShelves() {
+    const wanted = t('library.defaultShelves');
+    for (const words of Object.values(STRINGS)) {
+      const other = words.library.defaultShelves;
+      if (other === wanted) continue;
+      let changed = false;
+      for (const [i, name] of other.entries()) {
+        const at = shelves.indexOf(name);
+        if (at < 0 || shelves.includes(wanted[i])) continue;
+        shelves = shelves.map((n, k) => (k === at ? wanted[i] : n));
+        for (const doc of docs.filter((d) => isShelf(d, name))) await setShelf(doc, wanted[i], { quiet: true });
+        if (activeShelf === name) activeShelf = wanted[i];
+        changed = true;
+      }
+      if (changed) saveShelves();
     }
   }
 
@@ -823,6 +878,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       status.hidden = true;
       showProgress(controller.progress());
       fillToc(controller.toc);
+      // the chrome shows for a moment at the start, so the reader knows it is there
+      showChrome();
       scroll.focus({ preventScroll: true });
       doc.opened = Date.now();
       lib.update(doc.id, { opened: doc.opened }).catch(() => {});
@@ -834,7 +891,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
 
   function closeReader() {
     if (!reading) return;
-    closeSheet();
+    hideChrome();
     closeMark();
     closeText();
     setPlacing(false);
@@ -2000,6 +2057,11 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       closeReader();
       return true;
     }
+    // inside a section, back leads to all the books first, then out of the library
+    if (!shelf.hidden && activeShelf !== null) {
+      showAllBooks();
+      return true;
+    }
     if (!shelf.hidden) {
       close();
       return true;
@@ -2052,6 +2114,13 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     back,
     onKey,
     flush,
+    /** The language changed: the shelf's words, and the starting sections' names, follow it. */
+    async relocalize() {
+      if (shelf.hidden) return;
+      localize();
+      await loadShelves();
+      render();
+    },
     /** Cards changed elsewhere (sync): read them again. */
     async reload() {
       await refresh();

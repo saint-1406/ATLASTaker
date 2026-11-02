@@ -45,7 +45,8 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
     }
     const e = document.createElement(node.tag);
     if (id) e.id = `rd-${id}`;
-    if (CLASSES.has(node.attrs.class)) e.className = `rd-${node.attrs.class}`;
+    const classes = String(node.attrs.class ?? '').split(' ').filter((c) => CLASSES.has(c));
+    if (classes.length) e.className = classes.map((c) => `rd-${c}`).join(' ');
     if (colspan) e.colSpan = Number(colspan);
     if (rowspan) e.rowSpan = Number(rowspan);
     if (node.tag === 'a') {
