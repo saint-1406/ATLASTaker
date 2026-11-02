@@ -2,10 +2,11 @@
 // write the result to both sides. The same code runs on Windows (in the local server, server/sync.js)
 // and on Android (in the page, src/sync/android.js); each gives it a `local` side:
 //
-//   notes()                         → [{ id, content, created, updated }]
+//   notes()                         → [{ id, content, created, updated, folder }]
 //   putNote({ id, content, created, updated })   creates or overwrites a note as it came from Drive
 //   createNote(content)             → { id, created, updated }   a fresh note (the other half of a conflict)
 //   trashNote(id)
+//   setNoteFolder(id, folder)       moves a note to a folder ('' for none) as Drive has it
 //   docs()                          → library cards (with id, format)
 //   fileHash(doc)                   → { hash, time }   hashBytes() of the document's file, cached as it likes
 //   docBytes(id)                    → Uint8Array
@@ -16,7 +17,8 @@
 //
 // On Drive (appDataFolder):
 //   index.json           { version, notes: { id: { hash, created, updated } | { deleted } },
-//                          docs: { id: { card, file, fileTime, format } | { deleted } }, assets: [name] }
+//                          docs: { id: { card, file, fileTime, format } | { deleted } }, assets: [name],
+//                          folders: { id: folder } }   — the notes' folders; none listed: in no folder
 //   note-<id>.md         a note's text
 //   card-<id>.json       a document's card: title, author, cover, place, marks, bookmarks…
 //   doc-<id>.<format>    the document itself
@@ -24,7 +26,7 @@
 // Files are written before the index that points at them, so a sync cut short leaves Drive readable,
 // and the next round simply does the rest.
 
-import { cardData, cardSigs, fingerprint, mergeCard, planDocs, planNotes, sig, stableJson } from './merge.js';
+import { cardData, cardSigs, fingerprint, mergeCard, mergeFolder, planDocs, planNotes, sig, stableJson } from './merge.js';
 
 export const INDEX = 'index.json';
 const MIME = { md: 'text/markdown; charset=UTF-8', json: 'application/json; charset=UTF-8' };
@@ -35,8 +37,8 @@ export async function hashBytes(bytes) {
   return Array.from(digest.subarray(0, 16), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export const emptyBase = () => ({ notes: {}, docs: {}, assets: [] });
-const emptyIndex = () => ({ version: 1, notes: {}, docs: {}, assets: [] });
+export const emptyBase = () => ({ notes: {}, docs: {}, assets: [], folders: {} });
+const emptyIndex = () => ({ version: 1, notes: {}, docs: {}, assets: [], folders: null });
 
 function cleanIndex(raw) {
   const out = emptyIndex();
@@ -44,6 +46,10 @@ function cleanIndex(raw) {
     if (raw.notes && typeof raw.notes === 'object') out.notes = raw.notes;
     if (raw.docs && typeof raw.docs === 'object') out.docs = raw.docs;
     if (Array.isArray(raw.assets)) out.assets = raw.assets.filter((n) => typeof n === 'string');
+    // an index written by a version without folders has none at all: that says nothing about them
+    if (raw.folders && typeof raw.folders === 'object' && !Array.isArray(raw.folders)) {
+      out.folders = Object.fromEntries(Object.entries(raw.folders).filter(([, v]) => typeof v === 'string' && v));
+    }
   }
   return out;
 }
@@ -114,8 +120,13 @@ export async function syncOnce({ local, drive, base: oldBase, skipDocs = [], now
     result.pulled.push(id);
     return true;
   };
-  const copyOf = async (content) => {
+  const copyOf = async (content, folder = '') => {
     const fresh = await local.createNote(content);
+    if (folder) {
+      await local.setNoteFolder(fresh.id, folder);
+      fresh.folder = folder;
+      notes.set(fresh.id, { ...fresh, content });
+    }
     await sendNote({ ...fresh, content, hash: fingerprint(content) });
     return fresh.id;
   };
@@ -150,15 +161,29 @@ export async function syncOnce({ local, drive, base: oldBase, skipDocs = [], now
         }
         if (step.keep === 'local') {
           await sendNote(mine);
-          result.conflicts.push({ id, copy: await copyOf(theirs) });
+          result.conflicts.push({ id, copy: await copyOf(theirs, index.folders?.[id] ?? '') });
         } else {
-          result.conflicts.push({ id, copy: await copyOf(mine.content) });
+          result.conflicts.push({ id, copy: await copyOf(mine.content, mine.folder ?? '') });
           await takeNote(id);
         }
         break;
       }
       default: // forget
     }
+  }
+
+  // ---- the notes' folders: each on its own, the side that moved a note wins ----
+  const folders = { ...(index.folders ?? {}) };
+  for (const id of Object.keys(folders)) if (!(id in next.notes) || next.notes[id].deleted) delete folders[id];
+  for (const id of Object.keys(nextBase.notes)) {
+    const mine = notes.get(id)?.folder ?? '';
+    const theirs = index.folders ? (index.folders[id] ?? '') : mine;
+    const merged = mergeFolder(mine, theirs, base.folders?.[id]);
+    if (merged !== mine) await local.setNoteFolder(id, merged);
+    if (merged) {
+      folders[id] = merged;
+      nextBase.folders[id] = merged;
+    } else delete folders[id];
   }
 
   // ---- library ----
@@ -257,7 +282,7 @@ export async function syncOnce({ local, drive, base: oldBase, skipDocs = [], now
   }
   nextBase.assets = [...new Set([...mineAssets, ...theirAssets])];
 
-  const index2 = { version: 1, notes: next.notes, docs: next.docs, assets: [...new Set(next.assets)].sort() };
+  const index2 = { version: 1, notes: next.notes, docs: next.docs, assets: [...new Set(next.assets)].sort(), folders };
   if (stableJson(index2) !== before) await upload(INDEX, JSON.stringify(index2), MIME.json);
   // older twins of a file: their content is already part of what was just written
   for (const f of extra) await drive.remove(f.id).catch(() => {});

@@ -80,7 +80,7 @@ export function createSyncClient({ api, beforeRound, openDocs, afterRound, h, to
       };
     }
   };
-  watch(api, ['create', 'write', 'trash', 'saveAsset']);
+  watch(api, ['create', 'write', 'trash', 'saveAsset', 'setFolder']);
   watch(api.library, ['add', 'update', 'replace', 'remove']);
 
   async function signIn() {

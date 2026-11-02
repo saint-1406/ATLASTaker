@@ -74,6 +74,8 @@ function serverApi() {
     create: (content = '') => call('POST', 'notes', { content }),
     write: (id, content) => call('PUT', `notes/${enc(id)}`, { content }),
     setMeta: (id, meta) => call('PATCH', `notes/${enc(id)}/meta`, meta),
+    /** Moves a note to a folder ('' for none); a separate call so that sync notices it. */
+    setFolder: (id, folder) => call('PATCH', `notes/${enc(id)}/meta`, { folder }),
     trash: (id) => call('POST', `notes/${enc(id)}/trash`),
     getState: () => call('GET', 'state'),
     setState: (patch) => call('PATCH', 'state', patch),
@@ -287,6 +289,13 @@ function browserApi() {
       if (Number.isFinite(meta?.scroll)) note.scroll = meta.scroll;
       await request(notes.put(note));
     },
+    async setFolder(id, folder) {
+      const notes = await store('notes', 'readwrite');
+      const note = await request(notes.get(id));
+      if (!note) return;
+      note.folder = String(folder ?? '');
+      await request(notes.put(note));
+    },
     async trash(id) {
       const t = (await opened).transaction(['notes', 'trash'], 'readwrite');
       const note = await request(t.objectStore('notes').get(id));
@@ -359,6 +368,10 @@ function localApi() {
     },
     async setMeta(id, meta) {
       applyMeta(note(id), meta);
+      persist();
+    },
+    async setFolder(id, folder) {
+      note(id).folder = String(folder ?? '');
       persist();
     },
     async trash(id) {

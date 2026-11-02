@@ -76,6 +76,20 @@ export function planNotes(local, remote, base) {
   return steps;
 }
 
+/**
+ * A note's folder ('' for none) from this device, Drive and the last sync: the side that changed it
+ * wins; changed on both, this device's. A folder travels apart from the text, so moving a note never
+ * makes a conflict copy of it.
+ */
+export function mergeFolder(local, remote, base) {
+  const l = local ?? '';
+  const r = remote ?? '';
+  const b = base ?? '';
+  if (l === r || r === b) return l;
+  if (l === b) return r;
+  return l;
+}
+
 // ---------- library cards ----------
 
 /** Card fields that travel, in groups that change together. `opened` is the newest of both. */

@@ -77,3 +77,22 @@ test('a damaged atlas.json is set aside, notes still load', async (t) => {
   assert.ok(readdirSync(dir).some((name) => name.startsWith('atlas.json.broken-')));
   again.flush();
 });
+
+test('a note keeps its folder across a restart and a synced copy; the folder list is kept in the state', async (t) => {
+  const { dir, store } = fresh(t);
+  const note = await store.create('# Plan');
+  await store.setMeta(note.id, { folder: '  Work   stuff ' });
+  await store.putSynced(note.id, '# Plan, edited elsewhere', { updated: 5 });
+  store.setState({ noteFolders: ['Work stuff', 'Empty'] });
+  store.setState({ noteFolders: ['x'.repeat(61)] }); // too long: refused
+  await store.idle();
+  store.flush();
+
+  const again = createStore(dir);
+  const [loaded] = await again.list();
+  assert.equal(loaded.folder, 'Work stuff');
+  assert.deepEqual(again.getState().noteFolders, ['Work stuff', 'Empty']);
+  await again.setMeta(note.id, { folder: '' });
+  assert.equal((await again.list())[0].folder, '');
+  again.flush();
+});

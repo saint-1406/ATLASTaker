@@ -109,7 +109,12 @@ function fakeDevice() {
   const local = {
     notes: async () => [...notes.values()].map((x) => ({ ...x })),
     async putNote(note) {
-      notes.set(note.id, { ...note });
+      // as on the devices: the text and times come in, the folder stays as it is
+      notes.set(note.id, { folder: notes.get(note.id)?.folder ?? "", ...note });
+    },
+    async setNoteFolder(id, folder) {
+      const note = notes.get(id);
+      if (note) note.folder = folder;
     },
     async createNote(content) {
       const note = { id: `n-copy${++n}`, content, created: 100 + n, updated: 100 + n };
@@ -307,4 +312,51 @@ test('a card with no marks or bookmarks at all (null) merges without failing', a
   assert.deepEqual(out.marks.map((m) => m.id), ['m-aaaa']);
   assert.deepEqual(out.bookmarks, []);
   assert.deepEqual(mergeCard(other, bare, null).marks.map((m) => m.id), ['m-aaaa']);
+});
+
+test('a note moved to a folder moves on the other device, without a conflict copy', async () => {
+  const drive = fakeDrive();
+  const pc = fakeDevice();
+  const phone = fakeDevice();
+  pc.note('n-aaaaaa', '# Plan');
+  pc.note('n-bbbbbb', '# Diary');
+  await pc.sync(drive);
+  await phone.sync(drive);
+  assert.equal(phone.notes.get('n-aaaaaa').folder, '');
+
+  // the PC files one note; the phone, meanwhile, edits it and files the other
+  pc.notes.get('n-aaaaaa').folder = 'Work';
+  Object.assign(phone.notes.get('n-aaaaaa'), { content: '# Plan\nmore', updated: 5 });
+  phone.notes.get('n-bbbbbb').folder = 'Personal';
+  await pc.sync(drive);
+  const r = await phone.sync(drive);
+  await pc.sync(drive);
+  assert.deepEqual(r.conflicts, []);
+  for (const device of [pc, phone]) {
+    assert.equal(device.notes.get('n-aaaaaa').folder, 'Work');
+    assert.equal(device.notes.get('n-aaaaaa').content, '# Plan\nmore');
+    assert.equal(device.notes.get('n-bbbbbb').folder, 'Personal');
+  }
+
+  // taken out of the folder on the phone: out on the PC too
+  phone.notes.get('n-aaaaaa').folder = '';
+  await phone.sync(drive);
+  await pc.sync(drive);
+  assert.equal(pc.notes.get('n-aaaaaa').folder, '');
+});
+
+test('an index written by an app without folders leaves this device’s folders alone', async () => {
+  const drive = fakeDrive();
+  const pc = fakeDevice();
+  pc.note('n-aaaaaa', '# Plan');
+  pc.notes.get('n-aaaaaa').folder = 'Work';
+  await pc.sync(drive);
+  const [indexFile] = drive.named('index.json');
+  const index = JSON.parse(indexFile.data);
+  assert.deepEqual(index.folders, { 'n-aaaaaa': 'Work' });
+  delete index.folders; // an older version rewrote the index
+  indexFile.data = JSON.stringify(index);
+  await pc.sync(drive);
+  assert.equal(pc.notes.get('n-aaaaaa').folder, 'Work');
+  assert.deepEqual(JSON.parse(drive.named('index.json')[0].data).folders, { 'n-aaaaaa': 'Work' });
 });

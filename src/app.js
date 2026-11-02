@@ -41,6 +41,7 @@ import welcomeTextEn from './welcome-en.md';
 import welcomeBrowserTextEn from './welcome-browser-en.md';
 import welcomeAndroidTextEn from './welcome-android-en.md';
 import { addReading, avatarNode, createTabBar, dayKey, drawHome, GOALS, shrinkPicture, streakOf } from './home.js';
+import { createNotesScreen } from './notesScreen.js';
 
 const $ = (sel) => document.querySelector(sel);
 const WELCOME = {
@@ -96,6 +97,32 @@ const readingLog = { days: {}, goal: 20 }; // minutes read per day, and the day'
 let readingClock = 0;
 const tabBar = createTabBar((tab) => pickTab(tab)); // the tabs at the foot of the main page and the library
 let readingTimer = 0;
+let noteFolders = []; // the notes' folders in order (noteFolders.js); each note names its own
+const notesScreen = createNotesScreen({
+  getNotes: () => [...notes.values()],
+  getSaved: () => noteFolders,
+  saveFolders: (list) => {
+    noteFolders = list;
+    return api.setState({ noteFolders: list }).catch((err) => toast(err.message));
+  },
+  moveNote: async (id, folder) => {
+    const note = notes.get(id);
+    if (!note) return;
+    note.folder = folder;
+    await api.setFolder?.(id, folder).catch((err) => toast(err.message));
+  },
+  deleteNote: (id) => deleteNote(id),
+  onOpen: (id) => {
+    hideNotes();
+    if (id !== currentId) openNote(id);
+    else editor.view.focus();
+  },
+  onCreate: (folder) => {
+    hideNotes();
+    createNote('', { folder });
+  },
+  onBack: () => showHome(),
+});
 
 let markReady;
 const ready = new Promise((resolve) => {
@@ -140,6 +167,7 @@ async function boot() {
   if (typeof saved.profileName === 'string') profile.name = saved.profileName;
   if (saved.readDays && typeof saved.readDays === 'object') readingLog.days = saved.readDays;
   if (Number.isInteger(saved.readGoal)) readingLog.goal = saved.readGoal;
+  if (Array.isArray(saved.noteFolders)) noteFolders = saved.noteFolders;
   // 0.13 brought the cosy look: every install is moved to it once (the theme can be changed back in Settings)
   if ((saved.lookVersion ?? 0) < LOOK_VERSION) {
     Object.assign(prefs, DEFAULT_LOOK);
@@ -214,10 +242,13 @@ async function boot() {
       onCustomize: () => showAppearance({ pdf: library.openDocKind?.() === 'pdf' }),
       onReaderColors: (bg, light) => (bg ? android?.setBars(bg, light) : applyBars()),
       onQuote: quoteToNote,
-      onOpenNote: (id) => openNote(id),
+      onOpenNote: (id) => {
+        hideNotes();
+        openNote(id);
+      },
       onLink: (url) => api.openExternal(url),
       // the main page stays under the library: back there (its progress drawn again), or back to the note
-      onClose: () => (homeEl.hidden ? editor.view.focus() : showHome()),
+      onClose: () => (notesScreen.isOpen() ? notesScreen.refresh() : homeEl.hidden ? editor.view.focus() : showHome()),
     });
   }
   sideMenu = createSideMenu({ sections: menuSections(), onClose: () => editor.view.focus({ preventScroll: true }) });
@@ -233,7 +264,7 @@ async function boot() {
   setInterval(tickPace, 10_000);
   markReady();
   // the app opens on the main page, where the person picks where to go
-  document.body.append(homeEl, tabBar.node);
+  document.body.append(homeEl, notesScreen.node, tabBar.node);
   new MutationObserver(updateTabs).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
   readingClock = setInterval(countReading, 30_000);
   showAvatar();
@@ -269,7 +300,10 @@ async function afterSync({ pulled, trashed, conflicts, docsChanged, first }) {
   const fresh = new Map((await api.list()).map((n) => [n.id, n]));
   for (const [id, note] of fresh) {
     const known = notes.get(id);
-    if (known && known.content === note.content) continue;
+    if (known && known.content === note.content) {
+      known.folder = note.folder ?? '';
+      continue;
+    }
     if (id === currentId && known) {
       if (dirty) {
         // typed here while the round ran: the text on screen stays, the incoming version becomes a note of its own
@@ -294,6 +328,7 @@ async function afterSync({ pulled, trashed, conflicts, docsChanged, first }) {
   for (const { id } of conflicts) toast(t('sync.conflict', titleOf(notes.get(id))), { timeout: 8000 });
   renderIndex();
   refreshChrome();
+  notesScreen.refresh();
 }
 
 /** Files another Android app handed over ("Open with" / "Share"): onto the shelf, the last one opened. */
@@ -520,7 +555,7 @@ async function openNoteNow(id, { transition = 'reveal', origin } = {}) {
   if (!note || suspended || lost) return;
   if (atlas?.isOpen) atlas.hide();
   if (id === currentId) {
-    editor.view.focus();
+    if (!notesScreen.isOpen()) editor.view.focus();
     return;
   }
   if (dictation?.listening) dictation.stop(); // the words would land in another note
@@ -546,7 +581,8 @@ async function openNoteNow(id, { transition = 'reveal', origin } = {}) {
   terrainKey = '';
   updateTerrain(transition, origin);
   api.setState({ lastOpen: id }).catch(() => {});
-  editor.view.focus();
+  // under the notes screen the note only gets ready: a focus there would bring up a phone's keyboard
+  if (!notesScreen.isOpen()) editor.view.focus();
 }
 
 /** Saves the open note before moving on; false when the save failed and the switch must not happen. */
@@ -572,13 +608,23 @@ function forget(id) {
   rescue.drop(id);
 }
 
-async function createNote(content = '') {
+async function createNote(content = '', { folder = '' } = {}) {
   if (suspended || lost) return;
   if (currentId && !content && !editor.view.state.doc.length) {
-    editor.view.focus(); // already standing on a blank page
+    // already standing on a blank page: it moves to the folder asked for
+    const blank = notes.get(currentId);
+    if (blank && (blank.folder ?? '') !== folder) {
+      blank.folder = folder;
+      api.setFolder?.(currentId, folder).catch(() => {});
+    }
+    editor.view.focus();
     return;
   }
   const note = await api.create(content);
+  if (folder) {
+    note.folder = folder;
+    await api.setFolder?.(note.id, folder).catch((err) => toast(err.message));
+  }
   notes.set(note.id, { ...note, info: analyze(note.content) });
   await openNote(note.id);
   if (content) editor.view.dispatch({ selection: { anchor: editor.view.state.doc.length } });
@@ -589,7 +635,7 @@ async function deleteNote(id) {
   if (!note) return;
   const c = copy();
   const ok = await confirmDialog({ kicker: c.deleteKicker, title: c.deleteTitle(titleOf(note)), text: c.deleteText, ok: c.deleteOk, danger: true });
-  if (!ok) return;
+  if (!ok) return false;
   const wasOpen = id === currentId;
   if (wasOpen) clearTimeout(saveTimer);
   trashing = id;
@@ -600,7 +646,7 @@ async function deleteNote(id) {
     // the file is still there: keep the note open and saving as if nothing happened
     if (wasOpen && dirty) saveTimer = setTimeout(flushSave, SAVE_DELAY);
     toast(t('notes.deleteFailed', err.message));
-    return;
+    return false;
   }
   trashing = null;
   if (id === currentId) {
@@ -612,6 +658,8 @@ async function deleteNote(id) {
   else if (!currentId) await openNote(newestId());
   renderIndex();
   toast(copy().deleted(titleOf(note)), api.openNotesFolder ? { action: { text: t('notes.openFolder'), run: () => api.openNotesFolder() } } : {});
+  notesScreen.refresh();
+  return true;
 }
 
 // ---------- dictation ----------
@@ -1220,6 +1268,12 @@ function applyLanguage({ persist = true } = {}) {
   document.querySelectorAll('[data-i18n-title]').forEach((el) => (el.title = t(el.dataset.i18nTitle)));
   document.querySelectorAll('[data-i18n-label]').forEach((el) => el.setAttribute('aria-label', t(el.dataset.i18nLabel)));
   document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => (el.placeholder = t(el.dataset.i18nPlaceholder)));
+  const notesBack = document.getElementById('btn-notes-back');
+  if (notesBack) {
+    notesBack.title = t('notesScreen.toList');
+    notesBack.setAttribute('aria-label', t('notesScreen.toList'));
+  }
+  notesScreen.refresh();
   if (persist) api.setState({ lang: prefs.lang }).catch(() => {});
   applyLook({ persist: false });
   if (!editor) return;
@@ -1460,6 +1514,7 @@ function menuSections() {
 
 /** The main page over everything: the book read last, the notes, the library. */
 async function showHome() {
+  hideNotes();
   closeIndexPanel();
   sideMenu?.close?.();
   const list = [...notes.values()].sort((a, b) => b.updated - a.updated).map((n) => ({ id: n.id, title: titleOf(n), updated: n.updated }));
@@ -1482,10 +1537,15 @@ async function showHome() {
     },
     onMenu: () => sideMenu?.open('account'),
     onNote: (id) => {
+      if (!id) {
+        showNotes();
+        return;
+      }
       hideHome();
-      if (id && id !== currentId) openNote(id);
+      if (id !== currentId) openNote(id);
       else editor.view.focus();
     },
+    onNotes: () => showNotes(),
     onNewNote: leave(() => createNote()),
     // the library and the reader open over the main page, which is there again when they close
     onLibrary: () => (library ? openLibrary() : toast(t('home.noLibrary'))),
@@ -1502,6 +1562,32 @@ async function showHome() {
   homeEl.querySelector('.home-book, .home-tile')?.focus({ preventScroll: true });
 }
 
+/** The notes screen (notesScreen.js): folders and the notes in them, over the editor. */
+function showNotes() {
+  closeIndexPanel();
+  sideMenu?.close?.();
+  if (atlas?.isOpen) atlas.hide();
+  if (focusMode) toggleFocus(false);
+  flushSave();
+  // the list shows the text as typed so far
+  if (currentId && notes.has(currentId)) {
+    const note = notes.get(currentId);
+    const text = editor.view.state.doc.toString();
+    if (note.content !== text) notes.set(currentId, { ...note, content: text, info: analyze(text) });
+  }
+  hideHome();
+  notesScreen.show({ focus: !phone });
+  document.body.classList.add('at-notes');
+  updateTabs();
+}
+
+function hideNotes() {
+  if (!notesScreen.isOpen()) return;
+  notesScreen.hide();
+  document.body.classList.remove('at-notes');
+  updateTabs();
+}
+
 function hideHome() {
   if (homeEl.hidden) return;
   homeEl.hidden = true;
@@ -1512,9 +1598,10 @@ function hideHome() {
 /** The tab bar shows on the main page and the library's shelf, with the place it is at marked. */
 function updateTabs() {
   const libraryOpen = document.documentElement.classList.contains('library-open');
-  tabBar.node.hidden = homeEl.hidden && !libraryOpen;
+  const notesOpen = notesScreen.isOpen();
+  tabBar.node.hidden = homeEl.hidden && !libraryOpen && !notesOpen;
   document.body.classList.toggle('has-tabbar', !tabBar.node.hidden);
-  tabBar.select(libraryOpen ? 'library' : 'home');
+  tabBar.select(libraryOpen ? 'library' : notesOpen ? 'notes' : 'home');
 }
 
 function pickTab(tab) {
@@ -1526,10 +1613,10 @@ function pickTab(tab) {
     openLibrary();
     return;
   }
-  if (tab === 'notes') hideHome();
-  // the library closes onto the main page or the note, whichever is under it
+  // the library closes onto whatever is under it
   if (library?.isOpen()) library.close();
-  if (tab === 'home') showHome();
+  if (tab === 'notes') showNotes();
+  else if (tab === 'home') showHome();
   else editor.view.focus();
 }
 
@@ -1759,6 +1846,8 @@ function bindChrome() {
     createNote();
   });
   $('#btn-index').addEventListener('click', toggleIndex);
+  const notesBack = h('button', { type: 'button', class: 'tb-btn icon tb-notes-back', id: 'btn-notes-back', title: t('notesScreen.toList'), 'aria-label': t('notesScreen.toList'), onclick: () => showNotes() }, '←');
+  $('.titlebar').prepend(notesBack);
   // the sliding panel closes on a click anywhere else, and when the window grows wide again
   document.addEventListener('pointerdown', (e) => {
     if ($('#app').classList.contains('index-open') && !e.target.closest('#index, #btn-index')) closeIndexPanel();
@@ -1873,8 +1962,12 @@ window.__atlas = {
       toggleFocus(false);
       return true;
     }
-    if (homeEl.hidden) {
+    if (notesScreen.isOpen()) {
       showHome();
+      return true;
+    }
+    if (homeEl.hidden) {
+      showNotes();
       return true;
     }
     return false;

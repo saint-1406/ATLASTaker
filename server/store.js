@@ -32,6 +32,8 @@ const STATE_RULES = {
   // the person's picture (a small square JPEG, src/home.js shrinkPicture) and name
   avatar: (v) => v === null || (typeof v === 'string' && v.length <= 200_000 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/.test(v)),
   profileName: (v) => typeof v === 'string' && v.length <= 60,
+  // the notes' folders, in order (src/noteFolders.js); notes name theirs in their meta (folder)
+  noteFolders: (v) => Array.isArray(v) && v.length <= 60 && v.every((s) => typeof s === 'string' && s.length > 0 && s.length <= 60),
   // the library's sections, in order (src/shelves.js); books name theirs on their cards
   shelves: (v) => Array.isArray(v) && v.length <= 60 && v.every((s) => typeof s === 'string' && s.length > 0 && s.length <= 60),
   // the look the app has been moved to once (0.13: the cosy design)
@@ -177,6 +179,11 @@ export function createStore(dir) {
     const cursor = cleanCursor(patch?.cursor);
     if (cursor) m.cursor = cursor;
     if (Number.isFinite(patch?.scroll)) m.scroll = Math.max(0, Math.round(patch.scroll));
+    if (typeof patch?.folder === 'string') {
+      const folder = patch.folder.replace(/\s+/g, ' ').trim().slice(0, 60);
+      if (folder) m.folder = folder;
+      else delete m.folder;
+    }
   }
 
   return {
@@ -201,6 +208,7 @@ export function createStore(dir) {
               updated: m.updated ?? Math.round(stat.mtimeMs),
               cursor: m.cursor ?? null,
               scroll: m.scroll ?? 0,
+              folder: m.folder ?? '',
             });
           } catch (err) {
             console.error(`Не удалось прочитать ${name}: ${err.message}`);
