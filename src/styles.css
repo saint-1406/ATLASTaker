@@ -7437,3 +7437,25 @@ body.typing .dictate:not(.listening) {
   color: var(--accent-text);
 }
 
+
+/* the chapter's number at the left of the contents, its parts lined up under the title */
+.rd-toc-num {
+  flex: none;
+  min-width: 2.2em;
+  color: var(--ink-dim);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.rd-toc-item.current .rd-toc-num {
+  color: var(--accent-text);
+}
+
+.rd-toc-item.level-2 button {
+  padding-left: calc(20px + 2.2em + 12px);
+}
+
+.rd-toc-item.level-3 button,
+.rd-toc-item.level-4 button {
+  padding-left: calc(20px + 2.2em + 28px);
+}

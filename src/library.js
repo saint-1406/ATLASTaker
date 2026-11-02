@@ -1001,6 +1001,9 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   const softCaps = (text) => (text && text === text.toLocaleUpperCase() && /\p{Lu}{3}/u.test(text) ? text.toLocaleLowerCase().replace(/(^|[\s—–(\-"«])(\p{L})/gu, (m, sep, ch) => sep + ch.toLocaleUpperCase()) : text);
 
   function fillToc(entries) {
+    // the chapters (the top level of this book's contents) are numbered in order; their parts are not
+    const top = Math.min(...entries.map((e) => e.level));
+    let chapter = 0;
     tocList.replaceChildren(
       ...(entries.length
         ? entries.map((entry) =>
@@ -1018,6 +1021,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
                     scroll.focus({ preventScroll: true });
                   },
                 },
+                entry.level === top ? h('span', { class: 'rd-toc-num' }, `${++chapter}.`) : null,
                 h('span', { class: 'rd-toc-text' }, softCaps(entry.text) || t('reader.pageN', entry.page)),
                 h('span', { class: 'rd-toc-page' }),
               ),
