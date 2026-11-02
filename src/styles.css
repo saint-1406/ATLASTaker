@@ -7364,3 +7364,76 @@ body.typing .dictate:not(.listening) {
   font-weight: 600;
   text-align: left;
 }
+
+/* ---------- the contents: bigger rows, the page at the right, the chapter being read marked ---------- */
+
+.rd-toc-head {
+  position: sticky;
+  top: -10px;
+  z-index: 1;
+  padding: 14px 20px 10px;
+  background: var(--bg-raised);
+  font: 600 12px var(--font-ui);
+  letter-spacing: 0.08em;
+}
+
+.rd-toc-item button {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-height: 46px;
+  padding: 11px 20px;
+  border-left: 3px solid transparent;
+  color: var(--ink);
+  font: 15px/1.35 var(--font-ui);
+}
+
+.rd-toc-item.level-1 + .rd-toc-item.level-1 button,
+.rd-toc-item.level-2 + .rd-toc-item.level-1 button,
+.rd-toc-item.level-3 + .rd-toc-item.level-1 button {
+  border-top: 1px solid var(--hairline);
+}
+
+.rd-toc-item.level-1 button {
+  font-weight: 600;
+}
+
+.rd-toc-item.level-2 button {
+  min-height: 40px;
+  padding-left: 36px;
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+
+.rd-toc-item.level-3 button,
+.rd-toc-item.level-4 button {
+  min-height: 38px;
+  padding-left: 50px;
+  color: var(--ink-dim);
+  font-size: 13.5px;
+}
+
+.rd-toc-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rd-toc-page {
+  flex: none;
+  color: var(--ink-dim);
+  font-size: 13px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.rd-toc-item.current button {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent-text);
+}
+
+.rd-toc-item.current .rd-toc-page {
+  color: var(--accent-text);
+}
+

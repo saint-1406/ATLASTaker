@@ -283,14 +283,25 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
   try {
     const walk = (items, level) => {
       for (const item of items ?? []) {
+        // the page an entry leads to (0-based), found once and kept: for the jump and the number shown
+        let target = null;
+        const pageIndex = () =>
+          (target ??= (async () => {
+            let dest = item.dest;
+            if (typeof dest === 'string') dest = await doc.getDestination(dest);
+            if (!Array.isArray(dest)) return null;
+            return typeof dest[0] === 'object' ? await doc.getPageIndex(dest[0]) : dest[0];
+          })().catch(() => null));
         toc.push({
           level,
           text: clean(item.title).slice(0, 160),
           async go() {
-            let dest = item.dest;
-            if (typeof dest === 'string') dest = await doc.getDestination(dest);
-            if (!Array.isArray(dest)) return;
-            goToPage(typeof dest[0] === 'object' ? await doc.getPageIndex(dest[0]) : dest[0]);
+            const index = await pageIndex();
+            if (Number.isInteger(index)) goToPage(index);
+          },
+          pageNumber: async () => {
+            const index = await pageIndex();
+            return Number.isInteger(index) ? index + 1 : null;
           },
         });
         walk(item.items, level + 1);

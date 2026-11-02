@@ -997,6 +997,9 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     }
   }
 
+  /** A title set all in capitals ("PRESENT — AGE NINETEEN") reads as a title ("Present — Age Nineteen"). */
+  const softCaps = (text) => (text && text === text.toLocaleUpperCase() && /\p{Lu}{3}/u.test(text) ? text.toLocaleLowerCase().replace(/(^|[\s—–(\-"«])(\p{L})/gu, (m, sep, ch) => sep + ch.toLocaleUpperCase()) : text);
+
   function fillToc(entries) {
     tocList.replaceChildren(
       ...(entries.length
@@ -1015,7 +1018,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
                     scroll.focus({ preventScroll: true });
                   },
                 },
-                entry.text || t('reader.pageN', entry.page),
+                h('span', { class: 'rd-toc-text' }, softCaps(entry.text) || t('reader.pageN', entry.page)),
+                h('span', { class: 'rd-toc-page' }),
               ),
             ),
           )
@@ -1023,8 +1027,42 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     );
   }
 
+  /**
+   * Each chapter's page (a book in pages: its share of the text times the pages; in a scroll: how far,
+   * in %; a PDF: its own page), and the chapter being read marked and brought into view.
+   */
+  async function markToc() {
+    const controller = reading?.controller;
+    if (!controller?.toc?.length) return;
+    const items = [...tocList.querySelectorAll('.rd-toc-item')];
+    const pages = controller.pages?.();
+    const here = controller.kind === 'pdf' ? controller.position().page : controller.progress();
+    const places = await Promise.all(
+      controller.toc.map(async (entry) => ({
+        page: (await entry.pageNumber?.()) ?? entry.page ?? null,
+        share: entry.share?.() ?? null,
+      })),
+    );
+    if (reading?.controller !== controller) return;
+    let current = -1;
+    places.forEach((place, i) => {
+      const label = items[i]?.querySelector('.rd-toc-page');
+      if (!label) return;
+      // a page where there are pages (a PDF, a book read by pages), else how far into the book
+      label.textContent = place.page ? String(pages ? Math.min(pages.count, place.page) : place.page) : place.share != null ? t('library.progress', Math.round(place.share * 100)) : '';
+      // the chapter being read: the last one starting at or before the place (a book by its text, a PDF by page)
+      const at = controller.kind === 'pdf' ? place.page : place.share;
+      if (at != null && at <= here + (controller.kind === 'pdf' ? 0 : 0.0005)) current = i;
+    });
+    items.forEach((item, i) => item.classList.toggle('current', i === current));
+    items[current]?.scrollIntoView({ block: 'center' });
+  }
+
   function toggleToc(show = tocPanel.hidden) {
-    if (show) finder.hideList();
+    if (show) {
+      finder.hideList();
+      markToc();
+    }
     viewPanel.hidden = true;
     marksPanel.hidden = true;
     tocPanel.hidden = !show;

@@ -306,6 +306,7 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
   }
   function pages() {
     if (!pager) return null;
+    learn(); // the measure first: every part counts its pages by the same one
     const first = shown === 0 && pager.index === 0;
     const last = shown === parts.length - 1 && pager.index >= pager.count - 1;
     if (parts.length === 1) return { index: pager.index, count: pager.count, first, last };
@@ -322,8 +323,56 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
   function jump(id) {
     const target = page.querySelector(`#${CSS.escape(`rd-${id}`)}`);
     if (!target) return;
-    if (pager) goToElement(target, { animate: true });
-    else host.scrollTop += target.getBoundingClientRect().top - host.getBoundingClientRect().top - 12;
+    if (pager) {
+      goToElement(target, { animate: true });
+      // a jump into another part can land on the same page number within it: the place is told anyway
+      setTimeout(report, 0);
+      return;
+    }
+    // scrolling: the parts on the way are laid out only once near the screen, and their real height
+    // moves the chapter; the place is set again for a few frames until the chapter's start stays put
+    let tries = 10;
+    const settle = () => {
+      const off = target.getBoundingClientRect().top - host.getBoundingClientRect().top - 12;
+      if (Math.abs(off) > 1) host.scrollTop += off;
+      if (--tries > 0 && Math.abs(off) > 1) requestAnimationFrame(settle);
+    };
+    settle();
+  }
+
+  /**
+   * In page mode, the page number an element starts on, counted as the page counter counts (pages()):
+   * exact in the part on screen, from the text before it in the others.
+   */
+  function pageNumberOf(el) {
+    if (!pager || !el) return null;
+    learn();
+    const p = partOf(el);
+    if (p === shown || parts.length === 1) {
+      const info = pages();
+      return (info ? info.index - pager.index : 0) + pageAt(startOf(el)) + 1;
+    }
+    const per = perPage || parts[shown].size / Math.max(1, pager.count);
+    if (!per) return null;
+    let u = unitOf(el);
+    if (u < 0) {
+      const inner = el.querySelector('.rd-u');
+      u = inner ? (unitIndex.get(inner) ?? -1) : -1;
+    }
+    const base = firstPage.has(p) ? firstPage.get(p) : Math.round(parts[p].start / per);
+    const within = u >= 0 ? Math.max(0, unitStart[u] - parts[p].start) / per : 0;
+    return Math.floor(base + within) + 1;
+  }
+
+  /** How far into the book an element starts, 0..1 (by the text before it), or null. */
+  function shareOf(el) {
+    if (!el || !total) return null;
+    let u = unitOf(el);
+    if (u < 0) {
+      const inner = el.querySelector('.rd-u');
+      u = inner ? (unitIndex.get(inner) ?? -1) : -1;
+    }
+    return u < 0 ? null : unitStart[u] / total;
   }
 
   // ---------- marks: block number + character offsets, drawn with the CSS Custom Highlight API ----------
@@ -665,7 +714,10 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
 
   return {
     kind: 'book',
-    toc: book.toc.map((entry) => ({ level: entry.level, text: entry.text, go: () => jump(entry.id) })),
+    toc: book.toc.map((entry) => {
+      const target = () => page.querySelector(`#${CSS.escape(`rd-${entry.id}`)}`);
+      return { level: entry.level, text: entry.text, go: () => jump(entry.id), share: () => shareOf(target()), pageNumber: async () => pageNumberOf(target()) };
+    }),
     position: current,
     progress,
     get paged() {
