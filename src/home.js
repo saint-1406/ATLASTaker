@@ -1,4 +1,4 @@
-// The main page: what the app opens on. A greeting, the book read last with a play button, today's
+// The main page: what the app opens on. A short greeting, the book read last with a play button, today's
 // reading goal, the newest books, the library's sections and the latest notes; the person picks where
 // to go. The avatar (top right) opens the menu, as in the notes; the tab bar sits at the bottom.
 
@@ -63,18 +63,6 @@ function greeting(name) {
   return name?.trim() ? t(`home.hello.${part}Name`, name.trim()) : t(`home.hello.${part}`);
 }
 
-// a quiet drawing for the corner of the page: an open book, a leaf, a few sparks (the theme's colours)
-const ART = `<svg viewBox="0 0 200 150" aria-hidden="true">
-  <path d="M30 118c18-9 44-11 68-3V58c-24-8-50-6-68 3z" fill="var(--home-art-page)" stroke="var(--home-art-line)" stroke-width="2.4" stroke-linejoin="round"/>
-  <path d="M166 118c-18-9-44-11-68-3V58c24-8 50-6 68 3z" fill="var(--home-art-page)" stroke="var(--home-art-line)" stroke-width="2.4" stroke-linejoin="round"/>
-  <path d="M44 72c14-4 30-4 44 0M44 84c14-4 30-4 44 0M44 96c14-4 30-4 44 0M110 72c14-4 30-4 44 0M110 84c14-4 30-4 44 0" stroke="var(--home-art-line)" stroke-width="1.6" stroke-linecap="round" opacity=".45"/>
-  <path d="M150 50c4-18 18-30 34-32-2 17-14 30-34 32z" fill="var(--home-art-leaf)" opacity=".8"/>
-  <path d="M150 50c8-10 18-18 30-26" stroke="var(--home-art-line)" stroke-width="1.4" stroke-linecap="round" opacity=".5"/>
-  <path d="M60 30l2.6 6.4L69 39l-6.4 2.6L60 48l-2.6-6.4L51 39l6.4-2.6z" fill="var(--home-art-spark)"/>
-  <path d="M120 20l1.6 3.9 3.9 1.6-3.9 1.6L120 31l-1.6-3.9-3.9-1.6 3.9-1.6z" fill="var(--home-art-spark)" opacity=".8"/>
-  <path d="M182 92l1.4 3.3 3.3 1.4-3.3 1.4-1.4 3.3-1.4-3.3-3.3-1.4 3.3-1.4z" fill="var(--home-art-spark)" opacity=".7"/>
-</svg>`;
-
 const pct = (v) => `${Math.round(Math.min(1, Math.max(0, v || 0)) * 100)}%`;
 
 /**
@@ -101,12 +89,11 @@ export function drawHome(root, ctx) {
             h('span', { class: 'home-kicker' }, t('home.continue')),
             h('span', { class: 'home-card-title' }, last.name),
             last.author ? h('span', { class: 'home-card-sub' }, last.author) : null,
+            // the streak sits in the text, under the author: it used to float over long titles
+            reading.streak ? h('span', { class: 'home-streak', title: t('home.streakTitle') }, h('span', { 'aria-hidden': 'true' }, '🔥 '), t('home.streak', reading.streak)) : null,
             h('span', { class: 'home-progress-row' }, h('span', { class: 'home-progress', 'aria-hidden': 'true' }, h('i', { style: `width: ${pct(last.progress)}` })), h('span', { class: 'home-pct' }, pct(last.progress))),
           ),
         ),
-        reading.streak
-          ? h('span', { class: 'home-streak', title: t('home.streakTitle') }, h('b', { 'aria-hidden': 'true' }, '🔥'), h('span', {}, t('home.streak', reading.streak)))
-          : null,
         h('button', { type: 'button', class: 'home-play', title: t('home.continue'), 'aria-label': t('home.continue'), onclick: () => ctx.onBook(last.id) }, h('span', { 'aria-hidden': 'true' }, '▶')),
       )
     : h(
@@ -190,7 +177,6 @@ export function drawHome(root, ctx) {
     h(
       'header',
       { class: 'home-hero' },
-      h('span', { class: 'home-art', 'aria-hidden': 'true' }),
       h(
         'div',
         { class: 'home-top' },
@@ -202,7 +188,6 @@ export function drawHome(root, ctx) {
     ),
     h('div', { class: 'home-body' }, book, goal, books, sections, notesBlock),
   );
-  root.querySelector('.home-art').innerHTML = ART; // fixed markup from this file
 }
 
 function when(time) {

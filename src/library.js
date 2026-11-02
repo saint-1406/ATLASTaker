@@ -166,12 +166,15 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     h('span', { class: 'rd-fab-ico', 'aria-hidden': 'true' }, h('i'), h('i'), h('b')),
   );
   const sheet = h('div', { class: 'rd-acts', hidden: true, role: 'menu' });
-  reader.append(fab, sheet);
+  // behind the open sheet the page is blurred and dimmed, so the sheet stands out from the text
+  const sheetScrim = h('div', { class: 'rd-acts-scrim', hidden: true, 'aria-hidden': 'true' });
+  reader.append(fab, sheetScrim, sheet);
 
   function closeSheet({ focus = false } = {}) {
     if (!sheet.hidden) holdChrome?.();
     if (sheet.hidden) return;
     sheet.hidden = true;
+    sheetScrim.hidden = true;
     fab.setAttribute('aria-expanded', 'false');
     if (focus) fab.focus({ preventScroll: true });
   }
@@ -211,6 +214,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       ),
     );
     sheet.hidden = false;
+    sheetScrim.hidden = false;
     fab.setAttribute('aria-expanded', 'true');
     sheet.querySelector('button')?.focus({ preventScroll: true });
   }
