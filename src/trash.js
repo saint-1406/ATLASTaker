@@ -109,8 +109,9 @@ export function createTrash({ getNotes, restoreNote, purgeNote, library }) {
     return row({ icon: 'T', title: item.text, lines: [t('trash.text'), book], onRestore: restore, onPurge: purge });
   };
 
-  function open(tab = 'notes') {
-    let active = TABS.includes(tab) ? tab : 'notes';
+  /** `tab`: 'notes', 'docs' or 'marks'; none: the first one with something in it. */
+  function open(tab) {
+    let active = TABS.includes(tab) ? tab : null;
     openDialog(
       (box, close) => {
         const tabs = h('div', { class: 'seg trash-tabs', role: 'tablist' });
@@ -134,6 +135,7 @@ export function createTrash({ getNotes, restoreNote, purgeNote, library }) {
 
         async function draw() {
           content = await gather();
+          active ??= (library && TABS.find((id) => content[id].length)) || 'notes';
           tabs.replaceChildren(
             ...TABS.map((id) =>
               h(

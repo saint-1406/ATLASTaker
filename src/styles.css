@@ -1715,6 +1715,9 @@ textarea {
   inset: 0;
   z-index: 50;
   display: grid;
+  /* one column the width of the screen: a dialog with a long unbroken line (the trash's excerpts)
+     would otherwise widen the column past the screen and itself with it */
+  grid-template-columns: minmax(0, 1fr);
   place-items: start center;
   padding: 14vh 16px 0;
   background: color-mix(in srgb, var(--bg) 55%, transparent);
@@ -7802,6 +7805,9 @@ body.typing .dictate:not(.listening) {
 
 .trash-tabs .seg-btn {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

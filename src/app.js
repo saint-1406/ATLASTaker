@@ -1660,8 +1660,10 @@ function menuSections() {
         },
       }),
     ],
-    account: () => [
+    account: (close) => [
       profileSection(),
+      // the whole trash (notes, books and marks), opened on whichever part has something in it
+      sideGroup(null, sideItem({ icon: '🗑', text: t('trash.title'), chevron: true, run: () => close(() => trashView?.open()) })),
       sync ? sync.section() : h('p', { class: 'side-empty' }, t('side.noSync')),
       updater ? updater.section() : null,
       h('p', { class: 'side-version' }, t('side.version', typeof __VERSION__ === 'string' ? __VERSION__ : '')),
