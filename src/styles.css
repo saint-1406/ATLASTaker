@@ -1613,13 +1613,8 @@ textarea {
   opacity: 1;
 }
 
-.app.focus .sheet .cm-editor .cm-line {
-  opacity: 0.3;
-  transition: opacity 0.25s ease;
-}
-
+/* what fades is the text around the paragraph or sentence being written (focusDim.js, .cm-dimmed) */
 .app.focus .sheet .cm-editor .cm-line.cm-activeLine {
-  opacity: 1;
   background: transparent;
 }
 
@@ -4685,6 +4680,7 @@ textarea {
 
 /* the settings and the account inside the menu: the dialog's groups, as cards */
 .side-body .set-body {
+  flex: none; /* its own height: the groups after it (Writing, Protection) start below it, not over it */
   overflow: visible;
   gap: 16px;
 }
@@ -7920,4 +7916,527 @@ body.typing .dictate:not(.listening) {
 .rd-sel-icon {
   min-width: 40px;
   justify-content: center;
+}
+
+/* back and forward one step (undo.js): two arrows, faint while there is nothing to go back or forward to */
+.step-pair {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+}
+
+.step-pair[hidden] {
+  display: none;
+}
+
+.step-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.step-btn:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+/* a note open for reading has nothing to undo: the arrows come with ✎ */
+.note-reading .tb-steps {
+  display: none;
+}
+
+/* in a book: a pill at the lower left, opposite the round button, and shown with it */
+.rd-steps {
+  position: absolute;
+  left: calc(14px + env(safe-area-inset-left, 0px));
+  bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+  z-index: 25;
+  padding: 3px;
+  border: 1px solid var(--sheet-edge);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-raised) 85%, transparent);
+  box-shadow: var(--shadow);
+  transition: opacity 0.25s ease;
+}
+
+.rd-steps .step-btn {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+}
+
+.reader:not(.chrome-on) .rd-steps {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ---------- writing (0.17): the statistics strip, the formatting bar, focus's dimming ---------- */
+
+/* the strip under the title bar and the bar over the status bar are rows of their own; a hidden one
+   takes no room, and every part keeps its row */
+.app {
+  --format-h: 46px;
+  grid-template-rows: var(--titlebar-h) auto minmax(0, 1fr) auto var(--status-h);
+}
+
+.app > .titlebar { grid-row: 1; }
+.app > .stats-strip { grid-row: 2; }
+.app > .body { grid-row: 3; }
+.app > .format-bar { grid-row: 4; }
+.app > .statusbar { grid-row: 5; }
+
+.stats-strip,
+.format-bar {
+  pointer-events: auto;
+}
+
+.stats-strip[hidden],
+.format-bar[hidden] {
+  display: none;
+}
+
+.stats-strip {
+  display: flex;
+  gap: 18px;
+  width: 100%;
+  padding: 6px 16px 8px;
+  overflow-x: auto;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  scrollbar-width: none;
+}
+
+.stats-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.stats-cell {
+  display: grid;
+  flex: none;
+  gap: 1px;
+}
+
+.stats-value {
+  font-family: var(--font-ui, inherit);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-label {
+  color: var(--ink-dim);
+  font-size: 11px;
+}
+
+.format-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--format-h);
+  padding: 0 8px env(safe-area-inset-bottom, 0px);
+  overflow-x: auto;
+  border-top: 1px solid var(--hairline);
+  background: var(--bg-raised, var(--bg));
+  scrollbar-width: none;
+}
+
+.format-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.format-btn {
+  flex: none;
+  min-width: 40px;
+  height: 38px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-soft, var(--ink));
+  font-family: var(--font-ui, inherit);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.format-btn:active {
+  background: var(--hairline);
+}
+
+.format-italic { font-style: italic; }
+.format-strike { text-decoration: line-through; }
+.format-code,
+.format-codeblock { font-family: var(--font-mono); font-size: 13px; }
+.format-keyboard { color: var(--ink-dim); }
+
+/* on a phone the bar stands right over the keyboard: the status bar steps out of the way */
+@media (max-width: 720px), (pointer: coarse) {
+  .app.formatting {
+    --status-h: 0px;
+  }
+
+  .app.formatting .statusbar {
+    display: none;
+  }
+}
+
+/* the microphone and "Translate" float above the bar */
+.app.formatting .dictate {
+  bottom: calc(var(--status-h) + var(--format-h) + 18px + env(safe-area-inset-bottom, 0px));
+}
+
+.app.formatting .translate-sel {
+  bottom: calc(var(--status-h) + var(--format-h) + 74px + env(safe-area-inset-bottom, 0px));
+}
+
+.cm-dimmed {
+  opacity: 0.28;
+  transition: opacity 0.2s ease;
+}
+
+/* ---------- the writing statistics ---------- */
+
+.modal-stats {
+  width: min(560px, 100%);
+}
+
+.stats-note {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 22px;
+  margin: 12px 0 4px;
+}
+
+.stats-head {
+  margin: 18px 0 6px;
+  font-size: 15px;
+}
+
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-table th,
+.stats-table td {
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--hairline);
+  text-align: right;
+}
+
+.stats-table th[scope="row"],
+.stats-table thead th:first-child {
+  text-align: left;
+  font-weight: 500;
+}
+
+.stats-table thead th {
+  color: var(--ink-dim);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.stats-streak {
+  margin: 12px 0 8px;
+  color: var(--ink-dim);
+}
+
+/* the heat map: 26 columns of seven days, Monday at the top */
+.heat {
+  display: grid;
+  grid-template-rows: repeat(7, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 3px;
+  width: 100%;
+}
+
+.heat-cell {
+  display: block;
+  aspect-ratio: 1;
+  min-width: 6px;
+  border-radius: 2px;
+  background: var(--hairline);
+}
+
+.heat-cell.none { visibility: hidden; }
+.heat-cell.l1 { background: color-mix(in srgb, var(--accent) 28%, var(--hairline)); }
+.heat-cell.l2 { background: color-mix(in srgb, var(--accent) 50%, var(--hairline)); }
+.heat-cell.l3 { background: color-mix(in srgb, var(--accent) 75%, var(--hairline)); }
+.heat-cell.l4 { background: var(--accent); }
+
+.heat-legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 8px;
+  color: var(--ink-dim);
+  font-size: 11px;
+}
+
+.heat-legend .heat-cell {
+  width: 11px;
+  min-width: 0;
+}
+
+/* ---------- version history ---------- */
+
+.modal-versions {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: calc(86vh - 16px);
+}
+
+.ver-hint {
+  margin-top: 4px;
+}
+
+.ver-list {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 0 0 4px;
+  overflow-x: auto;
+  list-style: none;
+}
+
+.ver-item {
+  display: grid;
+  gap: 2px;
+  padding: 7px 11px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ver-item[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.ver-when { font-size: 13px; }
+.ver-size { color: var(--ink-dim); font-size: 11.5px; }
+
+.ver-summary {
+  margin: 4px 0 6px;
+  color: var(--ink-dim);
+  font-size: 12.5px;
+}
+
+.ver-diff {
+  flex: 1;
+  min-height: 120px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.ver-line {
+  padding: 0 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ver-sign {
+  display: inline-block;
+  width: 1.4em;
+  color: var(--ink-dim);
+}
+
+.ver-line.add { background: color-mix(in srgb, #2e9e57 16%, transparent); }
+.ver-line.del { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.ver-line.fold { padding: 4px 10px; color: var(--ink-dim); text-align: center; }
+.ver-wait,
+.ver-none { padding: 14px; color: var(--ink-dim); }
+
+/* ---------- the formatting bar's buttons, chosen ---------- */
+
+.modal-format {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(86vh - 16px);
+}
+
+.format-tools {
+  margin: 8px 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.format-tool {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.format-tool.off { color: var(--ink-dim); }
+
+.format-tool-label {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.format-tool-glyph {
+  width: 30px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* ---------- the side menu's rows of choices, notes ---------- */
+
+.side-choice {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.side-choice .seg {
+  align-self: stretch;
+}
+
+.side-choice .seg-btn {
+  flex: 1;
+}
+
+.side-choice .seg-btn[aria-checked="true"] {
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+  color: var(--ink);
+}
+
+.side-note {
+  margin: 0;
+  padding: 8px 12px 10px;
+  color: var(--ink-dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* ---------- the PIN lock ---------- */
+
+/* locked: nothing but the lock is seen, not even for a moment while the app starts */
+html.locked body > :not(.lock-screen) {
+  visibility: hidden !important;
+}
+
+.lock-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: env(safe-area-inset-top, 0px) 16px env(safe-area-inset-bottom, 0px);
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.lock-screen[hidden] {
+  display: none;
+}
+
+.lock-box {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  width: min(320px, 100%);
+}
+
+.lock-box.shake {
+  animation: shake 0.35s;
+}
+
+.lock-icon {
+  font-size: 28px;
+}
+
+.lock-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.lock-dots {
+  display: flex;
+  gap: 12px;
+  min-height: 14px;
+}
+
+.lock-dots i {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--ink-dim);
+  border-radius: 50%;
+}
+
+.lock-dots i.on {
+  border-color: var(--ink);
+  background: var(--ink);
+}
+
+.lock-msg {
+  min-height: 1.4em;
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+  text-align: center;
+}
+
+.lock-keys {
+  display: grid;
+  grid-template-columns: repeat(3, 72px);
+  gap: 12px 22px;
+}
+
+.lock-key {
+  width: 72px;
+  height: 72px;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  background: var(--bg-raised, transparent);
+  color: var(--ink);
+  font-family: var(--font-ui, inherit);
+  font-size: 26px;
+  cursor: pointer;
+}
+
+.lock-key:active {
+  background: var(--hairline);
+}
+
+.lock-back {
+  border-color: transparent;
+  background: transparent;
+  font-size: 22px;
+}
+
+.lock-field {
+  width: 100%;
+  margin-top: 10px;
+  font-size: 20px;
+  letter-spacing: 0.3em;
+  text-align: center;
 }

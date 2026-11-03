@@ -121,8 +121,26 @@ export const SETTING_KEYS = [
   'shelves',
   'readDays',
   'readGoal',
+  // writing (0.17): the statistics strip, the formatting bar and its tools, what focus dims, and the
+  // writing logs (written per day and the text's growth per day, src/writing.js). The PIN is not here:
+  // it locks one device.
+  'statsBar',
+  'formatBar',
+  'formatTools',
+  'focusDim',
+  'writeDays',
+  'growDays',
 ];
 const MAX_DAYS = 60;
+const WRITING_DAYS = 400;
+
+/** Two devices' writing logs of one kind: of each day the larger amount (one device's day is not doubled). */
+export function mergeWriting(a, b) {
+  const out = { ...(a ?? {}) };
+  for (const [day, value] of Object.entries(b ?? {})) if (Math.abs(value) > Math.abs(out[day] ?? 0)) out[day] = value;
+  const days = Object.keys(out).sort().slice(-WRITING_DAYS);
+  return Object.fromEntries(days.map((day) => [day, out[day]]));
+}
 
 /**
  * The times kept with a change to the app's state (state.settingsAt): each setting whose value really
@@ -179,6 +197,10 @@ export function mergeSettings(local, remote) {
     }
     if (key === 'readDays' && hasL && hasR) {
       value = mergeDays(local.values[key], remote.values[key]);
+      when = Math.max(la, ra, 1);
+    }
+    if ((key === 'writeDays' || key === 'growDays') && hasL && hasR) {
+      value = mergeWriting(local.values[key], remote.values[key]);
       when = Math.max(la, ra, 1);
     }
     values[key] = value;

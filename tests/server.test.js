@@ -251,3 +251,38 @@ test('the translator’s files: only the allowed ones, only with the token, serv
   assert.match(served.headers.get('content-type'), /application\/json/);
   assert.equal((await fetch(`${app.url}translate-files/hf/Xenova/opus-mt-ru-en/vocab.json`)).status, 404);
 });
+
+test('a note keeps earlier versions over HTTP: listed newest first, read back, the same text not twice', async (t) => {
+  const { call, dataDir } = await start(t);
+  const note = await (await call('POST', 'notes', { content: 'first' })).json();
+  assert.deepEqual(await (await call('GET', `notes/${note.id}/versions`)).json(), []);
+  const one = await (await call('POST', `notes/${note.id}/versions`, { content: 'first' })).json();
+  const again = await (await call('POST', `notes/${note.id}/versions`, { content: 'first' })).json();
+  assert.equal(again.at, one.at, 'the same text as the newest version is not kept again');
+  await new Promise((r) => setTimeout(r, 5));
+  const two = await (await call('POST', `notes/${note.id}/versions`, { content: 'second, longer' })).json();
+  const list = await (await call('GET', `notes/${note.id}/versions`)).json();
+  assert.deepEqual(list, [two, one]);
+  assert.equal(two.chars, 'second, longer'.length);
+  assert.equal((await (await call('GET', `notes/${note.id}/versions/${one.at}`)).json()).content, 'first');
+  assert.equal((await call('GET', `notes/${note.id}/versions/123456789012`)).status, 404);
+  assert.equal((await call('GET', 'notes/n-..%2F..%2Fx/versions')).status, 400);
+  // deleted for good: the versions go with the note
+  await call('PATCH', `notes/${note.id}/meta`, { trashed: Date.now() });
+  await call('POST', `notes/${note.id}/trash`);
+  assert.equal(existsSync(path.join(dataDir, 'notes', '.versions', note.id)), false);
+});
+
+test('the PIN is kept only as a hash of the right shape; writing settings are checked too', async (t) => {
+  const { call } = await start(t);
+  const pinLock = { salt: 'c2FsdHNhbHRzYWx0c2FsdA==', hash: 'aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g=', iter: 150000, len: 4, after: 60 };
+  let state = await (await call('PATCH', 'state', { pinLock, statsBar: false, formatBar: 'always', focusDim: 'sentence', formatTools: ['h1', 'bold'] })).json();
+  assert.deepEqual(state.pinLock, pinLock);
+  assert.equal(state.formatBar, 'always');
+  assert.deepEqual(state.formatTools, ['h1', 'bold']);
+  state = await (await call('PATCH', 'state', { pinLock: { ...pinLock, pin: undefined, after: 7 }, formatBar: 'sometimes' })).json();
+  assert.equal(state.pinLock.after, 60, 'an odd lock is refused');
+  assert.equal(state.formatBar, 'always');
+  state = await (await call('PATCH', 'state', { pinLock: null })).json();
+  assert.equal(state.pinLock, null);
+});

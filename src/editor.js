@@ -17,7 +17,7 @@ import {
   Decoration,
   WidgetType,
 } from '@codemirror/view';
-import { history, defaultKeymap, historyKeymap, indentWithTab, isolateHistory, undo } from '@codemirror/commands';
+import { history, defaultKeymap, historyKeymap, indentWithTab, isolateHistory, undo, redo, undoDepth, redoDepth } from '@codemirror/commands';
 import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
@@ -27,8 +27,20 @@ import { classifyPaste, detectLanguage } from './codeDetect.js';
 import { planComment } from './comments.js';
 import { planSlashFence } from './fence.js';
 import { joinDictated } from './dictation.js';
+import { focusDim } from './focusDim.js';
 import { IMAGE_RE } from './markdown.js';
 import { count, currentLang, t as say, ui } from './i18n.js';
+
+// Focus mode's dimming (focusDim.js): nothing, or the paragraph or sentence lit; one extension per
+// mode and language, kept, so the compartment can tell whether it already holds the wanted one.
+const focusing = new Compartment();
+const dims = new Map();
+const dimFor = (mode, lang) => {
+  if (!mode) return [];
+  const key = `${mode}:${lang}`;
+  if (!dims.has(key)) dims.set(key, focusDim(mode, lang));
+  return dims.get(key);
+};
 
 // Writing on or off (a note opened for reading): one compartment, two fixed values.
 const editing = new Compartment();
@@ -581,7 +593,7 @@ export function createEditor({
     }),
   ];
 
-  const withLanguage = () => [...extensions, language.of(languageExtensions()), editing.of(EDITABLE)];
+  const withLanguage = () => [...extensions, language.of(languageExtensions()), editing.of(EDITABLE), focusing.of([])];
   const view = new EditorView({ parent, state: EditorState.create({ doc: '', extensions: withLanguage() }) });
   return {
     view,
@@ -596,6 +608,19 @@ export function createEditor({
       if (editing.get(view.state) !== wanted) view.dispatch({ effects: editing.reconfigure(wanted) });
     },
     isEditable: () => editing.get(view.state) === EDITABLE,
+    /** One step back or forward in the open note's own history (the ↶ ↷ buttons; Ctrl+Z / Ctrl+Y here too). */
+    undo: () => undo(view),
+    redo: () => redo(view),
+    /**
+     * Focus mode's dimming: 'paragraph' or 'sentence' lit, or null for none. Each note's state carries
+     * its own, so this is applied again after show(), like setEditable.
+     */
+    setFocusDim(mode, lang = currentLang()) {
+      const wanted = dimFor(mode, lang);
+      if (focusing.get(view.state) !== wanted) view.dispatch({ effects: focusing.reconfigure(wanted) });
+    },
+    /** What the note's history holds: steps that can be undone and redone. */
+    steps: () => ({ canUndo: undoDepth(view.state) > 0, canRedo: redoDepth(view.state) > 0 }),
     /**
      * Puts another note into the view. On Android, CodeMirror hands the text to the keyboard through an
      * EditContext, and setState leaves that holding the previous note: the keyboard then edits text that

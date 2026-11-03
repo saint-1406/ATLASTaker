@@ -7,12 +7,18 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { settingsOf, SETTING_KEYS, stampSettings } from '../src/sync/merge.js';
+import { versionsToKeep } from '../src/versionRules.js';
 
 export const ID_RE = /^n-[a-z0-9]{6,40}$/;
 export const ASSET_RE = /^a-[a-z0-9]{6,40}\.(png|jpg|gif|webp)$/;
 export const ASSET_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
 const META_FILE = 'atlas.json';
 const RETRYABLE = new Set(['EPERM', 'EBUSY', 'EACCES']);
+const VERSION_RE = /^(\d{12,14})-(\d{1,9})\.md$/; // <time>-<characters>.md
+// { 'YYYY-MM-DD': number } for at most a little over a year
+const dayLog = (v, min) =>
+  Boolean(v) && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length <= 400 && Object.entries(v).every(([k, n]) => /^\d{4}-\d{2}-\d{2}$/.test(k) && Number.isFinite(n) && n >= min && n <= 1e7);
+const base64ish = (s) => typeof s === 'string' && s.length > 0 && s.length <= 200 && /^[A-Za-z0-9+/]+=*$/.test(s);
 const STATE_RULES = {
   skin: (v) => v === 'cozy' || v === 'minimal' || v === 'atlas',
   theme: (v) => ['cream', 'dark', 'light', 'sepia', 'dusk', 'night', 'contrast', 'system'].includes(v),
@@ -42,6 +48,19 @@ const STATE_RULES = {
   // minutes read per day, for the main page's goal: { 'YYYY-MM-DD': minutes }, a few weeks kept
   readDays: (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length <= 60 && Object.values(v).every((m) => Number.isFinite(m) && m >= 0 && m < 1440),
   readGoal: (v) => Number.isInteger(v) && v >= 5 && v <= 600,
+  // writing (0.17): the statistics strip over a note, the formatting bar and its tools (src/formatBar.js),
+  // what focus mode dims (src/focusDim.js)
+  statsBar: (v) => typeof v === 'boolean',
+  formatBar: (v) => v === 'touch' || v === 'always' || v === 'off',
+  formatTools: (v) => Array.isArray(v) && v.length <= 40 && v.every((s) => typeof s === 'string' && /^[a-z0-9]{1,16}$/.test(s)),
+  focusDim: (v) => v === 'paragraph' || v === 'sentence' || v === 'off',
+  // characters written and the text's growth, per day (src/writing.js)
+  writeDays: (v) => dayLog(v, 0),
+  growDays: (v) => dayLog(v, -1e7),
+  // the PIN that locks the app on this device (src/lock.js): a salted PBKDF2 hash, never the PIN itself
+  pinLock: (v) =>
+    v === null ||
+    (Boolean(v) && typeof v === 'object' && base64ish(v.salt) && base64ish(v.hash) && Number.isInteger(v.iter) && v.iter >= 10_000 && v.iter <= 5_000_000 && Number.isInteger(v.len) && v.len >= 4 && v.len <= 8 && [0, 60, 300, 900].includes(v.after)),
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -130,6 +149,7 @@ function cleanCursor(c) {
 
 export function createStore(dir) {
   const trashDir = path.join(dir, '.trash');
+  const versionsDir = path.join(dir, '.versions'); // earlier versions of each note: .versions\<id>\<time>-<chars>.md
   const assetsDir = path.join(dir, 'assets'); // pictures, referenced from the notes as assets/<name>
   fs.mkdirSync(trashDir, { recursive: true });
   fs.mkdirSync(assetsDir, { recursive: true });
@@ -287,6 +307,46 @@ export function createStore(dir) {
       delete meta.notes[id];
       if (meta.state.lastOpen === id) meta.state.lastOpen = null;
       scheduleMeta();
+      // deleted for good: its earlier versions go with it
+      await fsp.rm(path.join(versionsDir, id), { recursive: true, force: true }).catch(() => {});
+    },
+
+    // ---------- earlier versions of a note (src/versionRules.js) ----------
+
+    /** The note's versions, newest first: [{ at, chars }]. */
+    async versions(id) {
+      fileOf(id);
+      const names = await fsp.readdir(path.join(versionsDir, id)).catch(() => []);
+      return names
+        .map((name) => VERSION_RE.exec(name))
+        .filter(Boolean)
+        .map((m) => ({ at: Number(m[1]), chars: Number(m[2]) }))
+        .sort((a, b) => b.at - a.at);
+    },
+
+    /** The text of one version. */
+    async readVersion(id, at) {
+      fileOf(id);
+      const found = (await this.versions(id)).find((v) => v.at === Number(at));
+      if (!found) throw httpError(404, 'нет такой версии');
+      return fsp.readFile(path.join(versionsDir, id, `${found.at}-${found.chars}.md`), 'utf8');
+    },
+
+    /** Keeps the note's text as a version; those the rules no longer keep are removed. */
+    async addVersion(id, content) {
+      fileOf(id);
+      if (typeof content !== 'string') throw httpError(400, 'нужен текст версии');
+      const folder = path.join(versionsDir, id);
+      await fsp.mkdir(folder, { recursive: true });
+      // the same text as the newest version: that one stands for it
+      const newest = (await this.versions(id))[0];
+      if (newest?.chars === content.length && (await fsp.readFile(path.join(folder, `${newest.at}-${newest.chars}.md`), 'utf8').catch(() => null)) === content) return newest;
+      const at = Date.now();
+      await atomicWrite(path.join(folder, `${at}-${content.length}.md`), content);
+      const all = await this.versions(id);
+      const keep = new Set(versionsToKeep(all.map((v) => v.at), at));
+      for (const v of all) if (!keep.has(v.at)) await fsp.rm(path.join(folder, `${v.at}-${v.chars}.md`), { force: true });
+      return { at, chars: content.length };
     },
 
     /** Saves a picture under a fresh name and returns the name. */

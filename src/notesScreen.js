@@ -6,15 +6,55 @@
 import { h, toast, confirmDialog, showMenu, openDialog } from './overlays.js';
 import { count, currentLocale, t } from './i18n.js';
 import { ALL, NONE, addFolder, folderCounts, folderList, inFolder, pickNotes, preview, renameFolder } from './noteFolders.js';
+import { changedKeys, createSteps, stepButtons, stepKey } from './undo.js';
+
+const FOLDERS = '$folders'; // the folder list's place in a snapshot, next to the notes' ids
 
 /**
  * getNotes(): [{ id, content, updated, folder }]; getSaved() / saveFolders(list): the folder list in
- * the app's state; moveNote(id, folder) and deleteNote(id) (→ true when it went) do the storage;
- * onOpen(id); onCreate(folder); onBack().
+ * the app's state; moveNote(id, folder), deleteNote(id, { quiet }) and restoreNote(id) (→ true when
+ * done) do the storage; onOpen(id); onCreate(folder); onBack().
  */
-export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, deleteNote, onOpen, onCreate, onBack, onTrash = null }) {
+export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, deleteNote, restoreNote, onOpen, onCreate, onBack, onTrash = null }) {
   let folder = ALL;
   let query = '';
+
+  // ---------- back and forward one step: deletions, moves and folders done here ----------
+  const steps = createSteps({ onChange: () => stepPair.update({ canUndo: steps.canUndo(), canRedo: steps.canRedo() }) });
+  const stepPair = stepButtons({ undo: () => steps.undo(), redo: () => steps.redo(), hideEmpty: true });
+
+  /** The folder list and where each note is; a note in the trash is not in it at all. */
+  const snapshot = () => ({ [FOLDERS]: [...getSaved()], ...Object.fromEntries(getNotes().map((n) => [n.id, n.folder || ''])) });
+
+  /** Does `run`, and if it changed anything, keeps that as one step. */
+  async function recorded(run) {
+    const before = snapshot();
+    const result = await run();
+    const after = snapshot();
+    if (changedKeys(before, after).length) steps.push({ undo: () => goTo(after, before), redo: () => goTo(before, after) });
+    return result;
+  }
+
+  /** From one snapshot to another, touching only what differs between the two (the rest may have moved on). */
+  async function goTo(from, to) {
+    // notes come back before any go: deleting the last note makes a blank one, which must not be needed
+    const keys = changedKeys(from, to).sort((a, b) => (to[a] === undefined) - (to[b] === undefined));
+    for (const key of keys) {
+      if (key === FOLDERS) {
+        await saveFolders(to[FOLDERS] ?? []);
+        continue;
+      }
+      const want = to[key];
+      const live = () => getNotes().find((n) => n.id === key);
+      if (want === undefined) {
+        if (live()) await deleteNote(key, { quiet: true });
+        continue;
+      }
+      if (!live() && !(await restoreNote(key))) continue;
+      if ((live()?.folder || '') !== want) await moveNote(key, want);
+    }
+    render();
+  }
 
   const backButton = h(
     'button',
@@ -53,10 +93,16 @@ export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, d
   const node = h(
     'section',
     { class: 'notes-screen', hidden: true },
-    h('header', { class: 'notes-head' }, backButton, h('h2', { class: 'notes-heading' }, heading, counter)),
+    h('header', { class: 'notes-head' }, backButton, h('h2', { class: 'notes-heading' }, heading, counter), stepPair.node),
     h('div', { class: 'notes-body' }, search, h('div', { class: 'notes-chip-row' }, chips), list, empty),
     fab,
   );
+  node.addEventListener('keydown', (e) => {
+    const way = stepKey(e);
+    if (!way) return;
+    e.preventDefault();
+    steps[way]();
+  });
 
   search.addEventListener('input', () => {
     query = search.value;
@@ -213,18 +259,20 @@ export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, d
     });
   }
 
-  async function newFolder() {
-    const name = await askName({ title: t('notesScreen.newFolder') });
-    if (name === null) return null;
-    const next = addFolder(folders(), name);
-    if (!next) {
-      if (name.trim()) toast(t('notesScreen.folderTaken'));
-      return null;
-    }
-    await saveFolders(next);
-    folder = next[next.length - 1];
-    render();
-    return folder;
+  function newFolder() {
+    return recorded(async () => {
+      const name = await askName({ title: t('notesScreen.newFolder') });
+      if (name === null) return null;
+      const next = addFolder(folders(), name);
+      if (!next) {
+        if (name.trim()) toast(t('notesScreen.folderTaken'));
+        return null;
+      }
+      await saveFolders(next);
+      folder = next[next.length - 1];
+      render();
+      return folder;
+    });
   }
 
   function folderMenu(name, x, y) {
@@ -233,44 +281,46 @@ export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, d
       {
         icon: '✎',
         text: t('notesScreen.renameFolder'),
-        run: async () => {
-          const to = await askName({
-            title: t('notesScreen.renameFolder'),
-            value: name,
-          });
-          if (to === null) return;
-          const before = folders();
-          const next = renameFolder(before, name, to);
-          if (!next) {
-            toast(t('notesScreen.folderTaken'));
-            return;
-          }
-          const renamed = next[before.indexOf(name)];
-          await saveFolders(next);
-          for (const note of getNotes().filter((n) => inFolder(n, name))) await moveNote(note.id, renamed);
-          if (folder === name) folder = renamed;
-          render();
-        },
+        run: () =>
+          recorded(async () => {
+            const to = await askName({
+              title: t('notesScreen.renameFolder'),
+              value: name,
+            });
+            if (to === null) return;
+            const before = folders();
+            const next = renameFolder(before, name, to);
+            if (!next) {
+              toast(t('notesScreen.folderTaken'));
+              return;
+            }
+            const renamed = next[before.indexOf(name)];
+            await saveFolders(next);
+            for (const note of getNotes().filter((n) => inFolder(n, name))) await moveNote(note.id, renamed);
+            if (folder === name) folder = renamed;
+            render();
+          }),
       },
       {
         icon: '✕',
         text: t('notesScreen.removeFolder'),
         className: 'danger',
-        run: async () => {
-          const inside = getNotes().filter((n) => inFolder(n, name));
-          const ok = await confirmDialog({
-            kicker: t('notesScreen.title'),
-            title: t('notesScreen.removeFolderTitle', name),
-            text: inside.length ? t('notesScreen.removeFolderText', count(inside.length, 'note')) : '',
-            ok: t('notesScreen.removeOk'),
-            danger: true,
-          });
-          if (!ok) return;
-          await saveFolders(folders().filter((n) => n !== name));
-          for (const note of inside) await moveNote(note.id, '');
-          if (folder === name) folder = ALL;
-          render();
-        },
+        run: () =>
+          recorded(async () => {
+            const inside = getNotes().filter((n) => inFolder(n, name));
+            const ok = await confirmDialog({
+              kicker: t('notesScreen.title'),
+              title: t('notesScreen.removeFolderTitle', name),
+              text: inside.length ? t('notesScreen.removeFolderText', count(inside.length, 'note')) : '',
+              ok: t('notesScreen.removeOk'),
+              danger: true,
+            });
+            if (!ok) return;
+            await saveFolders(folders().filter((n) => n !== name));
+            for (const note of inside) await moveNote(note.id, '');
+            if (folder === name) folder = ALL;
+            render();
+          }),
       },
     ]);
   }
@@ -290,21 +340,23 @@ export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, d
         icon: '✕',
         text: t('notesScreen.delete'),
         className: 'danger',
-        run: async () => {
-          if (await deleteNote(note.id)) render();
-        },
+        run: () =>
+          recorded(async () => {
+            if (await deleteNote(note.id)) render();
+          }),
       },
     ]);
   }
 
   function moveMenu(note, x, y) {
     const names = folders();
-    const move = async (name) => {
-      await moveNote(note.id, name);
-      render();
-      const title = preview(note.content).title || t('untitled');
-      toast(name ? t('notesScreen.moved', title, name) : t('notesScreen.unfiled', title));
-    };
+    const move = (name) =>
+      recorded(async () => {
+        await moveNote(note.id, name);
+        render();
+        const title = preview(note.content).title || t('untitled');
+        toast(name ? t('notesScreen.moved', title, name) : t('notesScreen.unfiled', title));
+      });
     showMenu(x, y, [
       { header: t('notesScreen.moveTo') },
       ...names.map((name) => ({

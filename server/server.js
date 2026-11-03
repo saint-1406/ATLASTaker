@@ -247,6 +247,15 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
     if (given.length !== tokenBytes.length || !crypto.timingSafeEqual(given, tokenBytes)) throw new HttpError(403, 'bad token');
     lastSeen = Date.now();
 
+    // a note's earlier versions: the list, one version's text, a new one (src/versionRules.js)
+    const versionsRoute = /^notes\/([^/]+)\/versions(?:\/(\d{1,15}))?$/.exec(route);
+    if (versionsRoute) {
+      const [, id, at] = versionsRoute;
+      if (!at && req.method === 'GET') return send(res, 200, await store.versions(id));
+      if (!at && req.method === 'POST') return send(res, 201, await store.addVersion(id, (await readJson(req)).content));
+      if (at && req.method === 'GET') return send(res, 200, { content: await store.readVersion(id, Number(at)) });
+      throw new HttpError(405, 'method not allowed');
+    }
     const notesRoute = /^notes(?:\/([^/]+)(?:\/(meta|trash))?)?$/.exec(route);
     if (notesRoute) {
       const [, id, action] = notesRoute;

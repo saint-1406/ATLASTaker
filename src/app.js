@@ -1,7 +1,7 @@
 // ATLAS Notetaker, renderer entry point: wires the editor, the chrome around it (in one of two looks)
 // and keeps every keystroke saved.
 
-import { EditorSelection } from '@codemirror/state';
+import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { android, api, rescue } from './bridge.js';
 import { createLibrary } from './library.js';
@@ -44,6 +44,17 @@ import { addReading, avatarNode, createTabBar, dayKey, drawHome, GOALS, shrinkPi
 import { createNotesScreen } from './notesScreen.js';
 import { createTrash } from './trash.js';
 import { createUpdater } from './update.js';
+import { stepButtons } from './undo.js';
+import { askPin, checkPin, coverEarly, createLock, hashPin, LOCK_AFTER } from './lock.js';
+import { createStatsStrip, openWritingStats } from './writingStats.js';
+import { createFormatBar, normalizeTools, openToolsDialog } from './formatBar.js';
+import { openVersions } from './versions.js';
+import { textStats } from './stats.js';
+import { noteWriting } from './writing.js';
+import { VERSION_EVERY } from './versionRules.js';
+
+// a device with a PIN shows nothing of its notes until the PIN is in (lock.js)
+coverEarly();
 
 const $ = (sel) => document.querySelector(sel);
 const WELCOME = {
@@ -95,6 +106,19 @@ const phone = Boolean(android) || matchMedia('(pointer: coarse)').matches;
 let sync = null; // Google Drive sync (sync/client.js), where this build has it
 let sideMenu = null; // the menu sliding in from the right (sidemenu.js)
 let updater = null; // newer versions: checked, and on Android installed from inside the app (update.js)
+let noteSteps = null; // ↶ ↷ in the title bar: the open note's text, one step back or forward (undo.js)
+// writing (0.17): the statistics strip, the formatting bar, what focus mode dims (all synced settings)
+const writing = { statsBar: true, formatBar: 'touch', formatTools: null, focusDim: 'paragraph' };
+const writeLog = { writeDays: {}, growDays: {} }; // characters written and the text's growth per day (writing.js)
+let pendingWritten = 0; // not yet in writeLog: it is saved every few seconds, not on every key
+let pendingGrown = 0;
+let writeLogTimer = 0;
+let pinLock = null; // this device's PIN, hashed (lock.js); null: none
+const lockScreen = createLock({ getLock: () => pinLock });
+const statsStrip = createStatsStrip({ onOpen: () => showWritingStats() });
+const formatBar = createFormatBar({ getView: () => editor?.view ?? null });
+const versionKept = new Map(); // note id → when a version of it was last kept in this window
+let lastStats = null; // the open note's textStats(), for the strip's pace updates in between
 let trashView = null; // the trash: deleted notes, documents and marks, until restored or deleted for good (trash.js)
 const profile = { avatar: null, name: '' }; // the picture and the name the person gave (Account)
 const homeEl = h('section', { class: 'home', hidden: true }); // the main page (home.js)
@@ -116,7 +140,8 @@ const notesScreen = createNotesScreen({
     note.folder = folder;
     await api.setFolder?.(id, folder).catch((err) => toast(err.message));
   },
-  deleteNote: (id) => deleteNote(id),
+  deleteNote: (id, options) => deleteNote(id, options),
+  restoreNote: (id) => restoreNote(id),
   onOpen: (id) => {
     hideNotes();
     if (id !== currentId) openNote(id);
@@ -156,6 +181,8 @@ applyLanguage({ persist: false });
 
 boot().catch((err) => {
   console.error(err);
+  // nothing of the notes was drawn: the cover put up for a PIN must not hide what went wrong
+  document.documentElement.classList.remove('locked');
   showBlocker({
     title: t('boot.title'),
     text: t('boot.text', err.message),
@@ -166,6 +193,8 @@ boot().catch((err) => {
 async function boot() {
   await claimWindow();
   const saved = (await api.getState()) ?? {};
+  readWriting(saved);
+  lockScreen.start(); // with a PIN, the lock is up before any note is drawn
   Object.assign(prefs, normalizeLook({ ...prefs, ...pickDefined(saved, ['skin', 'theme', 'accent']) }));
   if (typeof saved.sidebar === 'boolean') prefs.sidebar = saved.sidebar;
   if (typeof saved.fontScale === 'number') prefs.fontScale = saved.fontScale;
@@ -268,6 +297,7 @@ async function boot() {
   sideMenu = createSideMenu({ sections: menuSections(), onClose: () => editor.view.focus({ preventScroll: true }) });
   bindChrome();
   applyLook({ persist: false });
+  applyWriting();
 
   const fonts = ['500 16px "Inter Variable"', '500 10px "JetBrains Mono Variable"', 'italic 600 16px "Cormorant Garamond"'];
   await Promise.all([...fonts.map((f) => document.fonts.load(f)), document.fonts.ready].map((p) => p.catch(() => {})));
@@ -375,6 +405,8 @@ async function afterSync({ pulled, trashed, conflicts, docsChanged, first, trash
 /** Settings set on another device came in: the look, language, reading, profile and folders follow them now. */
 async function applySyncedSettings() {
   const saved = (await api.getState().catch(() => null)) ?? {};
+  readWriting(saved);
+  applyWriting();
   Object.assign(prefs, normalizeLook({ ...prefs, ...pickDefined(saved, ['skin', 'theme', 'accent']) }));
   Object.assign(prefs, normalizeReading(saved));
   if (typeof saved.sidebar === 'boolean' && saved.sidebar !== prefs.sidebar) applySidebar(saved.sidebar, { persist: false });
@@ -631,6 +663,9 @@ async function openNoteNow(id, { transition = 'reveal', origin } = {}) {
   note.blankAtOpen = !note.content.trim();
   editor.show(editorStates.get(id) ?? editor.makeState(note.content, savedSelection(note)));
   editor.localize(); // a kept state may still speak the language it was made in
+  showNoteSteps(); // each note keeps its own history
+  applyFocusDim(); // and its own editor state, where focus's dimming lives
+  refreshStats();
   // on a phone a note with text opens for reading (no stray tap changes it); ✎ turns writing on
   setEditing(!(phone && !note.blankAtOpen));
   dirty = false;
@@ -664,6 +699,7 @@ function setEditing(on, { focus = false } = {}) {
   button.title = t(on ? 'notes.read' : 'notes.edit');
   button.setAttribute('aria-label', button.title);
   document.documentElement.classList.toggle('note-reading', !on);
+  showFormatBar();
   if (on && focus) editor.view.focus();
   if (!on) editor.view.contentDOM.blur();
 }
@@ -721,9 +757,10 @@ async function createNote(content = '', { folder = '' } = {}) {
 /**
  * Into the trash: the note leaves every list but stays whole (its text, folder and dates), on every
  * device that syncs, until it is restored or deleted for good from the trash. No question asked: one
- * tap on "Undo" brings it back, and the trash keeps it after that.
+ * tap on "Undo" brings it back, and the trash keeps it after that. `quiet`: no toast (a step taken
+ * again with ↷ on the notes screen).
  */
-async function deleteNote(id) {
+async function deleteNote(id, { quiet = false } = {}) {
   const note = notes.get(id);
   if (!note) return false;
   const wasOpen = id === currentId;
@@ -751,7 +788,7 @@ async function deleteNote(id) {
   renderIndex();
   notesScreen.refresh();
   trashView?.refresh();
-  toast(t('trash.noteMoved', titleOf(note)), { action: { text: t('trash.undo'), run: () => restoreNote(id) }, timeout: 7000 });
+  if (!quiet) toast(t('trash.noteMoved', titleOf(note)), { action: { text: t('trash.undo'), run: () => restoreNote(id) }, timeout: 7000 });
   return true;
 }
 
@@ -875,7 +912,232 @@ async function quoteToNote(doc, text, where, link) {
 
 // ---------- saving ----------
 
+/** ↶ ↷ in the title bar can be pressed when the open note has something to undo or redo. */
+function showNoteSteps() {
+  noteSteps?.update(editor.steps());
+}
+
+// ---------- writing (0.17): statistics, the formatting bar, focus dimming, versions, the PIN ----------
+
+/** The writing settings, the writing log and this device's PIN, from the app's state. */
+function readWriting(saved) {
+  if (typeof saved.statsBar === 'boolean') writing.statsBar = saved.statsBar;
+  if (['touch', 'always', 'off'].includes(saved.formatBar)) writing.formatBar = saved.formatBar;
+  if (Array.isArray(saved.formatTools)) writing.formatTools = saved.formatTools;
+  if (['paragraph', 'sentence', 'off'].includes(saved.focusDim)) writing.focusDim = saved.focusDim;
+  if (saved.writeDays && typeof saved.writeDays === 'object') writeLog.writeDays = saved.writeDays;
+  if (saved.growDays && typeof saved.growDays === 'object') writeLog.growDays = saved.growDays;
+  pinLock = saved.pinLock && typeof saved.pinLock === 'object' ? saved.pinLock : null;
+}
+
+function applyWriting() {
+  statsStrip.node.hidden = !writing.statsBar;
+  formatBar.setTools(writing.formatTools);
+  showFormatBar();
+  applyFocusDim();
+  if (editor) refreshStats();
+}
+
+function setWriting(patch) {
+  Object.assign(writing, patch);
+  api.setState(patch).catch((err) => toast(err.message));
+  applyWriting();
+  sideMenu?.refresh();
+}
+
+/** The formatting bar shows while a note is written: on a phone, or everywhere if so chosen. */
+function showFormatBar() {
+  const wanted = writing.formatBar === 'always' || (writing.formatBar === 'touch' && phone);
+  const show = wanted && editing && normalizeTools(writing.formatTools).length > 0;
+  formatBar.node.hidden = !show;
+  $('#app').classList.toggle('formatting', show);
+}
+
+/** In focus mode, everything but the paragraph or sentence being written fades (focusDim.js). */
+function applyFocusDim() {
+  const lit = focusMode && writing.focusDim !== 'off';
+  editor?.setFocusDim(lit ? writing.focusDim : null, prefs.lang);
+  $('#app').classList.toggle('focus-lit', lit);
+}
+
+/** The strip over the note: counted again after a change, its typing speed every few seconds. */
+function refreshStats({ text = true } = {}) {
+  if (statsStrip.node.hidden || !editor) return;
+  if (text || !lastStats) lastStats = textStats(editor.view.state.doc.toString(), prefs.lang);
+  statsStrip.update(lastStats, pace.slice(-6).reduce((a, b) => a + b, 0));
+}
+
+/** What the person wrote in a change goes into today's numbers (saved every few seconds). */
+function noteWritten(update) {
+  let written = 0;
+  let grown = 0;
+  for (const tr of update.transactions) {
+    const event = tr.annotation(Transaction.userEvent);
+    if (!event || !tr.docChanged) continue; // sync and the like: not the person's writing
+    // undoing, and a version put back, change the text's size but are not writing
+    const writes = !/^(undo|redo|input\.restore)/.test(event);
+    tr.changes.iterChanges((fromA, toA, fromB, toB) => {
+      grown += toB - fromB - (toA - fromA);
+      if (writes) written += toB - fromB;
+    });
+  }
+  if (!written && !grown) return;
+  pendingWritten += written;
+  pendingGrown += grown;
+  if (!writeLogTimer) writeLogTimer = setTimeout(flushWriting, 15_000);
+}
+
+function flushWriting() {
+  clearTimeout(writeLogTimer);
+  writeLogTimer = 0;
+  if (!pendingWritten && !pendingGrown) return;
+  Object.assign(writeLog, noteWriting(writeLog, pendingWritten, pendingGrown));
+  pendingWritten = 0;
+  pendingGrown = 0;
+  // quiet: the log is merged day by day between devices (sync/merge.js), not won by the newest
+  api.setState({ writeDays: writeLog.writeDays, growDays: writeLog.growDays, $quiet: true }).catch(() => {});
+}
+
+function showWritingStats() {
+  const note = notes.get(currentId);
+  if (!note) return;
+  flushWriting();
+  openWritingStats({ title: titleOf(note), stats: textStats(editor.view.state.doc.toString(), prefs.lang), log: writeLog });
+}
+
+/**
+ * Keeps a version of a note: the first time it is saved in this window (its text before today's
+ * changes), then at most every VERSION_EVERY while it is written, and before another is put back.
+ */
+function keepVersion(id, content, { force = false } = {}) {
+  const last = versionKept.get(id);
+  if (!force && last !== undefined && Date.now() - last < VERSION_EVERY) return Promise.resolve();
+  versionKept.set(id, Date.now());
+  return api.addVersion?.(id, content).catch((err) => console.error(err)) ?? Promise.resolve();
+}
+
+function showVersions() {
+  const id = currentId;
+  const note = notes.get(id);
+  if (!note) return;
+  flushSave();
+  openVersions({
+    title: titleOf(note),
+    current: () => (id === currentId ? editor.view.state.doc.toString() : note.content),
+    list: () => api.versions(id),
+    read: (at) => api.readVersion(id, at),
+    onRestore: (text, at) => restoreVersion(id, text, at),
+  });
+}
+
+/** Puts a version back as one change, so ↶ undoes it; the text as it was is kept as a version first. */
+async function restoreVersion(id, text, at) {
+  if (id !== currentId) return;
+  await keepVersion(id, editor.view.state.doc.toString(), { force: true });
+  setEditing(true);
+  editor.view.dispatch({ changes: { from: 0, to: editor.view.state.doc.length, insert: text }, userEvent: 'input.restore', scrollIntoView: true });
+  toast(t('versions.restored', `${formatDay(at)}, ${formatTime(at)}`), { timeout: 6000 });
+}
+
+/** The current PIN asked once more before it is changed or taken off. */
+async function confirmCurrentPin() {
+  const pin = await askPin({ title: t('lock.current') });
+  if (pin === null) return false;
+  if (await checkPin(pin, pinLock)) return true;
+  toast(t('lock.wrong'));
+  return false;
+}
+
+/** A new PIN, typed twice. */
+async function newPin(done) {
+  const first = await askPin({ title: t('lock.set'), text: t('lock.setText') });
+  if (first === null) return;
+  const again = await askPin({ title: t('lock.repeat') });
+  if (again === null) return;
+  if (again !== first) {
+    toast(t('lock.mismatch'));
+    return;
+  }
+  // a new PIN locks again after a minute away: picking a file or signing in to Google leaves the app
+  // for a moment, and "at once" would ask for the PIN after each of those (it can be chosen in Settings)
+  pinLock = await hashPin(first, pinLock?.after ?? 60);
+  await api.setState({ pinLock }).catch((err) => toast(err.message));
+  lockScreen.changed();
+  toast(t(done));
+  sideMenu?.refresh();
+}
+
+async function changePin() {
+  if (await confirmCurrentPin()) await newPin('lock.changed');
+}
+
+async function removePin() {
+  if (!(await confirmCurrentPin())) return;
+  pinLock = null;
+  await api.setState({ pinLock: null }).catch((err) => toast(err.message));
+  lockScreen.changed();
+  toast(t('lock.removed'));
+  sideMenu?.refresh();
+}
+
+/** A row of choices in the side menu: a label and a segmented control. */
+function sideChoice(label, values, current, choose, name) {
+  return h(
+    'div',
+    { class: 'side-choice' },
+    h('span', { class: 'side-label' }, label),
+    h(
+      'div',
+      { class: 'seg', role: 'radiogroup', 'aria-label': label },
+      values.map((value) => h('button', { type: 'button', class: 'seg-btn', role: 'radio', 'aria-checked': String(value === current), onclick: () => choose(value) }, name(value))),
+    ),
+  );
+}
+
+/** Settings → Writing: the strip, the bar and its buttons, what focus lights. */
+function writingSettings(close) {
+  return sideGroup(
+    t('stats.writing'),
+    sideToggle({ icon: '∑', text: t('stats.bar'), hint: t('stats.barHint'), on: writing.statsBar, toggle: () => setWriting({ statsBar: !writing.statsBar }) }),
+    sideChoice(t('format.show'), ['touch', 'always', 'off'], writing.formatBar, (formatBar) => setWriting({ formatBar }), (v) => t(`format.${v}`)),
+    sideItem({
+      icon: 'B',
+      text: t('format.customize'),
+      chevron: true,
+      run: () => close(() => openToolsDialog({ current: writing.formatTools, onSave: (formatTools) => setWriting({ formatTools }) })),
+    }),
+    sideChoice(t('focusDim.title'), ['paragraph', 'sentence', 'off'], writing.focusDim, (focusDim) => setWriting({ focusDim }), (v) => t(`focusDim.${v}`)),
+  );
+}
+
+/** Settings → Protection: the PIN of this device. */
+function pinSettings(close) {
+  if (!lockScreen.canLock) return sideGroup(t('lock.kicker'), h('p', { class: 'side-empty' }, t('lock.unavailable')));
+  if (!pinLock) {
+    return sideGroup(t('lock.kicker'), sideItem({ icon: '🔒', text: t('lock.set'), hint: t('lock.off'), chevron: true, run: () => close(() => newPin('lock.saved')) }), h('p', { class: 'side-note' }, t('lock.note')));
+  }
+  return sideGroup(
+    t('lock.kicker'),
+    sideItem({ icon: '🔒', text: t('lock.now'), hint: `${t('lock.pin')}: ${t('lock.on')}`, run: () => close(() => lockScreen.lock()) }),
+    sideChoice(
+      t('lock.after'),
+      LOCK_AFTER,
+      pinLock.after,
+      (after) => {
+        pinLock = { ...pinLock, after };
+        api.setState({ pinLock }).catch((err) => toast(err.message));
+        sideMenu?.refresh();
+      },
+      (v) => t(`lock.afterOptions.${v}`),
+    ),
+    sideItem({ icon: '✎', text: t('lock.change'), chevron: true, run: () => close(changePin) }),
+    sideItem({ icon: '✕', text: t('lock.remove'), danger: true, run: () => close(removePin) }),
+    h('p', { class: 'side-note' }, t('lock.note')),
+  );
+}
+
 function onDocChange(update) {
+  showNoteSteps();
   if (suspended) return;
   if (lost) {
     // no server to save to: the text goes straight into the rescue copy
@@ -883,6 +1145,7 @@ function onDocChange(update) {
     return;
   }
   notePace(update);
+  noteWritten(update);
   markTyping();
   dirty = true;
   setSaveState('pending');
@@ -917,6 +1180,9 @@ async function saveNow() {
   if (suspended || lost) return false;
   dirty = false;
   setSaveState('pending');
+  // the first change in this window: the text as it was before it is kept as a version
+  const before = notes.get(id)?.content;
+  if (!versionKept.has(id) && before?.trim() && before !== content) keepVersion(id, before, { force: true });
   try {
     const { updated } = await api.write(id, content);
     rescue.drop(id, content);
@@ -925,6 +1191,7 @@ async function saveNow() {
       note.content = content;
       note.updated = updated;
     }
+    keepVersion(id, content);
     if (!dirty && id === currentId) setSaveState('saved', updated);
     renderIndex();
     return true;
@@ -1002,6 +1269,7 @@ function tickPace() {
   pace.shift();
   pace.push(0);
   renderPace();
+  refreshStats({ text: false });
 }
 
 function renderPace() {
@@ -1027,6 +1295,7 @@ function refreshAnalysis() {
   refreshChrome();
   updateIndexItem(note);
   renderPace();
+  refreshStats();
   clearTimeout(terrainTimer);
   terrainTimer = setTimeout(() => updateTerrain('fade'), 900);
 }
@@ -1558,6 +1827,7 @@ function applyFontScale(scale, { persist = true } = {}) {
 function toggleFocus(on = !focusMode) {
   focusMode = on;
   $('#app').classList.toggle('focus', on);
+  applyFocusDim();
   requestAnimationFrame(() => terrain.render('fade'));
   if (on) toast(t('view.focus'), { timeout: 2200 });
   editor.view.focus();
@@ -1593,6 +1863,8 @@ function menuSections() {
         sideToggle({ icon: '◎', text: t('side.focus'), on: focusMode, toggle: () => close(() => toggleFocus()) }),
         sideItem({ icon: '◉', text: t('side.dictate'), kbd: 'Ctrl+Shift+D', run: () => close(toggleDictation) }),
         sideItem({ icon: '🌐', text: t('side.translate'), kbd: 'Ctrl+Shift+X', run: () => close(() => translateSelection()) }),
+        sideItem({ icon: '◴', text: t('versions.title'), chevron: true, run: () => close(showVersions) }),
+        sideItem({ icon: '∑', text: t('stats.title'), chevron: true, run: () => close(showWritingStats) }),
       ),
       sideGroup(
         t('side.files'),
@@ -1659,6 +1931,8 @@ function menuSections() {
           else setLook(patch);
         },
       }),
+      writingSettings(close),
+      pinSettings(close),
     ],
     account: (close) => [
       profileSection(),
@@ -1897,7 +2171,10 @@ function commandList() {
     { icon: '⇡', title: t('commands.import'), keywords: 'import upload files импорт загрузить файлы', run: importFiles },
     { icon: '◉', title: t('commands.dictate'), kbd: 'Ctrl+Shift+D', keywords: 'dictate voice speech microphone диктовка голос речь микрофон', run: toggleDictation },
     { icon: '🌐', title: t('commands.translate'), kbd: 'Ctrl+Shift+X', keywords: 'translate translation english russian перевод перевести английский русский', run: () => translateSelection() },
+    { icon: '◴', title: t('versions.title'), keywords: 'history versions restore diff история версии вернуть сравнить', run: showVersions },
+    { icon: '∑', title: t('stats.title'), keywords: 'statistics words count heat map статистика слова знаки карта', run: showWritingStats },
   ];
+  if (pinLock && lockScreen.canLock) list.push({ icon: '🔒', title: t('lock.now'), keywords: 'lock pin блокировка закрыть пин', run: () => lockScreen.lock() });
   if (isAtlas()) list.splice(1, 0, { icon: '▦', title: t('commands.atlas'), kbd: 'Ctrl+M', keywords: 'atlas map archipelago карта архипелаг', run: toggleAtlas });
   if (library) {
     list.splice(
@@ -2007,6 +2284,18 @@ function onGlobalKey(e) {
 function bindChrome() {
   $('#btn-new').addEventListener('click', () => createNote());
   $('#btn-edit').addEventListener('click', () => setEditing(!editing, { focus: true }));
+  // one step back or forward in the note's text, next to ✎ (hidden while the note is only read)
+  noteSteps = stepButtons({ undo: () => editor.undo(), redo: () => editor.redo(), className: 'tb-steps' });
+  $('#btn-edit').before(noteSteps.node);
+  showNoteSteps();
+  // the statistics strip under the title bar, the formatting bar over the status bar (and the keyboard)
+  $('.titlebar').after(statsStrip.node);
+  $('.statusbar').before(formatBar.node);
+  // what was written is saved when the app goes away, not only every few seconds
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushWriting();
+  });
+  window.addEventListener('pagehide', flushWriting);
   // where the page is not shrunk for the on-screen keyboard, --kb says how much of it the keyboard
   // covers, so a comment being typed rises above it (on Android the app tells it, MainActivity.tellInsets)
   if (!android && window.visualViewport) {

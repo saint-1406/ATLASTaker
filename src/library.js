@@ -11,6 +11,7 @@ import { drawQuickPanel, paintTheme, setDim } from './readLook.js';
 import { live, MARK_COLORS, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, MAX_TEXT_LENGTH, MAX_TEXTS, newBookmarkId, newEditId, newMarkId, newTextId, remapPdf, remapTexts, sortMarks, sortTexts, TEXT_COLORS, TEXT_SIZES } from './marks.js';
 import { openPageEditor } from './pageEditor.js';
 import { createFind } from './readerFind.js';
+import { changedKeys, createSteps, stepButtons, stepKey } from './undo.js';
 
 /** A link from a note back to a place in a document: atlas:<document>#<mark>. */
 export const DOC_LINK_RE = /^atlas:(d-[a-z0-9]{6,40})(?:#(m-[a-z0-9]{4,40}))?$/;
@@ -79,7 +80,47 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   const addButton = h('button', { type: 'button', class: 'tb-btn accent lib-add', onclick: pickFiles }, h('span', { 'aria-hidden': 'true' }, '＋'), addLabel);
   // the search is an icon until it is wanted: then the field takes the heading's place, and × puts it away
   const searchButton = h('button', { type: 'button', class: 'tb-btn icon lib-search-btn', onclick: () => setSearching(!head.classList.contains('searching')) });
-  const head = h('header', { class: 'lib-head' }, shelfBack, h('h2', { class: 'lib-heading' }, heading, counter), filter, searchButton, addButton);
+
+  // back and forward one step on the shelf: a book to the trash and back, moved to a section, marked
+  // read, a section made, renamed or removed. A snapshot before and after each; going back touches only
+  // what that step changed.
+  const SHELVES = '$shelves';
+  const shelfSteps = createSteps({ onChange: () => shelfPair.update({ canUndo: shelfSteps.canUndo(), canRedo: shelfSteps.canRedo() }) });
+  const shelfPair = stepButtons({ undo: () => shelfSteps.undo(), redo: () => shelfSteps.redo(), className: 'lib-steps', hideEmpty: true });
+  const shelfSnapshot = () => ({
+    [SHELVES]: [...shelves],
+    ...Object.fromEntries([...docs, ...trashedDocs].map((d) => [d.id, { shelf: d.shelf || '', finished: Boolean(d.finished), trashed: Boolean(d.trashed) }])),
+  });
+  /** Does `run`, and if it changed anything, keeps that as one step. */
+  async function onShelf(run) {
+    const before = shelfSnapshot();
+    const result = await run();
+    const after = shelfSnapshot();
+    if (changedKeys(before, after).length) shelfSteps.push({ undo: () => shelfGoTo(after, before), redo: () => shelfGoTo(before, after) });
+    return result;
+  }
+  async function shelfGoTo(from, to) {
+    for (const key of changedKeys(from, to)) {
+      if (key === SHELVES) {
+        shelves = [...(to[SHELVES] ?? [])];
+        saveShelves();
+        continue;
+      }
+      const want = to[key];
+      if (!want) continue; // deleted for good since
+      if (want.trashed) {
+        if (docs.some((d) => d.id === key)) await remove(key, { quiet: true });
+        continue;
+      }
+      if (!docs.some((d) => d.id === key) && !(await restoreDoc(key))) continue;
+      const doc = docs.find((d) => d.id === key);
+      if ((doc.shelf || '') !== want.shelf) await setShelf(doc, want.shelf, { quiet: true });
+      if (Boolean(doc.finished) !== want.finished) await toggleFinished(doc);
+    }
+    if (!shelf.hidden) render();
+  }
+
+  const head = h('header', { class: 'lib-head' }, shelfBack, h('h2', { class: 'lib-heading' }, heading, counter), shelfPair.node, filter, searchButton, addButton);
   const dropHint = h('div', { class: 'lib-drop', 'aria-hidden': 'true' });
   const shelf = h(
     'section',
@@ -381,10 +422,10 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     const menu = (x, y) =>
       showMenu(x, y, [
         { icon: '↗', text: t('library.read'), run: () => read(doc.id) },
-        { icon: doc.finished ? '○' : '✓', text: t(doc.finished ? 'library.markUnread' : 'library.markRead'), run: () => toggleFinished(doc) },
+        { icon: doc.finished ? '○' : '✓', text: t(doc.finished ? 'library.markUnread' : 'library.markRead'), run: () => onShelf(() => toggleFinished(doc)) },
         { icon: '▤', text: t('library.moveToShelf'), run: () => moveMenu(doc, x, y) },
         '-',
-        { icon: '✕', text: t('library.remove'), kbd: 'Del', className: 'danger', run: () => remove(doc.id) },
+        { icon: '✕', text: t('library.remove'), kbd: 'Del', className: 'danger', run: () => onShelf(() => remove(doc.id)) },
       ]);
     li.addEventListener('click', (e) => {
       if (!e.target.closest('.lib-more')) read(doc.id);
@@ -393,7 +434,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         read(doc.id);
-      } else if (e.key === 'Delete') remove(doc.id);
+      } else if (e.key === 'Delete') onShelf(() => remove(doc.id));
     });
     li.addEventListener('contextmenu', (e) => {
       e.preventDefault();
@@ -604,19 +645,21 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     });
   }
 
-  async function newShelf() {
-    const name = await askName({ title: t('library.newShelf') });
-    if (name === null) return null;
-    const next = addShelf(shelfList(shelves, docs), name);
-    if (!next) {
-      if (name.trim()) toast(t('library.shelfTaken'));
-      return null;
-    }
-    shelves = next;
-    saveShelves();
-    activeShelf = next[next.length - 1];
-    render();
-    return activeShelf;
+  function newShelf() {
+    return onShelf(async () => {
+      const name = await askName({ title: t('library.newShelf') });
+      if (name === null) return null;
+      const next = addShelf(shelfList(shelves, docs), name);
+      if (!next) {
+        if (name.trim()) toast(t('library.shelfTaken'));
+        return null;
+      }
+      shelves = next;
+      saveShelves();
+      activeShelf = next[next.length - 1];
+      render();
+      return activeShelf;
+    });
   }
 
   function shelfMenu(name, x, y) {
@@ -625,43 +668,45 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       {
         icon: '✎',
         text: t('library.renameShelf'),
-        run: async () => {
-          const to = await askName({ title: t('library.renameShelf'), value: name });
-          if (to === null) return;
-          const before = shelfList(shelves, docs);
-          const next = renameShelf(before, name, to);
-          if (!next) {
-            toast(t('library.shelfTaken'));
-            return;
-          }
-          const renamed = next[before.indexOf(name)];
-          shelves = next;
-          saveShelves();
-          for (const doc of docs.filter((d) => isShelf(d, name))) await setShelf(doc, renamed, { quiet: true });
-          if (activeShelf === name) activeShelf = renamed;
-          render();
-        },
+        run: () =>
+          onShelf(async () => {
+            const to = await askName({ title: t('library.renameShelf'), value: name });
+            if (to === null) return;
+            const before = shelfList(shelves, docs);
+            const next = renameShelf(before, name, to);
+            if (!next) {
+              toast(t('library.shelfTaken'));
+              return;
+            }
+            const renamed = next[before.indexOf(name)];
+            shelves = next;
+            saveShelves();
+            for (const doc of docs.filter((d) => isShelf(d, name))) await setShelf(doc, renamed, { quiet: true });
+            if (activeShelf === name) activeShelf = renamed;
+            render();
+          }),
       },
       {
         icon: '✕',
         text: t('library.removeShelf'),
         className: 'danger',
-        run: async () => {
-          const inside = docs.filter((d) => isShelf(d, name));
-          const ok = await confirmDialog({
-            kicker: t('library.title'),
-            title: t('library.removeShelfTitle', name),
-            text: inside.length ? t('library.removeShelfText', count(inside.length, 'book')) : '',
-            ok: t('library.removeOk'),
-            danger: true,
-          });
-          if (!ok) return;
-          shelves = shelfList(shelves, docs).filter((n) => n !== name);
-          saveShelves();
-          for (const doc of inside) await setShelf(doc, '', { quiet: true });
-          if (activeShelf === name) activeShelf = null;
-          render();
-        },
+        run: () =>
+          onShelf(async () => {
+            const inside = docs.filter((d) => isShelf(d, name));
+            const ok = await confirmDialog({
+              kicker: t('library.title'),
+              title: t('library.removeShelfTitle', name),
+              text: inside.length ? t('library.removeShelfText', count(inside.length, 'book')) : '',
+              ok: t('library.removeOk'),
+              danger: true,
+            });
+            if (!ok) return;
+            shelves = shelfList(shelves, docs).filter((n) => n !== name);
+            saveShelves();
+            for (const doc of inside) await setShelf(doc, '', { quiet: true });
+            if (activeShelf === name) activeShelf = null;
+            render();
+          }),
       },
     ]);
   }
@@ -682,15 +727,15 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     const list = shelfList(shelves, docs);
     showMenu(x, y, [
       { header: t('library.moveTo') },
-      ...list.map((name) => ({ icon: isShelf(doc, name) ? '✓' : '', text: name, run: () => setShelf(doc, name) })),
-      { icon: doc.shelf ? '' : '✓', text: t('library.noShelf'), run: () => setShelf(doc, '') },
+      ...list.map((name) => ({ icon: isShelf(doc, name) ? '✓' : '', text: name, run: () => onShelf(() => setShelf(doc, name)) })),
+      { icon: doc.shelf ? '' : '✓', text: t('library.noShelf'), run: () => onShelf(() => setShelf(doc, '')) },
       '-',
       {
         icon: '＋',
         text: t('library.newShelf'),
         run: async () => {
           const name = await newShelf();
-          if (name) await setShelf(doc, name);
+          if (name) await onShelf(() => setShelf(doc, name));
         },
       },
     ]);
@@ -796,8 +841,11 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     return out;
   }
 
-  /** Into the trash: off the shelf, whole (the file, the place, the marks), with "Undo" at hand. */
-  async function remove(id) {
+  /**
+   * Into the trash: off the shelf, whole (the file, the place, the marks), with "Undo" at hand.
+   * `quiet`: no toast (the step taken again with ↷).
+   */
+  async function remove(id, { quiet = false } = {}) {
     const doc = docs.find((d) => d.id === id);
     if (!doc) return;
     if (reading?.doc.id === id) closeReader();
@@ -811,7 +859,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     trashedDocs.push(doc);
     if (!shelf.hidden) render();
     onTrashChanged();
-    toast(t('trash.docMoved', nameOf(doc)), { timeout: 7000, action: { text: t('trash.undo'), run: () => restoreDoc(id) } });
+    if (!quiet) toast(t('trash.docMoved', nameOf(doc)), { timeout: 7000, action: { text: t('trash.undo'), run: () => restoreDoc(id) } });
   }
 
   async function restoreDoc(id) {
@@ -979,6 +1027,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     scroll.scrollTop = 0;
     const session = { doc, controller: null, closed: false };
     reading = session;
+    startBookSteps(session);
     try {
       const code = await loadReader();
       const bytes = await lib.bytes(doc.id);
@@ -1032,6 +1081,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     reading.closed = true;
     reading.controller?.close();
     reading = null;
+    stopBookSteps();
     reader.hidden = true;
     systemBars();
     hideSelBar();
@@ -1304,9 +1354,88 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     item.edited = Date.now();
   };
 
+  // ---------- back and forward one step in a book: its marks, bookmarks and texts ----------
+  // Each list's last known state is kept as JSON; a change pushes a step holding the list before and
+  // after. Typing a comment or a text is one step until the typing pauses, not one step per letter.
+  const BOOK_LISTS = ['marks', 'bookmarks', 'texts'];
+  const TYPING_MS = 1500;
+  let bookState = null; // { session, last: { list: json }, burst: { kind, step, at, stale } | null }
+  // each step keeps one list as JSON: about 4 million characters in all (a few MB), then the oldest go
+  const bookSteps = createSteps({ budget: 4_000_000, onChange: () => bookPair.update({ canUndo: bookSteps.canUndo(), canRedo: bookSteps.canRedo() }) });
+  const bookPair = stepButtons({ undo: () => stepBook('undo'), redo: () => stepBook('redo'), className: 'rd-steps', hideEmpty: true });
+  reader.append(bookPair.node);
+
+  function startBookSteps(session) {
+    bookState = { session, last: Object.fromEntries(BOOK_LISTS.map((kind) => [kind, JSON.stringify(session.doc[kind] ?? [])])), burst: null };
+    bookSteps.clear();
+  }
+
+  function stopBookSteps() {
+    bookState = null;
+    bookSteps.clear();
+  }
+
+  /** The typing burst's step gets the list as it is now (its "after"), and so does the last known state. */
+  function settleBurst() {
+    const burst = bookState?.burst;
+    if (!burst?.stale) return;
+    const json = JSON.stringify(bookState.session.doc[burst.kind] ?? []);
+    burst.step.after[burst.kind] = json;
+    bookState.last[burst.kind] = json;
+    burst.stale = false;
+  }
+
+  /** One of the open book's lists changed (saveMarks, saveTexts, saveBookmarks): a step, or part of one being typed. */
+  function noteBookChange(kind, session) {
+    if (!bookState || bookState.session !== session || bookSteps.replaying()) return;
+    const now = Date.now();
+    const active = document.activeElement;
+    const typing = Boolean(active?.matches?.('textarea, input') && reader.contains(active));
+    const burst = bookState.burst;
+    if (typing && burst?.kind === kind && now - burst.at < TYPING_MS) {
+      burst.at = now;
+      burst.stale = true;
+      return;
+    }
+    settleBurst();
+    const json = JSON.stringify(session.doc[kind] ?? []);
+    if (json === bookState.last[kind]) return;
+    const step = { before: { [kind]: bookState.last[kind] }, after: { [kind]: json } };
+    bookState.last[kind] = json;
+    bookState.burst = typing ? { kind, step, at: now, stale: false } : null;
+    bookSteps.push({ undo: () => putBook(step.before), redo: () => putBook(step.after), weight: json.length });
+  }
+
+  function stepBook(way) {
+    if (!bookState || bookSteps.replaying()) return;
+    closeMark();
+    closeText();
+    settleBurst();
+    bookState.burst = null;
+    bookSteps[way]();
+  }
+
+  /** Puts lists back as a step had them; what differs from now is stamped as edited now, so sync keeps it. */
+  function putBook(lists) {
+    const session = bookState?.session;
+    if (!session || session.closed) return;
+    const now = Date.now();
+    for (const [kind, json] of Object.entries(lists)) {
+      const was = new Map((session.doc[kind] ?? []).map((item) => [item.id, JSON.stringify(item)]));
+      const list = JSON.parse(json);
+      for (const item of list) if (was.get(item.id) !== JSON.stringify(item)) item.edited = now;
+      session.doc[kind] = list;
+      bookState.last[kind] = JSON.stringify(list);
+    }
+    if ('marks' in lists) saveMarks(session);
+    if ('texts' in lists) saveTexts(session);
+    if ('bookmarks' in lists) saveBookmarks(session);
+  }
+
   /** The marks changed: drawn again at once, kept a moment later (all of the document's marks in one go). */
   function saveMarks(session = reading) {
     if (!session || session.closed) return;
+    noteBookChange('marks', session);
     session.controller?.setMarks?.(liveMarks(session.doc), openMarkId);
     showMarkCount();
     if (!marksPanel.hidden) fillMarks();
@@ -1482,6 +1611,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
 
   function saveTexts(session = reading) {
     if (!session || session.closed) return;
+    noteBookChange('texts', session);
     session.controller?.setTexts?.(liveTexts(session.doc), openTextId);
     showMarkCount();
     if (!marksPanel.hidden) fillMarks();
@@ -2030,6 +2160,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   let bookmarksTimer = 0;
   function saveBookmarks(session = reading) {
     if (!session || session.closed) return;
+    noteBookChange('bookmarks', session);
     showMarkCount();
     if (!marksPanel.hidden) fillMarks();
     clearTimeout(bookmarksTimer);
@@ -2346,6 +2477,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     else if (reading?.controller && mod && e.code === 'KeyF') finder.open();
     else if (reading?.controller && e.key === 'F3' && !e.altKey) finder.step(e.shiftKey ? -1 : 1);
     else if (!reading && mod && e.code === 'KeyF') filter.focus();
+    else if (reading && stepKey(e)) stepBook(stepKey(e));
+    else if (!reading && !shelf.hidden && stepKey(e)) shelfSteps[stepKey(e)]();
     else handled = false;
     if (handled) {
       e.preventDefault();

@@ -6,6 +6,7 @@
 import { t } from './i18n.js';
 import { createAndroidSync } from './sync/android.js';
 import { stampSettings } from './sync/merge.js';
+import { versionsToKeep } from './versionRules.js';
 
 const token = document.querySelector('meta[name="atlas-token"]')?.content ?? '';
 const onServer = location.protocol.startsWith('http') && token !== '' && !token.startsWith('__');
@@ -81,6 +82,10 @@ function serverApi() {
     setTrashed: (id, trashed) => call('PATCH', `notes/${enc(id)}/meta`, { trashed }),
     /** Gone for good (from the trash): the file goes to notes\.trash, out of the app's sight. */
     trash: (id) => call('POST', `notes/${enc(id)}/trash`),
+    // a note's earlier versions (src/versionRules.js): [{ at, chars }], one's text, a new one
+    versions: (id) => call('GET', `notes/${enc(id)}/versions`),
+    readVersion: async (id, at) => (await call('GET', `notes/${enc(id)}/versions/${Number(at)}`)).content,
+    addVersion: (id, content) => call('POST', `notes/${enc(id)}/versions`, { content }),
     getState: () => call('GET', 'state'),
     setState: (patch) => call('PATCH', 'state', patch),
     ping: () => call('POST', 'ping'),
@@ -181,8 +186,9 @@ const finished = (t) =>
 // to a trash store instead of disappearing.
 function browserApi() {
   const opened = new Promise((resolve, reject) => {
-    // v2 added pictures, v3 the library; each store is created only if missing, so existing notes stay put
-    const r = indexedDB.open('atlas-notetaker', 3);
+    // v2 added pictures, v3 the library, v4 the notes' earlier versions; each store is created only if
+    // missing, so existing notes stay put
+    const r = indexedDB.open('atlas-notetaker', 4);
     r.onupgradeneeded = () => {
       const db = r.result;
       const has = (name) => db.objectStoreNames.contains(name);
@@ -192,6 +198,7 @@ function browserApi() {
       if (!has('assets')) db.createObjectStore('assets');
       if (!has('docs')) db.createObjectStore('docs', { keyPath: 'id' });
       if (!has('docFiles')) db.createObjectStore('docFiles');
+      if (!has('versions')) db.createObjectStore('versions', { keyPath: ['id', 'at'] }).createIndex('note', 'id');
     };
     r.onsuccess = () => {
       // a newer ATLAS opening the same storage must not wait for this window
@@ -310,13 +317,40 @@ function browserApi() {
       await request(notes.put(note));
     },
     async trash(id) {
-      const t = (await opened).transaction(['notes', 'trash'], 'readwrite');
+      const t = (await opened).transaction(['notes', 'trash', 'versions'], 'readwrite');
       const note = await request(t.objectStore('notes').get(id));
       if (note) {
         t.objectStore('trash').add({ ...note, deletedAt: Date.now() });
         t.objectStore('notes').delete(id);
       }
+      // deleted for good: its earlier versions go with it
+      const versions = t.objectStore('versions');
+      for (const key of await request(versions.index('note').getAllKeys(id))) versions.delete(key);
       await finished(t);
+    },
+    async versions(id) {
+      const all = await request((await store('versions')).index('note').getAll(id));
+      return all.map(({ at, chars }) => ({ at, chars })).sort((a, b) => b.at - a.at);
+    },
+    async readVersion(id, at) {
+      const version = await request((await store('versions')).get([id, Number(at)]));
+      if (!version) throw Object.assign(new Error(t('versions.missing')), { status: 404 });
+      return version.content;
+    },
+    /** Keeps the note's text as a version; those the rules no longer keep are removed. */
+    async addVersion(id, content) {
+      const at = Date.now();
+      const versions = await store('versions', 'readwrite');
+      // the same text as the newest version: that one stands for it
+      const before = await request(versions.index('note').getAllKeys(id));
+      const newestKey = before.sort((a, b) => b[1] - a[1])[0];
+      const newest = newestKey ? await request(versions.get(newestKey)) : null;
+      if (newest && newest.content === content) return { at: newest.at, chars: newest.chars };
+      await request(versions.put({ id, at, chars: content.length, content: String(content) }));
+      const keys = await request(versions.index('note').getAllKeys(id));
+      const keep = new Set(versionsToKeep(keys.map((key) => key[1]), at));
+      for (const key of keys) if (!keep.has(key[1])) versions.delete(key);
+      return { at, chars: content.length };
     },
     // text put aside instead of restored goes to the trash store too, so it is never simply gone
     async keepDraft({ title, content, at, label }) {
@@ -394,6 +428,12 @@ function localApi() {
       note(id).trashed = Number.isFinite(trashed) && trashed > 0 ? trashed : 0;
       persist();
     },
+    // localStorage is a few MB at most: no earlier versions here
+    versions: async () => [],
+    readVersion: async () => {
+      throw Object.assign(new Error(t('versions.missing')), { status: 404 });
+    },
+    addVersion: async () => null,
     async trash(id) {
       delete db.notes[id];
       persist();
