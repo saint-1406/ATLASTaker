@@ -38,7 +38,8 @@ export function closeMenu(restoreFocus = true) {
 /**
  * items: { icon, text, kbd, run, disabled } | { header } | { note } | '-'
  */
-export function showMenu(x, y, items, { onClose } = {}) {
+/** above: the menu opens up and to the left of (x, y) — for a button at the foot of the screen. */
+export function showMenu(x, y, items, { onClose, above = false } = {}) {
   closeMenu(false);
   const node = h('div', { class: 'ctx', role: 'menu' });
   const buttons = [];
@@ -71,8 +72,10 @@ export function showMenu(x, y, items, { onClose } = {}) {
   }
   layer().append(node);
   const rect = node.getBoundingClientRect();
-  node.style.left = `${Math.max(8, Math.min(x, innerWidth - rect.width - 8))}px`;
-  node.style.top = `${Math.max(8, Math.min(y, innerHeight - rect.height - 8))}px`;
+  const left = above ? x - rect.width : x;
+  const top = above ? y - rect.height : y;
+  node.style.left = `${Math.max(8, Math.min(left, innerWidth - rect.width - 8))}px`;
+  node.style.top = `${Math.max(8, Math.min(top, innerHeight - rect.height - 8))}px`;
 
   const onPointer = (e) => {
     if (!node.contains(e.target)) closeMenu();
@@ -323,7 +326,7 @@ export function commandPalette({ notes, commands, onPick, onCreate, initial = ''
           li.append(
             h('span', { class: 'qs-ico' }, row.icon ?? '›'),
             h('span', { class: 'qs-main' }, h('span', { class: 'qs-title' }, ...highlight(row.title, q))),
-            row.kbd ? h('kbd', {}, row.kbd) : null,
+            row.kbd ? h('kbd', {}, row.kbd) : '',
           );
         } else {
           const snip = q && !row.title.toLowerCase().includes(q) ? snippet(row.content, q) : null;

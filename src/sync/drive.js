@@ -106,5 +106,15 @@ export function createDrive({ getToken, fetchImpl = (...args) => fetch(...args) 
     }
   }
 
-  return { list, bytes, text, put, remove };
+  /** When a file was last written ('' when it is gone): tells whether another device wrote it meanwhile. */
+  async function modified(id) {
+    try {
+      return (await (await request(`${API}/files/${id}?fields=modifiedTime`)).json()).modifiedTime ?? '';
+    } catch (err) {
+      if (err.status === 404) return '';
+      throw err;
+    }
+  }
+
+  return { list, bytes, text, put, remove, modified };
 }

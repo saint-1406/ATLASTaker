@@ -5,6 +5,7 @@
 
 import { t } from './i18n.js';
 import { createAndroidSync } from './sync/android.js';
+import { stampSettings } from './sync/merge.js';
 
 const token = document.querySelector('meta[name="atlas-token"]')?.content ?? '';
 const onServer = location.protocol.startsWith('http') && token !== '' && !token.startsWith('__');
@@ -13,7 +14,7 @@ const onServer = location.protocol.startsWith('http') && token !== '' && !token.
 export const android = typeof window.AtlasAndroid === 'object' && window.AtlasAndroid ? window.AtlasAndroid : null;
 
 /** The fields of a library card the page may change. */
-const DOC_FIELDS = ['title', 'author', 'cover', 'position', 'progress', 'opened', 'notesId', 'scale', 'marks', 'bookmarks', 'texts', 'edits', 'shelf', 'finished'];
+const DOC_FIELDS = ['title', 'author', 'cover', 'position', 'progress', 'opened', 'notesId', 'scale', 'marks', 'bookmarks', 'texts', 'edits', 'shelf', 'finished', 'trashed'];
 const newDoc = (blob, { name, format }) => ({
   id: `d-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`,
   name: String(name ?? '').slice(0, 200) || 'document',
@@ -76,10 +77,15 @@ function serverApi() {
     setMeta: (id, meta) => call('PATCH', `notes/${enc(id)}/meta`, meta),
     /** Moves a note to a folder ('' for none); a separate call so that sync notices it. */
     setFolder: (id, folder) => call('PATCH', `notes/${enc(id)}/meta`, { folder }),
+    /** Into the trash (when) or back out of it (0); the note itself stays where it is. */
+    setTrashed: (id, trashed) => call('PATCH', `notes/${enc(id)}/meta`, { trashed }),
+    /** Gone for good (from the trash): the file goes to notes\.trash, out of the app's sight. */
     trash: (id) => call('POST', `notes/${enc(id)}/trash`),
     getState: () => call('GET', 'state'),
     setState: (patch) => call('PATCH', 'state', patch),
     ping: () => call('POST', 'ping'),
+    /** The newest release on GitHub, as the local server sees it (update.js). */
+    update: () => call('GET', 'update'),
     // Google Drive sync, run by the server (server/sync.js)
     sync: {
       status: () => call('GET', 'sync'),
@@ -296,6 +302,13 @@ function browserApi() {
       note.folder = String(folder ?? '');
       await request(notes.put(note));
     },
+    async setTrashed(id, trashed) {
+      const notes = await store('notes', 'readwrite');
+      const note = await request(notes.get(id));
+      if (!note) return;
+      note.trashed = Number.isFinite(trashed) && trashed > 0 ? trashed : 0;
+      await request(notes.put(note));
+    },
     async trash(id) {
       const t = (await opened).transaction(['notes', 'trash'], 'readwrite');
       const note = await request(t.objectStore('notes').get(id));
@@ -312,9 +325,12 @@ function browserApi() {
     async getState() {
       return (await request((await store('state')).get('state'))) ?? {};
     },
-    async setState(patch) {
+    // each setting the person changes keeps when (settingsAt), for sync; `$quiet` marks a default or a move
+    async setState({ $quiet, ...patch }) {
       const states = await store('state', 'readwrite');
-      const state = { ...((await request(states.get('state'))) ?? {}), ...patch };
+      const old = (await request(states.get('state'))) ?? {};
+      const settingsAt = stampSettings(old, patch, { quiet: $quiet === true });
+      const state = { ...old, ...patch, ...(Object.keys(settingsAt).length ? { settingsAt } : {}) };
       await request(states.put(state, 'state'));
       return state;
     },
@@ -374,6 +390,10 @@ function localApi() {
       note(id).folder = String(folder ?? '');
       persist();
     },
+    async setTrashed(id, trashed) {
+      note(id).trashed = Number.isFinite(trashed) && trashed > 0 ? trashed : 0;
+      persist();
+    },
     async trash(id) {
       delete db.notes[id];
       persist();
@@ -385,7 +405,7 @@ function localApi() {
     async getState() {
       return { ...db.state };
     },
-    async setState(patch) {
+    async setState({ $quiet, ...patch }) {
       Object.assign(db.state, patch);
       persist();
       return { ...db.state };

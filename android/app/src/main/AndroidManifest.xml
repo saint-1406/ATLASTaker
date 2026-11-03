@@ -8,6 +8,10 @@
          The page itself still reaches only the app's own files (its Content-Security-Policy). -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- updates from inside the app: a new version, downloaded and checked here, goes to Android's installer
+         (Updater.java); Android asks the person once to allow it -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- Android 11+ shows an app the speech recognition service only when it says it looks for one -->
     <queries>
         <intent>
@@ -91,5 +95,16 @@
                 <data android:mimeType="application/octet-stream" />
             </intent-filter>
         </activity>
+
+        <!-- the installer reads the downloaded update from the app's cache through this -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_paths" />
+        </provider>
     </application>
 </manifest>

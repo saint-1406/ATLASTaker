@@ -153,6 +153,17 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
       frame.append(text);
       entry.layer = new TextLayer({ textContentSource: page.streamTextContent(), container: text, viewport: page.getViewport({ scale: cssScale }) });
       await entry.layer.render();
+      // as in pdf.js' own viewer: while a selection is being made, an empty block spreads over the page
+      // below the words, so dragging between lines widens the selection instead of jumping about
+      const end = document.createElement('div');
+      end.className = 'endOfContent';
+      text.append(end);
+      text.addEventListener('pointerdown', () => {
+        text.classList.add('selecting');
+        const done = () => text.classList.remove('selecting');
+        window.addEventListener('pointerup', done, { once: true });
+        window.addEventListener('pointercancel', done, { once: true });
+      });
     } catch (err) {
       if (err?.name !== 'RenderingCancelledException' && !entry.cancelled) console.warn(`pdf page ${n}:`, err);
     }

@@ -99,6 +99,26 @@ jobs:
       - run: npm run build
       - run: node scripts/android-assets.mjs
 
+      # Phones take an APK as an update only when its versionCode (from package.json) is higher than the
+      # one they have: a tag must name package.json's version, and that must be newer than the last release.
+      - name: Check the version goes up
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "${{ github.ref_name }}" ]; then
+            echo "::error::the tag is ${{ github.ref_name }} but package.json says $version"
+            exit 1
+          fi
+          previous=$(gh release view --repo "${{ github.repository }}" --json tagName -q .tagName 2>/dev/null || echo v0.0.0)
+          node -e '
+            const [a, b] = process.argv.slice(1).map((v) => v.replace(/^v/, "").split(".").map(Number));
+            for (let i = 0; i < 3; i++) if (a[i] !== b[i]) process.exit(a[i] > b[i] ? 0 : 1);
+            process.exit(1);
+          ' "$version" "$previous" || { echo "::error::$version is not newer than the published $previous: phones would refuse it as an update"; exit 1; }
+          echo "$previous → $version"
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -135,6 +155,17 @@ jobs:
           cp android/app/build/outputs/apk/release/app-release.apk "out/ATLASTaker-$version-android.apk"
           ls -l out
 
+      # An APK signed with any other key would be refused over the installed one (and tempt people to
+      # remove the app, notes and all): a release carries the release key's certificate or does not go out.
+      - name: Check the signing key
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
+        run: |
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          certs=$("$apksigner" verify --print-certs out/*.apk)
+          echo "$certs"
+          echo "$certs" | grep -qi "SHA-256 digest: 5a267d11ec0c81a8fdcff3768d60a6e70a2ba4bf9f1b3cbd1b5011b765c1c511" \
+            || { echo "::error::the APK is not signed with the release key: phones would refuse it as an update"; exit 1; }
+
       - uses: actions/upload-artifact@v4
         with:
           name: android
@@ -149,6 +180,14 @@ jobs:
         with:
           path: out
           merge-multiple: true
+
+      # what each file must hash to: a download can be checked (the app checks the APK itself)
+      - name: Checksums
+        run: |
+          cd out
+          rm -f SHA256SUMS.txt
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - name: Publish the release
         if: startsWith(github.ref, 'refs/tags/v')

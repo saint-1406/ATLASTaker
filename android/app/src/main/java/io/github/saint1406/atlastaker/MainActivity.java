@@ -51,6 +51,7 @@ import com.google.mlkit.nl.translate.TranslateRemoteModel;
 import com.google.mlkit.nl.translate.Translation;
 import com.google.mlkit.nl.translate.Translator;
 import com.google.mlkit.nl.translate.TranslatorOptions;
+import com.google.android.gms.auth.GoogleAuthUtil;
 import com.google.android.gms.auth.api.identity.AuthorizationRequest;
 import com.google.android.gms.auth.api.identity.AuthorizationResult;
 import com.google.android.gms.auth.api.identity.Identity;
@@ -62,9 +63,14 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Arrays;
@@ -116,6 +122,8 @@ public class MainActivity extends ComponentActivity {
     private boolean reading;
     private boolean barsShown = true;
     private String sysInsets = "";
+    private String keyboardInset = "";
+    private Updater updater;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -234,6 +242,10 @@ public class MainActivity extends ComponentActivity {
             }
         });
 
+        // updating from inside the app: answers come to the page as window.__atlas.updateEvent(…)
+        updater = new Updater(this, event -> runOnUiThread(() -> {
+            if (web != null) web.evaluateJavascript("window.__atlas && window.__atlas.updateEvent && window.__atlas.updateEvent(" + event + ")", null);
+        }));
         web.addJavascriptInterface(new Bridge(), "AtlasAndroid");
         setContentView(web);
         ViewCompat.setOnApplyWindowInsetsListener(web, (view, insets) -> {
@@ -298,10 +310,18 @@ public class MainActivity extends ComponentActivity {
         int keyboard = reading ? insets.getInsets(WindowInsetsCompat.Type.ime()).bottom : 0;
         float px = getResources().getDisplayMetrics().density;
         String css = Math.round(bars.top / px) + "px " + Math.round(bars.right / px) + "px "
-                + Math.round(Math.max(bars.bottom, keyboard) / px) + "px " + Math.round(bars.left / px) + "px";
-        if (css.equals(sysInsets)) return;
-        sysInsets = css;
-        web.evaluateJavascript("document.documentElement.style.setProperty('--sys-insets','" + css + "')", null);
+                + Math.round(bars.bottom / px) + "px " + Math.round(bars.left / px) + "px";
+        if (!css.equals(sysInsets)) {
+            sysInsets = css;
+            web.evaluateJavascript("document.documentElement.style.setProperty('--sys-insets','" + css + "')", null);
+        }
+        // The keyboard is told apart: edge to edge, the window no longer shrinks for it, so what is typed
+        // into (a comment on a mark) rises by --kb above it; the book's pages stay as they are.
+        String kb = Math.round(keyboard / px) + "px";
+        if (!kb.equals(keyboardInset)) {
+            keyboardInset = kb;
+            web.evaluateJavascript("document.documentElement.style.setProperty('--kb','" + kb + "')", null);
+        }
     }
 
     @Override
@@ -350,6 +370,15 @@ public class MainActivity extends ComponentActivity {
                     }
                 })
                 .addOnFailureListener(e -> sendToken(id, null, e instanceof ApiException ? "Google " + ((ApiException) e).getStatusCode() : "failed"));
+    }
+
+    /** Play services keeps the tokens it handed out: one Drive refused must go, or the same one comes back. */
+    private void forgetToken(String token) {
+        try {
+            GoogleAuthUtil.clearToken(this, token);
+        } catch (Exception ignored) {
+            // nothing to forget, or play services is away: the next request asks Google itself
+        }
     }
 
     private void sendToken(String id, String token, String error) {
@@ -727,6 +756,56 @@ public class MainActivity extends ComponentActivity {
         @JavascriptInterface
         public void syncAuthorize(String id, boolean interactive) {
             runOnUiThread(() -> authorize(id, interactive));
+        }
+
+        /** The newest release on GitHub; the answer comes as window.__atlas.updateEvent({ type: 'check', … }). */
+        @JavascriptInterface
+        public void checkUpdate() {
+            updater.check();
+        }
+
+        /** Downloads the new version, checks it and hands it to Android's installer (Updater). */
+        @JavascriptInterface
+        public void installUpdate(boolean askPermission) {
+            updater.install(askPermission);
+        }
+
+        @JavascriptInterface
+        public String appVersion() {
+            return updater.currentVersion();
+        }
+
+        /** Drive refused this token: the phone forgets it, so the next authorize gets a fresh one, not the same. */
+        @JavascriptInterface
+        public void syncClearToken(String token) {
+            if (token == null || token.isEmpty()) return;
+            io.execute(() -> forgetToken(token));
+        }
+
+        /** Signing out: Google forgets the app's access (the next sign-in asks for an account again) and the phone its token. */
+        @JavascriptInterface
+        public void syncSignOut(String token) {
+            if (token == null || token.isEmpty()) return;
+            io.execute(() -> {
+                HttpURLConnection connection = null;
+                try {
+                    connection = (HttpURLConnection) new URL("https://oauth2.googleapis.com/revoke").openConnection();
+                    connection.setRequestMethod("POST");
+                    connection.setDoOutput(true);
+                    connection.setConnectTimeout(15_000);
+                    connection.setReadTimeout(15_000);
+                    connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                    try (OutputStream out = connection.getOutputStream()) {
+                        out.write(("token=" + URLEncoder.encode(token, "UTF-8")).getBytes(StandardCharsets.UTF_8));
+                    }
+                    connection.getResponseCode();
+                } catch (IOException ignored) {
+                    // offline: the token runs out within the hour anyway, and it is forgotten here below
+                } finally {
+                    if (connection != null) connection.disconnect();
+                }
+                forgetToken(token);
+            });
         }
 
         @JavascriptInterface

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cardData, cardSigs, fingerprint, mergeCard, mergeItems, planDocs, planNotes } from '../src/sync/merge.js';
+import { cardData, cardSigs, fingerprint, mergeCard, mergeDays, mergeItems, mergeSettings, planDocs, planNotes, settingsOf } from '../src/sync/merge.js';
 import { emptyBase, hashBytes, syncOnce } from '../src/sync/engine.js';
 
 // ---------- the rules ----------
@@ -94,28 +94,44 @@ function fakeDrive() {
     async remove(id) {
       files.delete(id);
     },
+    async modified(id) {
+      return files.get(id)?.modifiedTime ?? '';
+    },
     named: (name) => [...files.values()].filter((f) => f.name === name),
   };
 }
 
 /** refuse(id): documents this device's library will not take (as the Windows one refused an empty file). */
-function fakeDevice({ refuse = () => false } = {}) {
+function fakeDevice({ refuse = () => false, badAsset = '' } = {}) {
   const notes = new Map();
   const docs = new Map();
   const docFiles = new Map();
   const assets = new Map();
   const trash = [];
+  const state = {}; // settings, with settingsAt, as the devices keep them
   let n = 0;
   let base = emptyBase();
   const local = {
     notes: async () => [...notes.values()].map((x) => ({ ...x })),
     async putNote(note) {
-      // as on the devices: the text and times come in, the folder stays as it is
-      notes.set(note.id, { folder: notes.get(note.id)?.folder ?? "", ...note });
+      // as on the devices: the text and times come in, the folder and the trash stay as they are
+      const old = notes.get(note.id);
+      notes.set(note.id, { folder: old?.folder ?? '', trashed: old?.trashed ?? 0, ...note });
     },
     async setNoteFolder(id, folder) {
       const note = notes.get(id);
       if (note) note.folder = folder;
+    },
+    async setNoteTrashed(id, trashed) {
+      const note = notes.get(id);
+      if (note) note.trashed = trashed || 0;
+    },
+    settings: async () => settingsOf(state),
+    async putSettings(entries) {
+      for (const [key, { value, at }] of Object.entries(entries)) {
+        state[key] = value;
+        (state.settingsAt ??= {})[key] = at;
+      }
     },
     async createNote(content) {
       const note = { id: `n-copy${++n}`, content, created: 100 + n, updated: 100 + n };
@@ -139,7 +155,10 @@ function fakeDevice({ refuse = () => false } = {}) {
       docFiles.delete(id);
     },
     assets: async () => [...assets.keys()],
-    assetBytes: async (name) => assets.get(name),
+    async assetBytes(name) {
+      if (name === badAsset) throw new Error('unreadable');
+      return assets.get(name);
+    },
     async putAsset(name, bytes) {
       assets.set(name, bytes);
     },
@@ -150,6 +169,7 @@ function fakeDevice({ refuse = () => false } = {}) {
     docFiles,
     assets,
     trash,
+    state,
     note: (id, content, updated = 1) => notes.set(id, { id, content, created: 1, updated }),
     async sync(drive, opts = {}) {
       const result = await syncOnce({ local, drive, base, ...opts });
@@ -383,4 +403,161 @@ test('an index written by an app without folders leaves this device’s folders 
   await pc.sync(drive);
   assert.equal(pc.notes.get('n-aaaaaa').folder, 'Work');
   assert.deepEqual(JSON.parse(drive.named('index.json')[0].data).folders, { 'n-aaaaaa': 'Work' });
+});
+
+// ---------- the trash ----------
+
+test('the trash travels: in on one device, out on another, gone for good only from the trash', async () => {
+  const drive = fakeDrive();
+  const pc = fakeDevice();
+  const phone = fakeDevice();
+  pc.note('n-aaaaaa', '# Plan');
+  await pc.sync(drive);
+  await phone.sync(drive);
+
+  pc.notes.get('n-aaaaaa').trashed = 50; // deleted on the PC: into its trash
+  await pc.sync(drive);
+  const r = await phone.sync(drive);
+  assert.equal(r.trashChanged, true);
+  assert.equal(phone.notes.get('n-aaaaaa').trashed, 50, 'in the phone’s trash too, still a whole note');
+  assert.equal(phone.notes.get('n-aaaaaa').content, '# Plan');
+
+  phone.notes.get('n-aaaaaa').trashed = 0; // restored on the phone
+  await phone.sync(drive);
+  await pc.sync(drive);
+  assert.equal(pc.notes.get('n-aaaaaa').trashed, 0);
+
+  pc.notes.get('n-aaaaaa').trashed = 60;
+  await pc.sync(drive);
+  await phone.sync(drive);
+  pc.notes.delete('n-aaaaaa'); // deleted for good from the PC's trash
+  await pc.sync(drive);
+  await phone.sync(drive);
+  assert.equal(phone.notes.has('n-aaaaaa'), false, 'gone on the phone as well');
+  assert.equal(phone.trash.length, 1, 'kept out of sight, as every removal is');
+  assert.deepEqual(JSON.parse(drive.named('index.json')[0].data).trashed, {});
+});
+
+test('a note edited on one device while it sits in the other’s trash stays in the trash, with the new text', async () => {
+  const drive = fakeDrive();
+  const pc = fakeDevice();
+  const phone = fakeDevice();
+  pc.note('n-aaaaaa', '# Plan');
+  await pc.sync(drive);
+  await phone.sync(drive);
+  pc.notes.get('n-aaaaaa').trashed = 70;
+  phone.notes.get('n-aaaaaa').content = '# Plan\nmore';
+  await pc.sync(drive);
+  await phone.sync(drive);
+  await pc.sync(drive);
+  for (const device of [pc, phone]) {
+    assert.equal(device.notes.get('n-aaaaaa').trashed, 70);
+    assert.equal(device.notes.get('n-aaaaaa').content, '# Plan\nmore');
+  }
+});
+
+test('books, marks and bookmarks in the trash travel as part of the card', async () => {
+  const drive = fakeDrive();
+  const pc = fakeDevice();
+  const phone = fakeDevice();
+  const mark = { id: 'm-aaaa01', color: 'yellow', note: '', text: 'x', created: 1, anchor: { a: 1, ao: 0, b: 1, bo: 1 } };
+  pc.docs.set('d-book01', book('d-book01', { marks: [mark], bookmarks: [{ id: 'b-aaaa01', position: { block: 1 }, progress: 0.1, label: '', created: 1 }] }));
+  pc.docFiles.set('d-book01', new Uint8Array([1]));
+  await pc.sync(drive);
+  await phone.sync(drive);
+
+  const card = pc.docs.get('d-book01');
+  card.marks = [{ ...mark, trashed: 80, edited: 80 }];
+  card.bookmarks = [{ ...card.bookmarks[0], trashed: 81, edited: 81 }];
+  await pc.sync(drive);
+  await phone.sync(drive);
+  assert.equal(phone.docs.get('d-book01').marks[0].trashed, 80);
+  assert.equal(phone.docs.get('d-book01').bookmarks[0].trashed, 81);
+
+  phone.docs.get('d-book01').trashed = 90; // the whole book into the trash, on the phone
+  await phone.sync(drive);
+  await pc.sync(drive);
+  assert.equal(pc.docs.get('d-book01').trashed, 90);
+  assert.ok(pc.docFiles.has('d-book01'), 'its file stays, so it comes back whole');
+});
+
+// ---------- settings ----------
+
+test('settings: the newer wins, a default gives way, reading days add up', () => {
+  const pc = { values: { skin: 'minimal', theme: 'dark', readDays: { '2026-11-01': 10 } }, at: { skin: 100, theme: 100, readDays: 100 } };
+  const fresh = { values: { skin: 'cozy', theme: 'cream', readDays: { '2026-11-02': 5 } }, at: { readDays: 50 } };
+  const m = mergeSettings(fresh, pc);
+  assert.deepEqual(m.toLocal.skin, { value: 'minimal', at: 100 }, 'a fresh install takes what was chosen');
+  assert.deepEqual(m.values.readDays, { '2026-11-01': 10, '2026-11-02': 5 });
+  assert.equal(m.upload, true, 'the phone’s day goes up');
+  const later = mergeSettings({ values: { theme: 'sepia' }, at: { theme: 200 } }, pc);
+  assert.equal(later.values.theme, 'sepia');
+  assert.equal(later.values.skin, 'minimal');
+  assert.deepEqual(mergeDays({ a: 5, b: 1 }, { a: 3, c: 2 }), { a: 5, b: 1, c: 2 });
+});
+
+test('settings travel between devices, and only when something changed', async () => {
+  const drive = fakeDrive();
+  const pc = fakeDevice();
+  const phone = fakeDevice();
+  Object.assign(pc.state, { skin: 'minimal', theme: 'dark', fontScale: 1.2, lastOpen: 'n-aaaaaa', settingsAt: { skin: 100, theme: 100, fontScale: 100 } });
+  Object.assign(phone.state, { skin: 'cozy', theme: 'cream' }); // a fresh install's defaults
+  await pc.sync(drive);
+  const r = await phone.sync(drive);
+  assert.deepEqual(r.settingsChanged.sort(), ['fontScale', 'skin', 'theme']);
+  assert.equal(phone.state.theme, 'dark');
+  assert.equal(phone.state.fontScale, 1.2);
+  assert.equal('lastOpen' in phone.state, false, 'the open note stays on its device');
+
+  Object.assign(phone.state, { theme: 'night', settingsAt: { ...phone.state.settingsAt, theme: 300 } });
+  await phone.sync(drive);
+  await pc.sync(drive);
+  assert.equal(pc.state.theme, 'night');
+
+  const writes = drive.named('settings.json')[0].modifiedTime;
+  await pc.sync(drive);
+  await phone.sync(drive);
+  assert.equal(drive.named('settings.json')[0].modifiedTime, writes, 'nothing new: settings.json is left alone');
+});
+
+// ---------- rounds that meet trouble ----------
+
+test('one picture that will not go does not stop the round', async () => {
+  const drive = fakeDrive();
+  const pc = fakeDevice({ badAsset: 'a-broken.png' });
+  pc.assets.set('a-broken.png', new Uint8Array([1]));
+  pc.assets.set('a-good01.png', new Uint8Array([2]));
+  pc.note('n-aaaaaa', '# Plan');
+  const r = await pc.sync(drive);
+  assert.equal(r.skippedAssets, 1);
+  assert.equal(drive.named('asset-a-good01.png').length, 1);
+  assert.ok(JSON.parse(drive.named('index.json')[0].data).notes['n-aaaaaa'], 'the notes still went through');
+});
+
+test('another device writing the index mid-round: the round starts over and both keep their changes', async () => {
+  const drive = fakeDrive();
+  const pc = fakeDevice();
+  const phone = fakeDevice();
+  pc.note('n-aaaaaa', '# From the PC');
+  await pc.sync(drive);
+  await phone.sync(drive);
+  pc.note('n-cccccc', '# Written on the PC meanwhile');
+  phone.note('n-bbbbbb', '# From the phone');
+  // just before the phone writes its index, the PC finishes a round of its own
+  const modified = drive.modified;
+  let once = true;
+  drive.modified = async (id) => {
+    if (once) {
+      once = false;
+      await pc.sync(drive);
+    }
+    return modified(id);
+  };
+  await phone.sync(drive);
+  drive.modified = modified;
+  await pc.sync(drive);
+  const index = JSON.parse(drive.named('index.json')[0].data);
+  assert.ok(index.notes['n-bbbbbb'] && index.notes['n-cccccc'], 'both new notes are in the index');
+  assert.ok(pc.notes.has('n-bbbbbb'));
+  assert.ok(phone.notes.has('n-cccccc'));
 });

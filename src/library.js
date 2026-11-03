@@ -8,7 +8,7 @@ import { count, STRINGS, t } from './i18n.js';
 import { addShelf, groupShelves, isShelf, renameShelf, shelfList } from './shelves.js';
 import { shownTheme } from './skins.js';
 import { drawQuickPanel, paintTheme, setDim } from './readLook.js';
-import { MARK_COLORS, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, MAX_TEXT_LENGTH, MAX_TEXTS, newBookmarkId, newEditId, newMarkId, newTextId, remapPdf, remapTexts, sortMarks, sortTexts, TEXT_COLORS, TEXT_SIZES } from './marks.js';
+import { live, MARK_COLORS, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, MAX_TEXT_LENGTH, MAX_TEXTS, newBookmarkId, newEditId, newMarkId, newTextId, remapPdf, remapTexts, sortMarks, sortTexts, TEXT_COLORS, TEXT_SIZES } from './marks.js';
 import { openPageEditor } from './pageEditor.js';
 import { createFind } from './readerFind.js';
 
@@ -49,9 +49,10 @@ function loadReader() {
  * onOpenNote(id) shows a note; onLink(url) opens a web link; onClose() runs when the shelf goes away.
  * translator: translateCard.js, for the selection bar's "Translate".
  */
-export function createLibrary({ api, phone = false, getReading, onReading, onCustomize, onReaderColors, onSystemBars, onQuote, onOpenNote, onLink, onClose, translator = null }) {
+export function createLibrary({ api, phone = false, getReading, onReading, onCustomize, onReaderColors, onSystemBars, onQuote, onOpenNote, onLink, onClose, onOpenTrash = null, onTrash = null, translator = null }) {
   const lib = api.library;
-  let docs = [];
+  let docs = []; // the documents on the shelf
+  let trashedDocs = []; // those in the trash: whole (file, place, marks), out of every list until restored
   let reading = null; // { doc, controller, closed }
   let saveTimer = 0;
   let pendingSave = null;
@@ -120,6 +121,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     commentText,
   );
   const translateText = h('span');
+  // a bookmark at the selected passage, its words kept with it (addBookmark)
+  const bookmarkSelButton = h('button', { type: 'button', class: 'rd-sel-btn rd-sel-icon', onclick: () => addBookmark() }, h('span', { 'aria-hidden': 'true' }, '🔖'));
   const translateButton = h('button', { type: 'button', class: 'rd-sel-btn', onclick: () => translateSelection() }, h('span', { 'aria-hidden': 'true' }, '🌐'), translateText);
   const selBar = h(
     'div',
@@ -128,6 +131,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     commentButton,
     translator ? translateButton : null,
     quoteButton,
+    bookmarkSelButton,
   );
   // the card of one mark: its passage, its comment, its colour
   const markPanel = h('aside', { class: 'rd-markpanel', hidden: true });
@@ -200,7 +204,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       h('button', { type: 'button', role: 'menuitem', class: 'rd-acts-row', onclick: act(run), ...extra }, h('span', { class: 'rd-acts-text' }, text), h('span', { class: 'rd-acts-ico', 'aria-hidden': 'true' }, glyph));
     const round = (label, glyph, run, extra = {}) =>
       h('button', { type: 'button', role: 'menuitem', class: 'rd-acts-round', title: label, 'aria-label': label, onclick: act(run), ...extra }, glyph);
-    const marks = marksOf(doc).length + bookmarksOf(doc).length + textsOf(doc).length;
+    const marks = liveMarks(doc).length + liveBookmarks(doc).length + liveTexts(doc).length;
     sheet.replaceChildren(
       h('div', { class: 'rd-acts-title' }, h('span', { class: 'rd-acts-name' }, nameOf(doc)), doc.author ? h('span', { class: 'rd-acts-sub' }, doc.author) : null),
       row(`${t('reader.toc')} · ${t('library.progress', lastPct)}`, '☰', () => toggleToc(true)),
@@ -266,7 +270,10 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   }
   let centreTap = null;
   scroll.addEventListener('pointerdown', (e) => {
-    centreTap = e.button === 0 ? { x: e.clientX, y: e.clientY, at: performance.now() } : null;
+    // a tap that only puts a selection away is not a tap on the page: the chrome stays as it is
+    const sel = document.getSelection();
+    const hadSelection = Boolean(sel && !sel.isCollapsed && scroll.contains(sel.anchorNode));
+    centreTap = e.button === 0 && !hadSelection ? { x: e.clientX, y: e.clientY, at: performance.now() } : null;
   });
   scroll.addEventListener('pointerup', (e) => {
     const start = centreTap;
@@ -338,6 +345,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     quoteButton.title = t('reader.quoteTitle');
     commentText.textContent = t('reader.marks.comment');
     commentButton.title = t('reader.marks.commentTitle');
+    bookmarkSelButton.title = t('reader.bookmarks.addTitle');
+    bookmarkSelButton.setAttribute('aria-label', t('reader.bookmarks.addTitle'));
     translateText.textContent = t('translate.button');
     translateButton.title = t('commands.translate');
     selBar.setAttribute('aria-label', t('reader.marks.bar'));
@@ -472,8 +481,9 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       }
       else {
         // a first look at the library: a few genres and one for papers, to sort into or rename
+        // (quiet: not the person's choice, so sections made on another device win over these)
         shelves = [...t('library.defaultShelves')];
-        saveShelves();
+        saveShelves({ quiet: true });
       }
     } catch {
       shelves = [];
@@ -498,12 +508,12 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
         if (activeShelf === name) activeShelf = wanted[i];
         changed = true;
       }
-      if (changed) saveShelves();
+      if (changed) saveShelves({ quiet: true });
     }
   }
 
-  function saveShelves() {
-    api.setState?.({ shelves })?.catch?.((err) => toast(err.message));
+  function saveShelves({ quiet = false } = {}) {
+    api.setState?.({ shelves, ...(quiet ? { $quiet: true } : {}) })?.catch?.((err) => toast(err.message));
   }
 
   function drawChips(list) {
@@ -698,7 +708,9 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
 
   async function refresh() {
     try {
-      docs = await lib.list();
+      const all = await lib.list();
+      docs = all.filter((d) => !d.trashed);
+      trashedDocs = all.filter((d) => d.trashed);
     } catch (err) {
       toast(err.message);
     }
@@ -784,26 +796,106 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     return out;
   }
 
+  /** Into the trash: off the shelf, whole (the file, the place, the marks), with "Undo" at hand. */
   async function remove(id) {
     const doc = docs.find((d) => d.id === id);
     if (!doc) return;
-    const ok = await confirmDialog({
-      kicker: t('library.title'),
-      title: t('library.removeTitle', nameOf(doc)),
-      text: t(api.kind === 'server' ? 'library.removeDisk' : 'library.removeHere'),
-      ok: t('library.removeOk'),
-      danger: true,
-    });
-    if (!ok) return;
+    if (reading?.doc.id === id) closeReader();
     try {
-      await lib.remove(id);
+      Object.assign(doc, await lib.update(id, { trashed: Date.now() }));
     } catch (err) {
       toast(err.message);
       return;
     }
     docs = docs.filter((d) => d.id !== id);
-    render();
-    toast(t('library.removed', nameOf(doc)));
+    trashedDocs.push(doc);
+    if (!shelf.hidden) render();
+    onTrashChanged();
+    toast(t('trash.docMoved', nameOf(doc)), { timeout: 7000, action: { text: t('trash.undo'), run: () => restoreDoc(id) } });
+  }
+
+  async function restoreDoc(id) {
+    const doc = trashedDocs.find((d) => d.id === id);
+    if (!doc) return false;
+    try {
+      Object.assign(doc, await lib.update(id, { trashed: 0 }));
+    } catch (err) {
+      toast(err.message);
+      return false;
+    }
+    trashedDocs = trashedDocs.filter((d) => d.id !== id);
+    docs.push(doc);
+    if (!shelf.hidden) render();
+    onTrashChanged();
+    return true;
+  }
+
+  /** Deleted for good, from the trash only (on Windows the file still waits out of sight in library\.trash). */
+  async function purgeDoc(id) {
+    try {
+      await lib.remove(id);
+    } catch (err) {
+      toast(err.message);
+      return false;
+    }
+    trashedDocs = trashedDocs.filter((d) => d.id !== id);
+    onTrashChanged();
+    return true;
+  }
+
+  // the marks, bookmarks and texts in the trash live on their documents' cards
+  const KINDS = { mark: 'marks', bookmark: 'bookmarks', text: 'texts' };
+
+  /** A card's list of one kind, from the open document when it is the one (its unsaved changes count). */
+  function listOn(doc, kind) {
+    const card = reading && !reading.closed && reading.doc.id === doc.id ? reading.doc : doc;
+    return { card, list: Array.isArray(card[KINDS[kind]]) ? card[KINDS[kind]] : [] };
+  }
+
+  async function saveList(card, kind) {
+    const key = KINDS[kind];
+    if (reading && !reading.closed && reading.doc.id === card.id) {
+      if (kind === 'mark') saveMarks();
+      else if (kind === 'text') saveTexts();
+      else saveBookmarks();
+      return;
+    }
+    await lib.update(card.id, { [key]: card[key] });
+  }
+
+  /** What one document has in the trash: [{ kind, item }]. */
+  function trashedOn(doc) {
+    return Object.keys(KINDS).flatMap((kind) => listOn(doc, kind).list.filter((item) => item.trashed).map((item) => ({ kind, item })));
+  }
+
+  async function restoreItem(docId, kind, id) {
+    const doc = docs.find((d) => d.id === docId) ?? trashedDocs.find((d) => d.id === docId);
+    if (!doc) return false;
+    const { card, list } = listOn(doc, kind);
+    const item = list.find((x) => x.id === id);
+    if (!item) return false;
+    fromTrash(item);
+    await saveList(card, kind).catch((err) => toast(err.message));
+    onTrashChanged();
+    return true;
+  }
+
+  async function purgeItem(docId, kind, id) {
+    const doc = docs.find((d) => d.id === docId) ?? trashedDocs.find((d) => d.id === docId);
+    if (!doc) return false;
+    const { card, list } = listOn(doc, kind);
+    const index = list.findIndex((x) => x.id === id && x.trashed);
+    if (index < 0) return false;
+    list.splice(index, 1);
+    await saveList(card, kind).catch((err) => toast(err.message));
+    onTrashChanged();
+    return true;
+  }
+
+  function onTrashChanged() {
+    if (reading && !reading.closed && !marksPanel.hidden) fillMarks();
+    showMarkCount();
+    onTrash?.();
   }
 
   // ---------- reading ----------
@@ -907,8 +999,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
         return;
       }
       session.controller = controller;
-      controller.setMarks?.(marksOf(doc));
-      controller.setTexts?.(textsOf(doc));
+      controller.setMarks?.(liveMarks(doc));
+      controller.setTexts?.(liveTexts(doc));
       controller.setEdits?.(editsOf(doc));
       showEditBar();
       showMarkCount();
@@ -1115,6 +1207,9 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     if (sel && !sel.isCollapsed && sel.rangeCount && scroll.contains(sel.anchorNode) && sel.toString().trim()) {
       selected = sel.getRangeAt(0).cloneRange();
       selBar.hidden = false;
+      // in the lower half the bar would sit on the selection's handles: it goes to the top instead
+      const box = selected.getBoundingClientRect();
+      selBar.classList.toggle('rd-selbar-top', box.bottom > innerHeight * 0.55);
       closeMark();
     } else if (!selBar.contains(document.activeElement)) hideSelBar();
   });
@@ -1196,12 +1291,23 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
 
   // ---------- marks ----------
 
+  // The lists keep what went to the trash (marked `trashed`, so the trash travels with the card to
+  // other devices); everything shown, counted or exported takes only what is still in the document.
   const marksOf = (doc) => (Array.isArray(doc.marks) ? doc.marks : (doc.marks = []));
+  const liveMarks = (doc) => live(marksOf(doc));
+  const toTrash = (item) => {
+    item.trashed = Date.now();
+    item.edited = item.trashed;
+  };
+  const fromTrash = (item) => {
+    delete item.trashed;
+    item.edited = Date.now();
+  };
 
   /** The marks changed: drawn again at once, kept a moment later (all of the document's marks in one go). */
   function saveMarks(session = reading) {
     if (!session || session.closed) return;
-    session.controller?.setMarks?.(marksOf(session.doc), openMarkId);
+    session.controller?.setMarks?.(liveMarks(session.doc), openMarkId);
     showMarkCount();
     if (!marksPanel.hidden) fillMarks();
     pendingMarks = { id: session.doc.id, marks: marksOf(session.doc) };
@@ -1250,7 +1356,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     else saveMarks();
   }
 
-  const findMark = (id) => (reading ? marksOf(reading.doc).find((m) => m.id === id) : null);
+  const findMark = (id) => (reading ? liveMarks(reading.doc).find((m) => m.id === id) : null);
 
   function closeMark() {
     if (!openMarkId) return;
@@ -1261,24 +1367,23 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     saveMarks();
   }
 
+  /** Into the trash: gone from the page, back from there (or with "Undo") whenever wanted. */
   function removeMark(id) {
     if (!reading) return;
     const session = reading;
-    const list = marksOf(session.doc);
-    const index = list.findIndex((m) => m.id === id);
-    if (index < 0) return;
-    const [mark] = list.splice(index, 1);
+    const mark = findMark(id);
+    if (!mark) return;
+    toTrash(mark);
     markPanel.hidden = true;
     openMarkId = null;
     saveMarks();
-    toast(t('reader.marks.removed'), {
-      timeout: 6000,
+    toast(t('trash.markMoved'), {
+      timeout: 7000,
       action: {
-        text: t('reader.marks.undo'),
+        text: t('trash.undo'),
         run: () => {
           if (session.closed) return;
-          const again = marksOf(session.doc);
-          again.splice(Math.min(index, again.length), 0, mark);
+          fromTrash(mark);
           saveMarks(session);
         },
       },
@@ -1362,21 +1467,22 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       ),
     );
     markPanel.hidden = false;
-    reading.controller?.setMarks?.(marksOf(reading.doc), id);
+    reading.controller?.setMarks?.(liveMarks(reading.doc), id);
     if (focus) note.focus({ preventScroll: true });
   }
 
   // ---------- texts: words written on a PDF page ----------
 
   const textsOf = (doc) => (Array.isArray(doc.texts) ? doc.texts : (doc.texts = []));
-  const findText = (id) => (reading ? textsOf(reading.doc).find((x) => x.id === id) : null);
+  const liveTexts = (doc) => live(textsOf(doc));
+  const findText = (id) => (reading ? liveTexts(reading.doc).find((x) => x.id === id) : null);
   let openTextId = null; // the text whose card is open
   let textsTimer = 0;
   let textPress = false; // the press now going on belongs to a text
 
   function saveTexts(session = reading) {
     if (!session || session.closed) return;
-    session.controller?.setTexts?.(textsOf(session.doc), openTextId);
+    session.controller?.setTexts?.(liveTexts(session.doc), openTextId);
     showMarkCount();
     if (!marksPanel.hidden) fillMarks();
     clearTimeout(textsTimer);
@@ -1422,21 +1528,26 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     if (!reading) return;
     const session = reading;
     const list = textsOf(session.doc);
-    const index = list.findIndex((x) => x.id === id);
+    const index = list.findIndex((x) => x.id === id && !x.trashed);
     if (index < 0) return;
-    const [item] = list.splice(index, 1);
+    const item = list[index];
     openTextId = null;
     markPanel.hidden = true;
+    // an empty one is simply gone; one with words goes to the trash
+    if (!item.text.trim()) {
+      list.splice(index, 1);
+      saveTexts();
+      return;
+    }
+    toTrash(item);
     saveTexts();
-    if (!item.text.trim()) return;
-    toast(t('reader.texts.removed'), {
-      timeout: 6000,
+    toast(t('trash.textMoved'), {
+      timeout: 7000,
       action: {
-        text: t('reader.marks.undo'),
+        text: t('trash.undo'),
         run: () => {
           if (session.closed) return;
-          const again = textsOf(session.doc);
-          again.splice(Math.min(index, again.length), 0, item);
+          fromTrash(item);
           saveTexts(session);
         },
       },
@@ -1524,7 +1635,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       ),
     );
     markPanel.hidden = false;
-    reading.controller?.setTexts?.(textsOf(reading.doc), id);
+    reading.controller?.setTexts?.(liveTexts(reading.doc), id);
     if (focus) field.focus({ preventScroll: true });
   }
 
@@ -1825,7 +1936,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
         { icon: 'T', text: t('reader.texts.add'), run: () => setPlacing(true) },
         { icon: '✎', text: t(editing ? 'reader.edit.stop' : 'reader.edit.menu'), run: () => setEditing(!editing) },
         ...(editsOf(doc).length ? [{ icon: '💾', text: t('reader.edit.save', editsOf(doc).length), run: () => saveEditsToFile() }] : []),
-        { icon: '⤓', text: t('pages.exportMarked'), disabled: !marksOf(doc).length && !textsOf(doc).length && !editsOf(doc).length, title: marksOf(doc).length || textsOf(doc).length || editsOf(doc).length ? undefined : t('pages.noMarks'), run: exportMarked },
+        { icon: '⤓', text: t('pages.exportMarked'), disabled: !liveMarks(doc).length && !liveTexts(doc).length && !editsOf(doc).length, title: liveMarks(doc).length || liveTexts(doc).length || editsOf(doc).length ? undefined : t('pages.noMarks'), run: exportMarked },
         '-',
       );
     }
@@ -1855,7 +1966,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       const code = await loadReader();
       // rewritten lines first, the marks over them
       const bytes = await code.applyEdits(await lib.bytes(doc.id), editsOf(doc));
-      const out = await code.pdfWithMarks(bytes, marksOf(doc), { texts: textsOf(doc).filter((x) => x.text.trim()) });
+      const out = await code.pdfWithMarks(bytes, liveMarks(doc), { texts: liveTexts(doc).filter((x) => x.text.trim()) });
       api.download(`${baseOf(doc)} ${t('pages.markedSuffix')}.pdf`, out, 'application/pdf');
     } catch (err) {
       console.error(err);
@@ -1909,9 +2020,10 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   // ---------- the list of marks ----------
 
   const bookmarksOf = (doc) => (Array.isArray(doc.bookmarks) ? doc.bookmarks : (doc.bookmarks = []));
+  const liveBookmarks = (doc) => live(bookmarksOf(doc));
 
   function showMarkCount() {
-    const n = reading ? marksOf(reading.doc).length + bookmarksOf(reading.doc).length + textsOf(reading.doc).length : 0;
+    const n = reading ? liveMarks(reading.doc).length + liveBookmarks(reading.doc).length + liveTexts(reading.doc).length : 0;
     marksButton.lastChild.textContent = n ? String(n) : '';
   }
 
@@ -1926,7 +2038,10 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     bookmarksTimer = setTimeout(() => lib.update(id, { bookmarks }).catch((err) => toast(t('reader.marks.failed', err.message))), 300);
   }
 
-  /** A bookmark where the reader is now (Ctrl+D). */
+  /**
+   * A bookmark where the reader is now (Ctrl+D). With a passage selected, the bookmark keeps that
+   * passage as its words (what the person meant to come back to), not the first lines of the page.
+   */
   function addBookmark() {
     const controller = reading?.controller;
     if (!controller?.describe) return;
@@ -1937,18 +2052,55 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     const about = controller.describe(position);
     const pages = controller.pages?.();
     const label = (about.page ? t('reader.pageN', about.page) : [about.heading, pages ? t('reader.pageN', pages.index + 1) : t('library.progress', Math.round(progress * 100))].filter(Boolean).join(' · ')).slice(0, 300);
-    list.push({ id: newBookmarkId(), position, progress, label, snippet: about.snippet.slice(0, 300), created: Date.now() });
+    const chosen = selected ? selected.toString().replace(/\s+/g, ' ').trim() : '';
+    const snippet = (chosen || about.snippet).slice(0, 300);
+    list.push({ id: newBookmarkId(), position, progress, label, snippet, created: Date.now() });
     list.sort((x, y) => x.progress - y.progress || x.created - y.created);
+    if (chosen) {
+      document.getSelection()?.removeAllRanges();
+      hideSelBar();
+    }
     saveBookmarks();
     toast(t('reader.bookmarks.added', label));
   }
 
+  /** Into the trash, with "Undo" at hand. */
   function removeBookmark(id) {
     if (!reading) return;
-    const list = bookmarksOf(reading.doc);
-    const index = list.findIndex((b) => b.id === id);
-    if (index >= 0) list.splice(index, 1);
+    const session = reading;
+    const bookmark = liveBookmarks(session.doc).find((b) => b.id === id);
+    if (!bookmark) return;
+    toTrash(bookmark);
     saveBookmarks();
+    toast(t('trash.bookmarkMoved'), {
+      timeout: 7000,
+      action: {
+        text: t('trash.undo'),
+        run: () => {
+          if (session.closed) return;
+          fromTrash(bookmark);
+          saveBookmarks(session);
+        },
+      },
+    });
+  }
+
+  // how the panel lists marks: grouped by colour (the default) or in reading order; kept on this device
+  const MARKS_ORDER_KEY = 'atlas-notetaker:marks-order';
+  let marksByColor = true;
+  try {
+    marksByColor = localStorage.getItem(MARKS_ORDER_KEY) !== 'order';
+  } catch {
+    // only a convenience
+  }
+  function setMarksOrder(byColor) {
+    marksByColor = byColor;
+    try {
+      localStorage.setItem(MARKS_ORDER_KEY, byColor ? 'color' : 'order');
+    } catch {
+      // only a convenience
+    }
+    fillMarks();
   }
 
   function goToBookmark(bookmark) {
@@ -1959,8 +2111,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
 
   function fillMarks() {
     const doc = reading?.doc;
-    const marks = doc ? sortMarks(marksOf(doc).filter((m) => m.anchor)) : [];
-    const bookmarks = doc ? bookmarksOf(doc) : [];
+    const marks = doc ? sortMarks(liveMarks(doc).filter((m) => m.anchor)) : [];
+    const bookmarks = doc ? liveBookmarks(doc) : [];
     marksHead.textContent = t('reader.marks.list');
     const add = h('button', { type: 'button', class: 'tb-btn rd-bm-add', title: t('reader.bookmarks.addTitle'), onclick: addBookmark }, '🔖 ', t('reader.bookmarks.add'));
     const bookmarkItems = bookmarks.map((b) =>
@@ -1976,7 +2128,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
         h('button', { type: 'button', class: 'rd-bm-remove', title: t('reader.bookmarks.remove'), 'aria-label': t('reader.bookmarks.remove'), onclick: () => removeBookmark(b.id) }, '✕'),
       ),
     );
-    const markItems = marks.map((mark) =>
+    const markItem = (mark) =>
       h(
         'li',
         { class: 'rd-marks-item' },
@@ -1992,9 +2144,28 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
             mark.where ? h('span', { class: 'rd-marks-where' }, mark.where) : null,
           ),
         ),
-      ),
-    );
-    const textItems = (doc ? sortTexts(textsOf(doc).filter((x) => x.text.trim())) : []).map((item) =>
+      );
+    // by colour: a heading for each colour that has marks, in the order of the swatches
+    const markItems = marksByColor
+      ? MARK_COLORS.flatMap((color) => {
+          const group = marks.filter((m) => m.color === color);
+          if (!group.length) return [];
+          const head = h('li', { class: 'rd-marks-group', 'data-color': color }, h('span', { class: 'rd-marks-dot', 'aria-hidden': 'true' }), `${t(`reader.marks.colors.${color}`)} · ${group.length}`);
+          return [head, ...group.map(markItem)];
+        })
+      : marks.map(markItem);
+    const order = marks.length > 1
+      ? h(
+          'li',
+          { class: 'rd-marks-order seg', role: 'radiogroup', 'aria-label': t('reader.marks.order') },
+          h('button', { type: 'button', class: 'seg-btn', role: 'radio', 'aria-checked': String(marksByColor), onclick: () => setMarksOrder(true) }, t('reader.marks.byColor')),
+          h('button', { type: 'button', class: 'seg-btn', role: 'radio', 'aria-checked': String(!marksByColor), onclick: () => setMarksOrder(false) }, t('reader.marks.inOrder')),
+        )
+      : null;
+    // what went to the trash from this document waits there, a tap away
+    const trashed = doc ? marksOf(doc).length + bookmarksOf(doc).length + textsOf(doc).length - (liveMarks(doc).length + liveBookmarks(doc).length + liveTexts(doc).length) : 0;
+    const trashLink = onOpenTrash ? h('li', { class: 'rd-marks-trash' }, h('button', { type: 'button', class: 'tb-btn', onclick: () => onOpenTrash('marks') }, `🗑 ${t('trash.open', trashed)}`)) : null;
+    const textItems = (doc ? sortTexts(liveTexts(doc).filter((x) => x.text.trim())) : []).map((item) =>
       h(
         'li',
         { class: 'rd-marks-item rd-text-item' },
@@ -2006,14 +2177,17 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
         ),
       ),
     );
-    marksList.replaceChildren(
+    const rows = [
       h('li', { class: 'rd-bm-actions' }, add),
       h('li', { class: 'rd-marks-section' }, `${t('reader.bookmarks.title')}${bookmarks.length ? ` · ${bookmarks.length}` : ''}`),
       ...(bookmarkItems.length ? bookmarkItems : [h('li', { class: 'rd-toc-empty' }, t('reader.bookmarks.none'))]),
       h('li', { class: 'rd-marks-section' }, `${t('reader.marks.title')}${marks.length ? ` · ${marks.length}` : ''}`),
+      order,
       ...(markItems.length ? markItems : [h('li', { class: 'rd-toc-empty' }, t('reader.marks.none'))]),
       ...(textItems.length ? [h('li', { class: 'rd-marks-section' }, `${t('reader.texts.title')} · ${textItems.length}`), ...textItems] : []),
-    );
+      trashLink,
+    ];
+    marksList.replaceChildren(...rows.filter(Boolean));
   }
 
   function toggleMarks(show = marksPanel.hidden) {
@@ -2202,11 +2376,25 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       await loadShelves();
       render();
     },
-    /** Cards changed elsewhere (sync): read them again. */
+    /** Cards or sections changed elsewhere (sync): read them again. */
     async reload() {
       await refresh();
+      await loadShelves();
       if (!shelf.hidden) render();
+      if (reading && !reading.closed && !marksPanel.hidden) fillMarks();
     },
+    /** The trash's library part: documents, and the marks, bookmarks and texts deleted from documents. */
+    async trashContent() {
+      await refresh();
+      return {
+        docs: trashedDocs.map((d) => ({ id: d.id, title: nameOf(d), author: d.author ?? '', trashed: d.trashed })),
+        items: [...docs, ...trashedDocs].flatMap((d) => trashedOn(d).map(({ kind, item }) => ({ docId: d.id, docTitle: nameOf(d), kind, item }))),
+      };
+    },
+    restoreDoc,
+    purgeDoc,
+    restoreItem,
+    purgeItem,
     /** The document open in the reader, if any: sync leaves it for later. */
     openDocId: () => (reading && !reading.closed ? reading.doc.id : null),
     /** The side menu: how many documents, and the one read last ("continue reading"). */

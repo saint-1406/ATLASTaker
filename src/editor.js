@@ -30,6 +30,11 @@ import { joinDictated } from './dictation.js';
 import { IMAGE_RE } from './markdown.js';
 import { count, currentLang, t as say, ui } from './i18n.js';
 
+// Writing on or off (a note opened for reading): one compartment, two fixed values.
+const editing = new Compartment();
+const EDITABLE = [EditorView.editable.of(true), EditorState.readOnly.of(false)];
+const READ_ONLY = [EditorView.editable.of(false), EditorState.readOnly.of(true)];
+
 // The editor's own words (search panel, placeholder, the label screen readers hear), one set per
 // language; the compartment swaps them when the language changes.
 const language = new Compartment();
@@ -504,14 +509,16 @@ export function createEditor({
   onImage,
   resolveImage,
   openImage,
+  touch = false,
 }) {
   const extensions = [
     history(),
-    drawSelection(),
+    // On a touch screen the phone's own selection (its highlight, handles and copy bar) is left alone:
+    // CodeMirror's drawn one hides the native highlight and lags behind the handles being dragged.
+    // Rectangle selection and the crosshair are for a mouse with Alt held anyway.
+    touch ? [] : [drawSelection(), rectangularSelection(), crosshairCursor()],
     dropCursor(),
     highlightSpecialChars(),
-    rectangularSelection(),
-    crosshairCursor(),
     highlightActiveLine(),
     highlightSelectionMatches(),
     bracketMatching(),
@@ -574,11 +581,21 @@ export function createEditor({
     }),
   ];
 
-  const withLanguage = () => [...extensions, language.of(languageExtensions())];
+  const withLanguage = () => [...extensions, language.of(languageExtensions()), editing.of(EDITABLE)];
   const view = new EditorView({ parent, state: EditorState.create({ doc: '', extensions: withLanguage() }) });
   return {
     view,
     makeState: (doc, selection) => EditorState.create({ doc, selection, extensions: withLanguage() }),
+    /**
+     * Writing on or off. Off, the note can be read, scrolled, selected and copied, but no tap or key
+     * changes it (no keyboard comes up on a phone either). Each note's state carries its own, so this is
+     * applied again after show().
+     */
+    setEditable(on) {
+      const wanted = on ? EDITABLE : READ_ONLY;
+      if (editing.get(view.state) !== wanted) view.dispatch({ effects: editing.reconfigure(wanted) });
+    },
+    isEditable: () => editing.get(view.state) === EDITABLE,
     /**
      * Puts another note into the view. On Android, CodeMirror hands the text to the keyboard through an
      * EditContext, and setState leaves that holding the previous note: the keyboard then edits text that

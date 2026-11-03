@@ -120,6 +120,7 @@ export function createPager({ host, strip, frameFor, layout, onTurn, canCross = 
   // ---------- fingers, taps, the wheel ----------
 
   let gesture = null;
+  const LONG_PRESS = 350; // ms: a swipe moves sooner than this; a press to select waits longer
   const selecting = () => {
     const sel = document.getSelection();
     return Boolean(sel && !sel.isCollapsed && host.contains(sel.anchorNode));
@@ -137,7 +138,9 @@ export function createPager({ host, strip, frameFor, layout, onTurn, canCross = 
     if (!gesture.dragging) {
       // a mouse drag selects text; only a finger or a pen swipes
       if (gesture.type === 'mouse' || Math.abs(dx) < 12 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
-      if (selecting()) {
+      // a finger that rested before moving was pressing to select (the phone's long press), not swiping:
+      // its drift widens the selection instead of turning the page
+      if (selecting() || performance.now() - gesture.at > LONG_PRESS) {
         gesture = null;
         return;
       }

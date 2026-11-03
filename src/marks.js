@@ -14,6 +14,11 @@ export const MAX_TEXT = 2000;
 const ID_RE = /^m-[a-z0-9]{4,40}$/;
 const num = (v) => Number.isFinite(v);
 const int = (v) => Number.isInteger(v) && v >= 0;
+// `trashed`: when a mark, bookmark or text went to the trash (absent or 0: it is in the document)
+const inTrash = (item) => item.trashed === undefined || item.trashed === null || (num(item.trashed) && item.trashed >= 0);
+
+/** Items not in the trash. */
+export const live = (list) => (Array.isArray(list) ? list.filter((item) => !item.trashed) : []);
 
 export const MAX_BOOKMARKS = 1000;
 
@@ -50,6 +55,7 @@ export function validMark(mark) {
     (mark.where === undefined || (typeof mark.where === 'string' && mark.where.length <= 300)) &&
     num(mark.created) &&
     (mark.edited === undefined || num(mark.edited)) &&
+    inTrash(mark) &&
     validAnchor(mark.anchor)
   );
 }
@@ -109,7 +115,9 @@ export function validBookmark(b) {
     typeof b.label === 'string' &&
     b.label.length <= 300 &&
     (b.snippet === undefined || (typeof b.snippet === 'string' && b.snippet.length <= 300)) &&
-    num(b.created)
+    num(b.created) &&
+    (b.edited === undefined || num(b.edited)) &&
+    inTrash(b)
   );
 }
 
@@ -199,7 +207,8 @@ export function validText(item) {
     item.size <= 0.2 &&
     TEXT_COLORS.includes(item.color) &&
     num(item.created) &&
-    (item.edited === undefined || num(item.edited))
+    (item.edited === undefined || num(item.edited)) &&
+    inTrash(item)
   );
 }
 

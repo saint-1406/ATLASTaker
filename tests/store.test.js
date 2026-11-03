@@ -60,8 +60,44 @@ test('trash moves the file aside and blocks late writes', async (t) => {
 test('state keeps only known keys with valid values', (t) => {
   const { store } = fresh(t);
   store.setState({ theme: 'system', skin: 'atlas', accent: 'cyan', fontScale: 1.1, lang: 'en' });
-  const state = store.setState({ theme: 'neon', skin: 'neon', accent: '#fff', fontScale: 9, evil: true, lastOpen: '../x', lang: 'de' });
+  const { settingsAt, ...state } = store.setState({ theme: 'neon', skin: 'neon', accent: '#fff', fontScale: 9, evil: true, lastOpen: '../x', lang: 'de', settingsAt: { theme: 1 } });
   assert.deepEqual(state, { theme: 'system', skin: 'atlas', accent: 'cyan', fontScale: 1.1, lang: 'en' });
+  assert.deepEqual(Object.keys(settingsAt).sort(), ['accent', 'fontScale', 'lang', 'skin', 'theme']);
+  store.flush();
+});
+
+test('a setting the person changes keeps when; a quiet change or the same value does not', (t) => {
+  const { store } = fresh(t);
+  store.setState({ skin: 'cozy', theme: 'cream', $quiet: true });
+  assert.deepEqual(store.getState().settingsAt ?? {}, {}, 'a default is not a choice');
+  store.setState({ theme: 'dark' });
+  const at = store.getState().settingsAt.theme;
+  assert.ok(at > 0);
+  store.setState({ theme: 'dark', lastOpen: null });
+  assert.equal(store.getState().settingsAt.theme, at, 'the same value again changes nothing');
+  assert.equal('lastOpen' in store.getState().settingsAt, false, 'what is open stays on this device');
+  store.putSettings({ theme: { value: 'sepia', at: at + 5 }, skin: { value: 'neon', at: at + 5 } });
+  const s = store.getState();
+  assert.equal(s.theme, 'sepia');
+  assert.equal(s.skin, 'cozy', 'a value this version does not know is left alone…');
+  assert.equal(s.settingsAt.skin, at + 5, '…but not asked for again');
+  assert.deepEqual(store.settings().values, { skin: 'cozy', theme: 'sepia' });
+  store.flush();
+});
+
+test('a note in the trash stays a whole note and comes back', async (t) => {
+  const { store } = fresh(t);
+  const note = await store.create('# Список\nмолоко');
+  await store.setMeta(note.id, { folder: 'Дом' });
+  await store.setMeta(note.id, { trashed: 1793000000000 });
+  let [listed] = await store.list();
+  assert.equal(listed.trashed, 1793000000000);
+  assert.equal(listed.folder, 'Дом');
+  await store.write(note.id, '# Список\nмолоко, хлеб');
+  await store.setMeta(note.id, { trashed: 0 });
+  [listed] = await store.list();
+  assert.equal(listed.trashed, 0);
+  assert.equal(listed.content, '# Список\nмолоко, хлеб');
   store.flush();
 });
 

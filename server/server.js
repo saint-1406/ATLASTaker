@@ -66,6 +66,36 @@ const CSP = [
   "frame-ancestors 'none'",
 ].join('; ');
 
+/** "0.16.0" newer than "0.15.2"; a part that is not a number counts as 0. */
+export function isNewer(candidate, current) {
+  const a = String(candidate).split('.').map((p) => parseInt(p, 10) || 0);
+  const b = String(current).split('.').map((p) => parseInt(p, 10) || 0);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+  }
+  return false;
+}
+
+const RELEASES = 'https://api.github.com/repos/saint-1406/ATLASTaker/releases/latest';
+let releaseCache = null; // { at, value }: GitHub is asked at most once an hour
+
+/** The newest release on GitHub, for the page's "update" line: { version, current, newer, notes, page }. */
+async function latestRelease(fetchImpl = fetch) {
+  if (releaseCache && Date.now() - releaseCache.at < 60 * 60 * 1000) return releaseCache.value;
+  let res;
+  try {
+    res = await fetchImpl(RELEASES, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'ATLAS-Notetaker' }, signal: AbortSignal.timeout(15_000) });
+  } catch (err) {
+    throw new HttpError(503, `GitHub: ${err.message}`);
+  }
+  if (!res.ok) throw new HttpError(502, `GitHub ${res.status}`);
+  const body = await res.json();
+  const version = String(body.tag_name ?? '').replace(/^v/, '');
+  const value = { version, current: VERSION, newer: isNewer(version, VERSION), notes: String(body.body ?? '').slice(0, 4000), page: String(body.html_url ?? '') };
+  releaseCache = { at: Date.now(), value };
+  return value;
+}
+
 export function defaultDataDir() {
   if (process.env.ATLAS_DATA_DIR) return path.resolve(process.env.ATLAS_DATA_DIR);
   return path.join(process.env.APPDATA || path.join(os.homedir(), '.config'), 'ATLAS Notetaker');
@@ -296,6 +326,8 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
       await sync.signOut();
       return send(res, 204);
     }
+    // is there a newer ATLAS? (the page offers its download page; the installer keeps the notes)
+    if (route === 'update' && req.method === 'GET') return send(res, 200, await latestRelease());
     if (route === 'sync/run' && req.method === 'POST') {
       const { skipDocs } = await readJson(req);
       try {

@@ -3,6 +3,7 @@
 // the page on Android — behind api.sync: { status, signIn, cancel, signOut, run }.
 
 import { count, formatDay, formatTime, t } from '../i18n.js';
+import { SETTING_KEYS } from './merge.js';
 
 const AFTER_EDIT = 30_000; // a round this long after the last change
 const EVERY = 10 * 60_000; // and now and then while the window is open
@@ -83,8 +84,15 @@ export function createSyncClient({ api, beforeRound, openDocs, afterRound, h, to
       };
     }
   };
-  watch(api, ['create', 'write', 'trash', 'saveAsset', 'setFolder']);
+  watch(api, ['create', 'write', 'trash', 'saveAsset', 'setFolder', 'setTrashed']);
   watch(api.library, ['add', 'update', 'replace', 'remove']);
+  // a setting the person changed travels too; the rest of the state (the open note, …) stays on this device
+  const setState = api.setState;
+  api.setState = async (patch) => {
+    const out = await setState.call(api, patch);
+    if (!patch?.$quiet && Object.keys(patch ?? {}).some((key) => SETTING_KEYS.includes(key))) changed();
+    return out;
+  };
 
   async function signIn() {
     note = '';
@@ -176,5 +184,5 @@ export function createSyncClient({ api, beforeRound, openDocs, afterRound, h, to
     });
   }
 
-  return { start, changed, run: () => run({ quiet: false }), section, signedIn: () => status.signedIn };
+  return { start, changed, run: () => run({ quiet: false }), runQuiet: () => run(), section, signedIn: () => status.signedIn };
 }

@@ -32,6 +32,8 @@ const RULES = {
   // the section of the library the document sits in ('' — none) and whether it was read to the end
   shelf: text(60),
   finished: (v) => typeof v === 'boolean',
+  // in the trash since then (null or 0: on the shelf); the file stays, so the document comes back whole
+  trashed: (v) => v === null || (Number.isFinite(v) && v >= 0),
 };
 
 function httpError(status, message) {

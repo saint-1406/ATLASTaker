@@ -6,6 +6,35 @@
 
 import { createDrive } from './drive.js';
 import { emptyBase, hashBytes, syncOnce } from './engine.js';
+import { settingsOf, SETTING_KEYS } from './merge.js';
+import { validBookmarks, validEdits, validMarks, validTexts } from '../marks.js';
+
+const DOC_FORMATS = ['pdf', 'epub', 'fb2', 'docx', 'odt', 'rtf', 'md', 'txt', 'html', 'cbz', 'img'];
+const text = (max) => (v) => typeof v === 'string' && v.length <= max;
+const num = (v) => Number.isFinite(v);
+// what a card from Drive may hold, as the Windows side checks it (server/library.js)
+const CARD_RULES = {
+  name: text(200),
+  format: (v) => DOC_FORMATS.includes(v),
+  added: num,
+  title: text(300),
+  author: text(300),
+  cover: (v) => v === null || (typeof v === 'string' && v.length <= 400_000 && /^data:image\/(png|jpeg|webp);base64,/.test(v)),
+  position: (v) => v === null || (typeof v === 'object' && !Array.isArray(v) && JSON.stringify(v).length <= 2000),
+  progress: (v) => num(v) && v >= 0 && v <= 1,
+  opened: (v) => v === null || (num(v) && v >= 0),
+  notesId: (v) => v === null || (typeof v === 'string' && /^n-[a-z0-9]{6,40}$/.test(v)),
+  scale: (v) => v === null || (num(v) && v >= 0.5 && v <= 4),
+  marks: (v) => v === null || validMarks(v),
+  bookmarks: (v) => v === null || validBookmarks(v),
+  texts: (v) => v === null || validTexts(v),
+  edits: (v) => v === null || validEdits(v),
+  shelf: (v) => v === null || text(60)(v),
+  finished: (v) => v === null || typeof v === 'boolean',
+  trashed: (v) => v === null || (num(v) && v >= 0),
+};
+/** Only the fields that pass: a card from another device can't put anything odd into the library. */
+const cleanCard = (data) => Object.fromEntries(Object.entries(data ?? {}).filter(([key, value]) => CARD_RULES[key]?.(value)));
 
 const request = (r) =>
   new Promise((resolve, reject) => {
@@ -61,6 +90,8 @@ export function createAndroidSync({ android, opened, library }) {
 
   async function getToken(force = false) {
     if (!force && access && access.until > Date.now() + 60_000) return access.token;
+    // Drive said no to this token: the phone forgets it, or Google would hand the same one back
+    if (force && access?.token) android.syncClearToken?.(access.token);
     try {
       const token = await authorize(false);
       access = { token, until: Date.now() + 50 * 60_000 };
@@ -101,6 +132,23 @@ export function createAndroidSync({ android, opened, library }) {
       const note = await request(notes.get(id));
       if (note) await request(notes.put({ ...note, folder }));
     },
+    async setNoteTrashed(id, trashed) {
+      const notes = await store('notes', 'readwrite');
+      const note = await request(notes.get(id));
+      if (note) await request(notes.put({ ...note, trashed: trashed || 0 }));
+    },
+    settings: async () => settingsOf((await request((await store('state')).get('state'))) ?? {}),
+    async putSettings(entries) {
+      const states = await store('state', 'readwrite');
+      const state = (await request(states.get('state'))) ?? {};
+      const settingsAt = { ...(state.settingsAt ?? {}) };
+      for (const [key, entry] of Object.entries(entries ?? {})) {
+        if (!SETTING_KEYS.includes(key) || !num(entry?.at)) continue;
+        state[key] = entry.value;
+        settingsAt[key] = entry.at;
+      }
+      await request(states.put({ ...state, settingsAt }, 'state'));
+    },
     async trashNote(id) {
       const t = (await opened).transaction(['notes', 'trash'], 'readwrite');
       const note = await request(t.objectStore('notes').get(id));
@@ -126,10 +174,15 @@ export function createAndroidSync({ android, opened, library }) {
       return new Uint8Array(await blob.arrayBuffer());
     },
     async putDoc(id, data, bytes) {
+      const clean = cleanCard(data);
       const t = (await opened).transaction(['docs', 'docFiles'], 'readwrite');
       const docs = t.objectStore('docs');
       const old = await request(docs.get(id));
-      const doc = { size: 0, ...old, ...data, id };
+      if (!old && !(clean.name && clean.format)) {
+        t.abort();
+        throw new Error(`card ${id}: no name or format`);
+      }
+      const doc = { size: 0, ...old, ...clean, id };
       if (bytes) {
         doc.size = bytes.length;
         t.objectStore('docFiles').put(new Blob([bytes]), id);
@@ -187,11 +240,13 @@ export function createAndroidSync({ android, opened, library }) {
     },
     async cancel() {},
     async signOut() {
+      // Google forgets the app's access (signing in again asks for an account) and the phone its token
+      const token = access?.token ?? (await authorize(false).catch(() => ''));
       access = null;
       needsLogin = false;
       lastError = '';
       await keep({ signedIn: false });
-      android.syncSignOut?.();
+      if (token) android.syncSignOut?.(token);
     },
     run({ skipDocs = [] } = {}) {
       running ??= (async () => {

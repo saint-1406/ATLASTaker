@@ -77,23 +77,123 @@ export function planNotes(local, remote, base) {
 }
 
 /**
- * A note's folder ('' for none) from this device, Drive and the last sync: the side that changed it
- * wins; changed on both, this device's. A folder travels apart from the text, so moving a note never
- * makes a conflict copy of it.
+ * One small value of a note (its folder, when it went to the trash) from this device, Drive and the
+ * last sync: the side that changed it wins; changed on both, this device's. Such values travel apart
+ * from the text, so moving a note or putting it in the trash never makes a conflict copy of it.
  */
-export function mergeFolder(local, remote, base) {
-  const l = local ?? '';
-  const r = remote ?? '';
-  const b = base ?? '';
+export function mergeField(local, remote, base, none) {
+  const l = local ?? none;
+  const r = remote ?? none;
+  const b = base ?? none;
   if (l === r || r === b) return l;
   if (l === b) return r;
   return l;
 }
 
+/** A note's folder ('' for none). */
+export const mergeFolder = (local, remote, base) => mergeField(local, remote, base, '');
+
+/** When a note went to the trash (0: it is not there). */
+export const mergeTrashed = (local, remote, base) => mergeField(local || 0, remote || 0, base || 0, 0);
+
+// ---------- settings ----------
+
+/**
+ * Settings that travel between devices; each side keeps, per setting, when the person last set it.
+ * The newer one wins; a setting never set on purpose here (a fresh install's default) gives way to
+ * Drive's. Reading days add up: of each day, the longer time counts.
+ */
+export const SETTING_KEYS = [
+  'skin',
+  'theme',
+  'accent',
+  'lang',
+  'sidebar',
+  'fontScale',
+  'readMode',
+  'readTurn',
+  'readFont',
+  'readLeading',
+  'readLook',
+  'avatar',
+  'profileName',
+  'noteFolders',
+  'shelves',
+  'readDays',
+  'readGoal',
+];
+const MAX_DAYS = 60;
+
+/**
+ * The times kept with a change to the app's state (state.settingsAt): each setting whose value really
+ * changes gets `now`, unless the change is `quiet` — a default or a one-time move, not the person's choice.
+ */
+export function stampSettings(state, patch, { now = Date.now(), quiet = false } = {}) {
+  const at = { ...(state?.settingsAt ?? {}) };
+  if (quiet) return at;
+  for (const [key, value] of Object.entries(patch ?? {})) {
+    if (SETTING_KEYS.includes(key) && sig(value) !== sig(state?.[key])) at[key] = now;
+  }
+  return at;
+}
+
+/** A state's settings as sync sees them: { values, at }. */
+export function settingsOf(state) {
+  const values = {};
+  for (const key of SETTING_KEYS) if (state?.[key] !== undefined) values[key] = state[key];
+  return { values, at: { ...(state?.settingsAt ?? {}) } };
+}
+
+/** Minutes read per day from two devices: the longer of each day, the newest days kept. */
+export function mergeDays(a, b) {
+  const out = { ...(a ?? {}) };
+  for (const [day, minutes] of Object.entries(b ?? {})) out[day] = Math.max(out[day] ?? 0, minutes);
+  const days = Object.keys(out).sort().slice(-MAX_DAYS);
+  return Object.fromEntries(days.map((day) => [day, out[day]]));
+}
+
+/**
+ * This device's and Drive's settings, each { values: { key: value }, at: { key: time } }.
+ * Returns { values, at } for both sides afterwards, `toLocal` (key → { value, at }) for what this
+ * device takes, and `upload`: whether Drive's copy has to change.
+ */
+export function mergeSettings(local, remote) {
+  const values = {};
+  const at = {};
+  const toLocal = {};
+  let upload = false;
+  for (const key of SETTING_KEYS) {
+    const hasL = key in (local.values ?? {});
+    const hasR = key in (remote.values ?? {});
+    if (!hasL && !hasR) continue;
+    const la = local.at?.[key] ?? 0;
+    const ra = remote.at?.[key] ?? 0;
+    let value;
+    let when;
+    if (!hasR || (hasL && la > ra)) {
+      value = local.values[key];
+      when = la || 1; // set before settings travelled: known now, and older than anything set on purpose
+    } else {
+      value = remote.values[key];
+      when = ra;
+    }
+    if (key === 'readDays' && hasL && hasR) {
+      value = mergeDays(local.values[key], remote.values[key]);
+      when = Math.max(la, ra, 1);
+    }
+    values[key] = value;
+    at[key] = when;
+    if (!hasL || sig(value) !== sig(local.values[key]) || when !== la) toLocal[key] = { value, at: when };
+    if (!hasR || sig(value) !== sig(remote.values[key]) || when !== ra) upload = true;
+  }
+  return { values, at, toLocal, upload };
+}
+
 // ---------- library cards ----------
 
 /** Card fields that travel, in groups that change together. `opened` is the newest of both. */
-export const CARD_GROUPS = [['name'], ['format'], ['added'], ['title'], ['author'], ['cover'], ['position', 'progress'], ['notesId'], ['scale'], ['shelf'], ['finished']];
+// `trashed`: when the document went to the trash (null or 0: it is on the shelf)
+export const CARD_GROUPS = [['name'], ['format'], ['added'], ['title'], ['author'], ['cover'], ['position', 'progress'], ['notesId'], ['scale'], ['shelf'], ['finished'], ['trashed']];
 export const CARD_FIELDS = [...CARD_GROUPS.flat(), 'opened', 'marks', 'bookmarks', 'texts', 'edits'];
 
 const pick = (card, keys) => Object.fromEntries(keys.map((k) => [k, card?.[k] ?? null]));

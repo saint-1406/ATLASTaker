@@ -2,11 +2,14 @@
 // write the result to both sides. The same code runs on Windows (in the local server, server/sync.js)
 // and on Android (in the page, src/sync/android.js); each gives it a `local` side:
 //
-//   notes()                         → [{ id, content, created, updated, folder }]
+//   notes()                         → [{ id, content, created, updated, folder, trashed }]
 //   putNote({ id, content, created, updated })   creates or overwrites a note as it came from Drive
 //   createNote(content)             → { id, created, updated }   a fresh note (the other half of a conflict)
-//   trashNote(id)
+//   trashNote(id)                   gone for good elsewhere (deleted from a trash, or by an older app)
 //   setNoteFolder(id, folder)       moves a note to a folder ('' for none) as Drive has it
+//   setNoteTrashed(id, time)        puts a note in the trash (when) or takes it out (0), as Drive has it
+//   settings()                      → { values: { key: value }, at: { key: time } }   (optional)
+//   putSettings({ key: { value, at } })                settings as they came from another device
 //   docs()                          → library cards (with id, format)
 //   fileHash(doc)                   → { hash, time }   hashBytes() of the document's file, cached as it likes
 //   docBytes(id)                    → Uint8Array
@@ -18,7 +21,10 @@
 // On Drive (appDataFolder):
 //   index.json           { version, notes: { id: { hash, created, updated } | { deleted } },
 //                          docs: { id: { card, file, fileTime, format } | { deleted } }, assets: [name],
-//                          folders: { id: folder } }   — the notes' folders; none listed: in no folder
+//                          folders: { id: folder },   — the notes' folders; none listed: in no folder
+//                          trashed: { id: time },     — notes in the trash, and since when
+//                          settings: { key: time } }  — when each setting in settings.json was set
+//   settings.json        { values: { key: value }, at: { key: time } }   look, language, reading, profile…
 //   note-<id>.md         a note's text
 //   card-<id>.json       a document's card: title, author, cover, place, marks, bookmarks…
 //   doc-<id>.<format>    the document itself
@@ -26,9 +32,10 @@
 // Files are written before the index that points at them, so a sync cut short leaves Drive readable,
 // and the next round simply does the rest.
 
-import { cardData, cardSigs, fingerprint, mergeCard, mergeFolder, planDocs, planNotes, sig, stableJson } from './merge.js';
+import { cardData, cardSigs, fingerprint, mergeCard, mergeFolder, mergeSettings, mergeTrashed, planDocs, planNotes, sig, SETTING_KEYS, stableJson } from './merge.js';
 
 export const INDEX = 'index.json';
+export const SETTINGS = 'settings.json';
 const MIME = { md: 'text/markdown; charset=UTF-8', json: 'application/json; charset=UTF-8' };
 
 /** SHA-256 of bytes as hex: the same in Node and in a browser. */
@@ -37,8 +44,9 @@ export async function hashBytes(bytes) {
   return Array.from(digest.subarray(0, 16), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export const emptyBase = () => ({ notes: {}, docs: {}, assets: [], folders: {} });
-const emptyIndex = () => ({ version: 1, notes: {}, docs: {}, assets: [], folders: null });
+export const emptyBase = () => ({ notes: {}, docs: {}, assets: [], folders: {}, trashed: {} });
+const emptyIndex = () => ({ version: 1, notes: {}, docs: {}, assets: [], folders: null, trashed: null, settings: null });
+const isMap = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
 
 function cleanIndex(raw) {
   const out = emptyIndex();
@@ -46,23 +54,52 @@ function cleanIndex(raw) {
     if (raw.notes && typeof raw.notes === 'object') out.notes = raw.notes;
     if (raw.docs && typeof raw.docs === 'object') out.docs = raw.docs;
     if (Array.isArray(raw.assets)) out.assets = raw.assets.filter((n) => typeof n === 'string');
-    // an index written by a version without folders has none at all: that says nothing about them
-    if (raw.folders && typeof raw.folders === 'object' && !Array.isArray(raw.folders)) {
-      out.folders = Object.fromEntries(Object.entries(raw.folders).filter(([, v]) => typeof v === 'string' && v));
-    }
+    // an index written by an older version has no folders, trash or settings at all: that says nothing about them
+    if (isMap(raw.folders)) out.folders = Object.fromEntries(Object.entries(raw.folders).filter(([, v]) => typeof v === 'string' && v));
+    if (isMap(raw.trashed)) out.trashed = Object.fromEntries(Object.entries(raw.trashed).filter(([, v]) => Number.isFinite(v) && v > 0));
+    if (isMap(raw.settings)) out.settings = Object.fromEntries(Object.entries(raw.settings).filter(([k, v]) => SETTING_KEYS.includes(k) && Number.isFinite(v)));
   }
   return out;
+}
+
+/**
+ * Runs one sync (see syncRound). Another device may write the index while this round runs; then
+ * the round starts over from what that device wrote, so neither side's changes are lost.
+ */
+export async function syncOnce(args) {
+  const earlier = []; // what rounds that started over had already done here: it counts too
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const result = await syncRound({ ...args, checkIndex: attempt < 2 });
+      for (const r of earlier) {
+        result.pulled = [...new Set([...r.pulled, ...result.pulled])];
+        result.trashed = [...new Set([...r.trashed, ...result.trashed])];
+        result.conflicts = [...r.conflicts, ...result.conflicts];
+        result.settingsChanged = [...new Set([...r.settingsChanged, ...result.settingsChanged])];
+        result.docsChanged ||= r.docsChanged;
+        result.trashChanged ||= r.trashChanged;
+        result.sent += r.sent;
+        result.received += r.received;
+      }
+      return result;
+    } catch (err) {
+      if (!err.again) throw err;
+      earlier.push(err.partial);
+    }
+  }
 }
 
 /**
  * Runs one sync. `base` is what the previous round left (emptyBase() the first time); the result
  * carries the next one, to be kept by the caller. `skipDocs`: ids of documents open right now — they
  * wait for the next round. Returns { base, pulled, trashed, conflicts, docsChanged, skippedDocs, sent,
- * received }; skippedDocs: [{ id, title, error }], documents this device would not take this time.
+ * received, trashChanged, settingsChanged }; skippedDocs: [{ id, title, error }], documents this device
+ * would not take this time; trashChanged: notes went in or out of the trash here; settingsChanged: keys
+ * whose value came from another device.
  */
-export async function syncOnce({ local, drive, base: oldBase, skipDocs = [], now = Date.now() }) {
+async function syncRound({ local, drive, base: oldBase, skipDocs = [], now = Date.now(), checkIndex = false }) {
   const base = { ...emptyBase(), ...(oldBase ?? {}) };
-  const result = { pulled: [], trashed: [], conflicts: [], docsChanged: false, skippedDocs: [], sent: 0, received: 0 };
+  const result = { pulled: [], trashed: [], conflicts: [], docsChanged: false, skippedDocs: [], sent: 0, received: 0, trashChanged: false, settingsChanged: [], skippedAssets: 0 };
 
   // what is on Drive; of two files with one name (two devices at the same moment) the newer counts
   const files = (await drive.list()).sort((a, b) => String(a.modifiedTime).localeCompare(String(b.modifiedTime)));
@@ -73,6 +110,7 @@ export async function syncOnce({ local, drive, base: oldBase, skipDocs = [], now
     byName.set(f.name, f);
   }
   let index = emptyIndex();
+  const indexFile = byName.get(INDEX); // what this round started from; checked again before writing
   if (byName.has(INDEX)) {
     try {
       index = cleanIndex(JSON.parse(await drive.text(byName.get(INDEX).id)));
@@ -187,6 +225,23 @@ export async function syncOnce({ local, drive, base: oldBase, skipDocs = [], now
     } else delete folders[id];
   }
 
+  // ---- the trash: a note in it is still a note, it only waits there; in or out moves like a folder ----
+  const trashed = { ...(index.trashed ?? {}) };
+  for (const id of Object.keys(trashed)) if (!(id in next.notes) || next.notes[id].deleted) delete trashed[id];
+  for (const id of Object.keys(nextBase.notes)) {
+    const mine = notes.get(id)?.trashed || 0;
+    const theirs = index.trashed ? index.trashed[id] || 0 : mine;
+    const merged = mergeTrashed(mine, theirs, base.trashed?.[id]);
+    if (merged !== mine) {
+      await local.setNoteTrashed(id, merged);
+      result.trashChanged = true;
+    }
+    if (merged) {
+      trashed[id] = merged;
+      nextBase.trashed[id] = merged;
+    } else delete trashed[id];
+  }
+
   // ---- library ----
   const skip = new Set(skipDocs);
   const docs = new Map();
@@ -280,22 +335,66 @@ export async function syncOnce({ local, drive, base: oldBase, skipDocs = [], now
   }
 
   // ---- pictures in notes: they never change, so both sides simply get all of them ----
+  // one picture that will not go (unreadable here, refused there) waits for the next round, like a document
   const mineAssets = new Set(await local.assets());
   const theirAssets = new Set(index.assets);
   for (const name of mineAssets) {
     if (theirAssets.has(name)) continue;
-    await upload(`asset-${name}`, await local.assetBytes(name), 'application/octet-stream');
-    next.assets.push(name);
+    try {
+      await upload(`asset-${name}`, await local.assetBytes(name), 'application/octet-stream');
+      next.assets.push(name);
+    } catch (err) {
+      if (err.auth || err.offline) throw err;
+      result.skippedAssets++;
+    }
   }
   for (const name of theirAssets) {
     if (mineAssets.has(name)) continue;
-    const bytes = await download(`asset-${name}`, false);
-    if (bytes) await local.putAsset(name, bytes);
+    try {
+      const bytes = await download(`asset-${name}`, false);
+      if (bytes) await local.putAsset(name, bytes);
+    } catch (err) {
+      if (err.auth || err.offline) throw err;
+      result.skippedAssets++;
+    }
   }
   nextBase.assets = [...new Set([...mineAssets, ...theirAssets])];
 
-  const index2 = { version: 1, notes: next.notes, docs: next.docs, assets: [...new Set(next.assets)].sort(), folders };
-  if (stableJson(index2) !== before) await upload(INDEX, JSON.stringify(index2), MIME.json);
+  // ---- settings: read and written only when one side set something the other has not seen ----
+  let settings = index.settings;
+  if (local.settings) {
+    const mine = await local.settings();
+    const remoteAt = index.settings ?? {};
+    const keys = SETTING_KEYS.filter((key) => key in mine.values || key in remoteAt);
+    // settled: both sides know the same time (a value this version refused stays settled, not asked for again)
+    if (keys.some((key) => (key in remoteAt ? remoteAt[key] !== mine.at[key] : key in mine.values))) {
+      let remote = { values: {}, at: {} };
+      const raw = await download(SETTINGS, true);
+      try {
+        const parsed = raw === null ? null : JSON.parse(raw);
+        if (isMap(parsed?.values) && isMap(parsed?.at)) remote = { values: parsed.values, at: parsed.at };
+      } catch {
+        // a damaged file: this device's settings go up again
+      }
+      const merged = mergeSettings(mine, remote);
+      if (Object.keys(merged.toLocal).length) {
+        await local.putSettings(merged.toLocal);
+        result.settingsChanged = Object.keys(merged.toLocal).filter((key) => !(key in mine.values) || sig(merged.values[key]) !== sig(mine.values[key]));
+      }
+      if (merged.upload) await upload(SETTINGS, JSON.stringify({ values: merged.values, at: merged.at }), MIME.json);
+      settings = merged.at;
+    } else settings = remoteAt;
+  }
+
+  const index2 = { version: 1, notes: next.notes, docs: next.docs, assets: [...new Set(next.assets)].sort(), folders, trashed, settings };
+  if (stableJson(index2) !== before) {
+    // another device wrote the index since this round read it: start over from what it wrote
+    if (checkIndex && indexFile && drive.modified) {
+      const latest = await drive.modified(indexFile.id);
+      if (latest && indexFile.modifiedTime && latest !== indexFile.modifiedTime) throw Object.assign(new Error('index changed'), { again: true, partial: result });
+    }
+    await upload(INDEX, JSON.stringify(index2), MIME.json);
+  }
   // older twins of a file: their content is already part of what was just written
   for (const f of extra) await drive.remove(f.id).catch(() => {});
 

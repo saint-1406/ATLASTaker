@@ -42,6 +42,8 @@ import welcomeBrowserTextEn from './welcome-browser-en.md';
 import welcomeAndroidTextEn from './welcome-android-en.md';
 import { addReading, avatarNode, createTabBar, dayKey, drawHome, GOALS, shrinkPicture, streakOf } from './home.js';
 import { createNotesScreen } from './notesScreen.js';
+import { createTrash } from './trash.js';
+import { createUpdater } from './update.js';
 
 const $ = (sel) => document.querySelector(sel);
 const WELCOME = {
@@ -56,6 +58,7 @@ const narrow = matchMedia('(max-width: 820px)'); // the list becomes a panel tha
 const inBrowser = api.kind !== 'server'; // the single-file build: notes live in this browser
 
 const notes = new Map(); // id → { id, content, created, updated, cursor, scroll, info }
+const trashedNotes = new Map(); // id → a note in the trash: whole, out of every list, until restored or deleted for good
 const editorStates = new Map(); // id → EditorState, keeps undo history while the window is open
 const indexItems = new Map(); // id → <li>
 const cached = cachedLook();
@@ -91,6 +94,8 @@ const translator = createTranslator({ api, android }); // a selected passage, Ru
 const phone = Boolean(android) || matchMedia('(pointer: coarse)').matches;
 let sync = null; // Google Drive sync (sync/client.js), where this build has it
 let sideMenu = null; // the menu sliding in from the right (sidemenu.js)
+let updater = null; // newer versions: checked, and on Android installed from inside the app (update.js)
+let trashView = null; // the trash: deleted notes, documents and marks, until restored or deleted for good (trash.js)
 const profile = { avatar: null, name: '' }; // the picture and the name the person gave (Account)
 const homeEl = h('section', { class: 'home', hidden: true }); // the main page (home.js)
 const readingLog = { days: {}, goal: 20 }; // minutes read per day, and the day's goal (home.js)
@@ -122,6 +127,7 @@ const notesScreen = createNotesScreen({
     createNote('', { folder });
   },
   onBack: () => showHome(),
+  onTrash: () => trashView?.open('notes'),
 });
 
 let markReady;
@@ -169,14 +175,15 @@ async function boot() {
   if (Number.isInteger(saved.readGoal)) readingLog.goal = saved.readGoal;
   if (Array.isArray(saved.noteFolders)) noteFolders = saved.noteFolders;
   // 0.13 brought the cosy look: every install is moved to it once (the theme can be changed back in Settings)
+  // (quiet: a move made for the person, not their choice — a look set on another device wins over it)
   if ((saved.lookVersion ?? 0) < LOOK_VERSION) {
     Object.assign(prefs, DEFAULT_LOOK);
-    api.setState({ ...DEFAULT_LOOK, lookVersion: LOOK_VERSION }).catch(() => {});
+    api.setState({ ...DEFAULT_LOOK, lookVersion: LOOK_VERSION, $quiet: true }).catch(() => {});
   }
   Object.assign(prefs, normalizeReading(saved));
   // the language is settled once and stored, so it no longer follows the browser's afterwards
   const lang = pickLang({ saved: saved.lang, existing: Boolean(saved.welcomed), preferred: browserLanguages() });
-  if (saved.lang !== lang) api.setState({ lang }).catch(() => {});
+  if (saved.lang !== lang) api.setState({ lang, $quiet: true }).catch(() => {});
   if (lang !== prefs.lang) {
     prefs.lang = lang;
     applyLanguage({ persist: false });
@@ -185,7 +192,9 @@ async function boot() {
   applyFontScale(prefs.fontScale, { persist: false });
 
   let list = await api.list();
-  const firstRun = !list.length && !saved.welcomed;
+  for (const note of list) if (note.trashed) trashedNotes.set(note.id, note);
+  list = list.filter((note) => !note.trashed);
+  const firstRun = !list.length && !saved.welcomed && !trashedNotes.size;
   if (!list.length) {
     list = [await api.create(saved.welcomed ? '' : WELCOME[prefs.lang][android ? 'android' : inBrowser ? 'browser' : 'server'])];
     api.setState({ welcomed: true }).catch(() => {});
@@ -204,6 +213,7 @@ async function boot() {
     onImage: addImage,
     resolveImage: (name) => (api.assetUrl ? api.assetUrl(name) : Promise.resolve(null)),
     openImage: showImage,
+    touch: phone,
   });
   editor.view.scrollDOM.addEventListener(
     'scroll',
@@ -248,10 +258,13 @@ async function boot() {
         openNote(id);
       },
       onLink: (url) => api.openExternal(url),
+      onOpenTrash: (tab) => trashView?.open(tab),
+      onTrash: () => trashView?.refresh(),
       // the main page stays under the library: back there (its progress drawn again), or back to the note
       onClose: () => (notesScreen.isOpen() ? notesScreen.refresh() : homeEl.hidden ? editor.view.focus() : showHome()),
     });
   }
+  trashView = createTrash({ getNotes: () => [...trashedNotes.values()], restoreNote, purgeNote, library });
   sideMenu = createSideMenu({ sections: menuSections(), onClose: () => editor.view.focus({ preventScroll: true }) });
   bindChrome();
   applyLook({ persist: false });
@@ -283,12 +296,26 @@ async function boot() {
     afterRound: afterSync,
   });
   sync?.start();
+  updater = createUpdater({
+    api,
+    android,
+    h,
+    toast,
+    // what is being typed, and the open book's place and marks, are kept (and synced) before the installer opens
+    beforeInstall: async () => {
+      library?.flush();
+      await flushSave();
+      if (sync?.signedIn()) await sync.runQuiet();
+    },
+  });
+  updater?.start();
 }
 
-/** A sync round brought notes or cards from another device: show them. */
-async function afterSync({ pulled, trashed, conflicts, docsChanged, first }) {
+/** A sync round brought notes, cards or settings from another device: show them. */
+async function afterSync({ pulled, trashed, conflicts, docsChanged, first, trashChanged = false, settingsChanged = [] }) {
   if (docsChanged) await library?.reload();
-  if (!pulled.length && !trashed.length && !conflicts.length) return;
+  if (settingsChanged.length) await applySyncedSettings();
+  if (!pulled.length && !trashed.length && !conflicts.length && !trashChanged) return;
   if (first) {
     // a device signing in for the first time: its untouched welcome note would sit next to the one the
     // other devices already have; it goes to the trash (and, being untouched, off the Drive next round)
@@ -298,7 +325,17 @@ async function afterSync({ pulled, trashed, conflicts, docsChanged, first }) {
       await api.trash(note.id).catch(() => {});
     }
   }
-  const fresh = new Map((await api.list()).map((n) => [n.id, n]));
+  const all = await api.list();
+  trashedNotes.clear();
+  for (const note of all) if (note.trashed) trashedNotes.set(note.id, note);
+  const fresh = new Map(all.filter((n) => !n.trashed).map((n) => [n.id, n]));
+  // typed into here while another device put it in the trash: the typing wins, the note comes back out
+  if (currentId && dirty && trashedNotes.has(currentId)) {
+    const back = trashedNotes.get(currentId);
+    trashedNotes.delete(currentId);
+    fresh.set(currentId, { ...back, trashed: 0 });
+    await api.setTrashed(currentId, 0).catch(() => {});
+  }
   for (const [id, note] of fresh) {
     const known = notes.get(id);
     if (known && known.content === note.content) {
@@ -323,13 +360,38 @@ async function afterSync({ pulled, trashed, conflicts, docsChanged, first }) {
   }
   for (const id of [...notes.keys()]) if (!fresh.has(id)) forget(id);
   if (currentId && !notes.has(currentId)) {
+    // the open note went (to the trash, or for good) on another device: another one opens, or a fresh one
     currentId = null;
-    await openNote(newestId());
+    if (notes.size) await openNote(newestId());
+    else await createNote();
   }
   for (const { id } of conflicts) toast(t('sync.conflict', titleOf(notes.get(id))), { timeout: 8000 });
   renderIndex();
   refreshChrome();
   notesScreen.refresh();
+  trashView?.refresh();
+}
+
+/** Settings set on another device came in: the look, language, reading, profile and folders follow them now. */
+async function applySyncedSettings() {
+  const saved = (await api.getState().catch(() => null)) ?? {};
+  Object.assign(prefs, normalizeLook({ ...prefs, ...pickDefined(saved, ['skin', 'theme', 'accent']) }));
+  Object.assign(prefs, normalizeReading(saved));
+  if (typeof saved.sidebar === 'boolean' && saved.sidebar !== prefs.sidebar) applySidebar(saved.sidebar, { persist: false });
+  if (typeof saved.fontScale === 'number' && saved.fontScale !== prefs.fontScale) applyFontScale(saved.fontScale, { persist: false });
+  if (typeof saved.avatar === 'string' || saved.avatar === null) profile.avatar = saved.avatar;
+  if (typeof saved.profileName === 'string') profile.name = saved.profileName;
+  if (saved.readDays && typeof saved.readDays === 'object') readingLog.days = saved.readDays;
+  if (Number.isInteger(saved.readGoal)) readingLog.goal = saved.readGoal;
+  if (Array.isArray(saved.noteFolders)) noteFolders = saved.noteFolders;
+  if ((saved.lang === 'ru' || saved.lang === 'en') && saved.lang !== prefs.lang) {
+    prefs.lang = saved.lang;
+    applyLanguage({ persist: false });
+    await library?.relocalize?.();
+  } else applyLook({ persist: false });
+  showAvatar();
+  notesScreen.refresh();
+  if (!homeEl.hidden && sideMenu?.isOpen?.() !== true) await showHome();
 }
 
 /** Files another Android app handed over ("Open with" / "Share"): onto the shelf, the last one opened. */
@@ -569,6 +631,8 @@ async function openNoteNow(id, { transition = 'reveal', origin } = {}) {
   note.blankAtOpen = !note.content.trim();
   editor.show(editorStates.get(id) ?? editor.makeState(note.content, savedSelection(note)));
   editor.localize(); // a kept state may still speak the language it was made in
+  // on a phone a note with text opens for reading (no stray tap changes it); ✎ turns writing on
+  setEditing(!(phone && !note.blankAtOpen));
   dirty = false;
   setSaveState('saved', note.updated, { quiet: true });
   const scroll = note.scroll || 0;
@@ -584,6 +648,29 @@ async function openNoteNow(id, { transition = 'reveal', origin } = {}) {
   api.setState({ lastOpen: id }).catch(() => {});
   // under the notes screen the note only gets ready: a focus there would bring up a phone's keyboard
   if (!notesScreen.isOpen()) editor.view.focus();
+}
+
+// ---------- reading or writing ----------
+
+let editing = true; // the open note takes typing; off, it is only read (✎ in the title bar)
+let readHintAt = 0;
+
+/** Writing on or off for the open note; on, the cursor is placed and (on a phone) the keyboard comes up. */
+function setEditing(on, { focus = false } = {}) {
+  editing = on;
+  editor.setEditable(on);
+  const button = $('#btn-edit');
+  button.setAttribute('aria-pressed', String(on));
+  button.title = t(on ? 'notes.read' : 'notes.edit');
+  button.setAttribute('aria-label', button.title);
+  document.documentElement.classList.toggle('note-reading', !on);
+  if (on && focus) editor.view.focus();
+  if (!on) editor.view.contentDOM.blur();
+}
+
+/** A command that writes into the note (a comment, dictation, a code block…) turns writing on first. */
+function ensureEditing() {
+  if (!editing) setEditing(true);
 }
 
 /** Saves the open note before moving on; false when the save failed and the switch must not happen. */
@@ -631,35 +718,73 @@ async function createNote(content = '', { folder = '' } = {}) {
   if (content) editor.view.dispatch({ selection: { anchor: editor.view.state.doc.length } });
 }
 
+/**
+ * Into the trash: the note leaves every list but stays whole (its text, folder and dates), on every
+ * device that syncs, until it is restored or deleted for good from the trash. No question asked: one
+ * tap on "Undo" brings it back, and the trash keeps it after that.
+ */
 async function deleteNote(id) {
   const note = notes.get(id);
-  if (!note) return;
-  const c = copy();
-  const ok = await confirmDialog({ kicker: c.deleteKicker, title: c.deleteTitle(titleOf(note)), text: c.deleteText, ok: c.deleteOk, danger: true });
-  if (!ok) return false;
+  if (!note) return false;
   const wasOpen = id === currentId;
-  if (wasOpen) clearTimeout(saveTimer);
-  trashing = id;
+  // what was typed last goes into the trash with it
+  if (wasOpen && !(await flushSave())) {
+    toast(t('notes.deleteFailed', t('notes.notSaved')));
+    return false;
+  }
+  const when = Date.now();
   try {
-    await api.trash(id);
+    await api.setTrashed(id, when);
   } catch (err) {
-    trashing = null;
-    // the file is still there: keep the note open and saving as if nothing happened
-    if (wasOpen && dirty) saveTimer = setTimeout(flushSave, SAVE_DELAY);
     toast(t('notes.deleteFailed', err.message));
     return false;
   }
-  trashing = null;
-  if (id === currentId) {
+  if (wasOpen) {
+    rememberPosition();
     dirty = false;
     currentId = null;
   }
+  trashedNotes.set(id, { ...note, content: wasOpen ? editor.view.state.doc.toString() : note.content, trashed: when });
   forget(id);
   if (!notes.size) await createNote();
-  else if (!currentId) await openNote(newestId());
+  else if (wasOpen && !notesScreen.isOpen()) await openNote(newestId());
   renderIndex();
-  toast(copy().deleted(titleOf(note)), api.openNotesFolder ? { action: { text: t('notes.openFolder'), run: () => api.openNotesFolder() } } : {});
   notesScreen.refresh();
+  trashView?.refresh();
+  toast(t('trash.noteMoved', titleOf(note)), { action: { text: t('trash.undo'), run: () => restoreNote(id) }, timeout: 7000 });
+  return true;
+}
+
+/** Out of the trash, back where it was (its folder too). */
+async function restoreNote(id) {
+  const note = trashedNotes.get(id);
+  if (!note) return false;
+  try {
+    await api.setTrashed(id, 0);
+  } catch (err) {
+    toast(err.message);
+    return false;
+  }
+  trashedNotes.delete(id);
+  notes.set(id, { ...note, trashed: 0, info: analyze(note.content) });
+  renderIndex();
+  notesScreen.refresh();
+  trashView?.refresh();
+  return true;
+}
+
+/** Deleted for good: only from the trash. The file still waits out of sight (notes\.trash) on Windows. */
+async function purgeNote(id) {
+  if (!trashedNotes.has(id)) return false;
+  try {
+    await api.trash(id);
+  } catch (err) {
+    toast(err.message);
+    return false;
+  }
+  trashedNotes.delete(id);
+  rescue.drop(id);
+  trashView?.refresh();
   return true;
 }
 
@@ -681,6 +806,7 @@ function toggleDictation() {
     dictation.stop();
     return;
   }
+  ensureEditing();
   if (!dictation.supported || suspended || lost) {
     toast(t('dictation.unsupported'), { timeout: 8000 });
     return;
@@ -1115,6 +1241,18 @@ function openEditorMenu(event, view) {
 
   const items = [];
   if (url) items.push({ icon: '↗', text: t('menu.openLink'), kbd: t('menu.ctrlClick'), run: () => openLink(url) }, '-');
+  if (!editing) {
+    items.push(
+      { icon: '⧉', text: t('menu.copy'), kbd: 'Ctrl+C', disabled: sel.empty, run: () => copySelection(view) },
+      { icon: '🌐', text: t('menu.translate'), kbd: 'Ctrl+Shift+X', disabled: sel.empty, run: () => translateSelection(view) },
+      { icon: '▣', text: t('menu.selectAll'), kbd: 'Ctrl+A', run: () => view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }) },
+      { icon: '⇩', text: t('notes.saveCopy'), run: () => exportNote(currentId) },
+      '-',
+      { icon: '✎', text: t('notes.edit'), run: () => setEditing(true, { focus: true }) },
+    );
+    showMenu(event.clientX, event.clientY, items);
+    return;
+  }
   items.push(
     {
       icon: '❝',
@@ -1139,6 +1277,7 @@ function openEditorMenu(event, view) {
 }
 
 async function requestComment(view, lineNumber) {
+  ensureEditing();
   const { state } = view;
   const sel = state.selection.main;
   const n = lineNumber ?? state.doc.lineAt(sel.empty ? sel.head : Math.max(sel.from, sel.to - 1)).number;
@@ -1173,6 +1312,7 @@ async function cutSelection(view) {
 }
 
 async function pasteFromClipboard(view) {
+  ensureEditing();
   try {
     pasteText(view, await api.readClipboard(), onSmartPaste);
   } catch {
@@ -1459,6 +1599,7 @@ function menuSections() {
         sideItem({ icon: '⇩', text: t('side.saveCopy'), run: () => close(() => exportNote(currentId)) }),
         sideItem({ icon: '⇊', text: t('side.exportAll'), run: () => close(exportAll) }),
         sideItem({ icon: '⇡', text: t('side.import'), run: () => close(importFiles) }),
+        sideItem({ icon: '🗑', text: t('trash.title'), run: () => close(() => trashView?.open('notes')) }),
         api.openNotesFolder ? sideItem({ icon: '▭', text: t('side.notesFolder'), run: () => close(() => api.openNotesFolder()) }) : null,
         api.openBackupsFolder ? sideItem({ icon: '⟲', text: t('side.backupsFolder'), run: () => close(() => api.openBackupsFolder()) }) : null,
       ),
@@ -1498,6 +1639,7 @@ function menuSections() {
           null,
           sideItem({ icon: '▥', text: t('side.openLibrary'), kbd: 'Ctrl+O', run: () => close(() => openLibrary()) }),
           sideItem({ icon: '⇡', text: t('side.addDocument'), hint: t('side.addDocumentHint'), run: () => close(() => openLibrary({ pick: true })) }),
+          sideItem({ icon: '🗑', text: t('trash.title'), run: () => close(() => trashView?.open('docs')) }),
         ),
         sideGroup(null, sideItem({ icon: 'Aa', text: t('side.readLook'), hint: t('side.readLookHint'), chevron: true, run: () => close(() => showAppearance()) })),
       ];
@@ -1521,8 +1663,9 @@ function menuSections() {
     account: () => [
       profileSection(),
       sync ? sync.section() : h('p', { class: 'side-empty' }, t('side.noSync')),
+      updater ? updater.section() : null,
       h('p', { class: 'side-version' }, t('side.version', typeof __VERSION__ === 'string' ? __VERSION__ : '')),
-    ],
+    ].filter(Boolean),
   };
 }
 
@@ -1742,7 +1885,11 @@ function commandList() {
     { icon: '▤', title: t('commands.sidebar'), kbd: 'Ctrl+B', keywords: 'sidebar list панель список', run: toggleIndex },
     { icon: '◎', title: t(focusMode ? 'commands.unfocus' : 'commands.focus'), kbd: 'Ctrl+.', keywords: 'focus фокус', run: () => toggleFocus() },
     { icon: '❝', title: t('commands.comment'), kbd: 'Ctrl+Shift+M', keywords: 'comment комментарий', run: () => requestComment(editor.view) },
-    { icon: '⌗', title: t('commands.codeBlock'), kbd: 'Ctrl+E', keywords: 'code код', run: () => insertCodeBlock(editor.view) },
+    { icon: '⌗', title: t('commands.codeBlock'), kbd: 'Ctrl+E', keywords: 'code код', run: () => {
+        ensureEditing();
+        insertCodeBlock(editor.view);
+      },
+    },
     { icon: '⇩', title: t('commands.saveCopy'), keywords: 'export save экспорт скачать', run: () => exportNote(currentId) },
     { icon: '⇊', title: t('commands.exportAll'), keywords: 'backup download резервная копия архив экспорт zip', run: exportAll },
     { icon: '⇡', title: t('commands.import'), keywords: 'import upload files импорт загрузить файлы', run: importFiles },
@@ -1857,6 +2004,21 @@ function onGlobalKey(e) {
 
 function bindChrome() {
   $('#btn-new').addEventListener('click', () => createNote());
+  $('#btn-edit').addEventListener('click', () => setEditing(!editing, { focus: true }));
+  // where the page is not shrunk for the on-screen keyboard, --kb says how much of it the keyboard
+  // covers, so a comment being typed rises above it (on Android the app tells it, MainActivity.tellInsets)
+  if (!android && window.visualViewport) {
+    const vv = window.visualViewport;
+    const keyboard = () => document.documentElement.style.setProperty('--kb', `${Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop))}px`);
+    vv.addEventListener('resize', keyboard);
+    vv.addEventListener('scroll', keyboard);
+  }
+  // a tap on a note open for reading says how to write in it (now and then, not on every tap)
+  $('#editor').addEventListener('click', () => {
+    if (editing || !editor.view.state.selection.main.empty || Date.now() - readHintAt < 20_000) return;
+    readHintAt = Date.now();
+    toast(t('notes.readOnly'), { timeout: 3500, action: { text: t('notes.edit'), run: () => setEditing(true, { focus: true }) } });
+  });
   $('#btn-new-2').addEventListener('click', () => {
     closeIndexPanel();
     createNote();
@@ -1913,6 +2075,10 @@ function bindChrome() {
 // A small handle for checking the app from the outside (browser console, automated runs).
 window.__atlas = {
   ready,
+  // Android's updater reports here (MainActivity → Updater.java)
+  updateEvent: (event) => updater?.event(event),
+  trash: (tab) => trashView?.open(tab),
+  setEditing: (on) => setEditing(on),
   summary: () => {
     const note = notes.get(currentId);
     return {

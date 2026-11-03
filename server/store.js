@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { settingsOf, SETTING_KEYS, stampSettings } from '../src/sync/merge.js';
 
 export const ID_RE = /^n-[a-z0-9]{6,40}$/;
 export const ASSET_RE = /^a-[a-z0-9]{6,40}\.(png|jpg|gif|webp)$/;
@@ -184,6 +185,11 @@ export function createStore(dir) {
       if (folder) m.folder = folder;
       else delete m.folder;
     }
+    // in the trash since then (the file stays where it is, so a note comes back whole); 0 takes it out
+    if (Number.isFinite(patch?.trashed) && patch.trashed >= 0) {
+      if (patch.trashed > 0) m.trashed = Math.round(patch.trashed);
+      else delete m.trashed;
+    }
   }
 
   return {
@@ -209,6 +215,7 @@ export function createStore(dir) {
               cursor: m.cursor ?? null,
               scroll: m.scroll ?? 0,
               folder: m.folder ?? '',
+              trashed: m.trashed ?? 0,
             });
           } catch (err) {
             console.error(`Не удалось прочитать ${name}: ${err.message}`);
@@ -312,14 +319,37 @@ export function createStore(dir) {
       return { ...meta.state };
     },
 
+    /**
+     * Changes the state. Each setting the person changes keeps when (settingsAt), so sync knows which
+     * device set it last; `$quiet: true` marks a change that is not their choice (a default, a move).
+     */
     setState(patch) {
       if (patch && typeof patch === 'object') {
-        for (const [key, value] of Object.entries(patch)) {
-          if (STATE_RULES[key]?.(value)) meta.state[key] = value;
-        }
+        const accepted = Object.fromEntries(Object.entries(patch).filter(([key, value]) => STATE_RULES[key]?.(value)));
+        const at = stampSettings(meta.state, accepted, { quiet: patch.$quiet === true });
+        Object.assign(meta.state, accepted);
+        if (Object.keys(at).length) meta.state.settingsAt = at;
         scheduleMeta();
       }
       return { ...meta.state };
+    },
+
+    /** The settings as sync sees them: { values, at }. */
+    settings() {
+      return settingsOf(meta.state);
+    },
+
+    /** Settings from another device (sync), each with the time it was set there. */
+    putSettings(entries) {
+      const at = { ...(meta.state.settingsAt ?? {}) };
+      for (const [key, entry] of Object.entries(entries ?? {})) {
+        if (!SETTING_KEYS.includes(key) || !Number.isFinite(entry?.at)) continue;
+        // a value this version does not know is left alone, but its time is kept: it is not asked for again
+        if (STATE_RULES[key]?.(entry.value)) meta.state[key] = entry.value;
+        at[key] = entry.at;
+      }
+      meta.state.settingsAt = at;
+      scheduleMeta();
     },
 
     /** Writes atlas.json right now (shutdown path). */

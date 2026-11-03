@@ -12,7 +12,7 @@ import { ALL, NONE, addFolder, folderCounts, folderList, inFolder, pickNotes, pr
  * the app's state; moveNote(id, folder) and deleteNote(id) (→ true when it went) do the storage;
  * onOpen(id); onCreate(folder); onBack().
  */
-export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, deleteNote, onOpen, onCreate, onBack }) {
+export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, deleteNote, onOpen, onCreate, onBack, onTrash = null }) {
   let folder = ALL;
   let query = '';
 
@@ -32,9 +32,21 @@ export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, d
     type: 'search',
     spellcheck: 'false',
   });
-  // a new note leads the folder row and stays where it is while the folders scroll beside it
-  const newLabel = h('span', { class: 'notes-new-text' });
-  const newNote = h('button', { type: 'button', class: 'lib-chip notes-new', onclick: () => onCreate(folderForNew()) }, h('span', { 'aria-hidden': 'true' }, '＋'), newLabel);
+  // one round button at the bottom right, where the thumb is: a note, a folder, or the trash
+  const fab = h('button', { type: 'button', class: 'notes-fab', 'aria-haspopup': 'menu' }, h('span', { 'aria-hidden': 'true' }, '+'));
+  fab.addEventListener('click', () => {
+    const r = fab.getBoundingClientRect();
+    showMenu(
+      r.right,
+      r.top - 8,
+      [
+        { icon: '✎', text: t('notesScreen.newNote'), run: () => onCreate(folderForNew()) },
+        { icon: '▭', text: t('notesScreen.newFolder'), run: () => newFolder() },
+        ...(onTrash ? ['-', { icon: '🗑', text: t('trash.title'), run: () => onTrash() }] : []),
+      ],
+      { above: true, onClose: () => fab.focus({ preventScroll: true }) },
+    );
+  });
   const chips = h('div', { class: 'lib-chips notes-chips', role: 'tablist' });
   const list = h('ol', { class: 'notes-list' });
   const empty = h('div', { class: 'notes-empty', hidden: true });
@@ -42,7 +54,8 @@ export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, d
     'section',
     { class: 'notes-screen', hidden: true },
     h('header', { class: 'notes-head' }, backButton, h('h2', { class: 'notes-heading' }, heading, counter)),
-    h('div', { class: 'notes-body' }, search, h('div', { class: 'notes-chip-row' }, newNote, chips), list, empty),
+    h('div', { class: 'notes-body' }, search, h('div', { class: 'notes-chip-row' }, chips), list, empty),
+    fab,
   );
 
   search.addEventListener('input', () => {
@@ -69,8 +82,8 @@ export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, d
     backButton.setAttribute('aria-label', t('notesScreen.back'));
     search.placeholder = t('notesScreen.search');
     search.setAttribute('aria-label', t('notesScreen.search'));
-    newLabel.textContent = t('notesScreen.newNote');
-    newNote.title = t('notesScreen.newNote');
+    fab.title = t('notesScreen.create');
+    fab.setAttribute('aria-label', t('notesScreen.create'));
     drawChips(names);
     drawList();
   }
@@ -103,13 +116,12 @@ export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, d
       return node;
     };
     if (!names.length && folder === NONE) folder = ALL;
-    // a new folder is the rarer thing: at the end of the row
+    // a new folder comes from the round "+" at the bottom
     chips.replaceChildren(
       ...[
         chip(t('notesScreen.all'), ALL),
         ...names.map((name) => chip(name, name, { menu: true })),
         counts[NONE] && names.length ? chip(t('notesScreen.none'), NONE) : null,
-        h('button', { type: 'button', class: 'lib-chip add', onclick: () => newFolder() }, '＋ ', t('notesScreen.newFolder')),
       ].filter(Boolean),
     );
   }
