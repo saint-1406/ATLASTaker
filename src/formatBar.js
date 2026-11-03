@@ -16,6 +16,7 @@ export const TOOLS = [
   { id: 'h3', glyph: 'H3', run: (view) => apply(view, (s) => heading(s, 3)) },
   { id: 'bold', glyph: 'B', run: (view) => apply(view, (s) => wrap(s, '**')) },
   { id: 'italic', glyph: 'I', run: (view) => apply(view, (s) => wrap(s, '*')) },
+  { id: 'underline', glyph: 'U', run: (view) => apply(view, (s) => wrap(s, '<u>', '</u>')) },
   { id: 'strike', glyph: 'S', run: (view) => apply(view, (s) => wrap(s, '~~')) },
   { id: 'code', glyph: '`', run: (view) => apply(view, (s) => wrap(s, '`')) },
   { id: 'bullet', glyph: '•', run: (view) => apply(view, (s) => lineMark(s, 'bullet')) },
@@ -25,11 +26,12 @@ export const TOOLS = [
   { id: 'indent', glyph: '⇥', run: (view) => indentMore(view) },
   { id: 'outdent', glyph: '⇤', run: (view) => indentLess(view) },
   { id: 'link', glyph: '🔗', run: (view) => apply(view, link) },
+  { id: 'image', glyph: '🖼', run: (view, actions) => actions.image?.() },
   { id: 'rule', glyph: '―', run: (view) => apply(view, rule) },
   { id: 'codeblock', glyph: '{ }', run: (view) => insertCodeBlock(view) },
 ];
 const BY_ID = new Map(TOOLS.map((tool) => [tool.id, tool]));
-export const DEFAULT_TOOLS = ['keyboard', 'h1', 'h2', 'h3', 'bold', 'italic', 'bullet', 'numbered', 'task', 'quote', 'indent', 'outdent', 'link'];
+export const DEFAULT_TOOLS = ['keyboard', 'h1', 'h2', 'h3', 'bold', 'italic', 'underline', 'strike', 'bullet', 'numbered', 'task', 'quote', 'indent', 'outdent', 'link', 'image'];
 
 /** A saved list of buttons, made safe: known ones, each once; nothing saved yet: the default ones. */
 export function normalizeTools(list) {
@@ -37,8 +39,11 @@ export function normalizeTools(list) {
   return [...new Set(list.filter((id) => BY_ID.has(id)))];
 }
 
-/** The bar. getView(): the editor's view; buttons never take the focus, so the keyboard stays up. */
-export function createFormatBar({ getView }) {
+/**
+ * The bar. getView(): the editor's view; actions.image(): a picture chosen and put in. Buttons never
+ * take the focus, so the keyboard stays up.
+ */
+export function createFormatBar({ getView, actions = {} }) {
   const node = h('div', { class: 'format-bar', role: 'toolbar', hidden: true });
   let tools = [...DEFAULT_TOOLS];
 
@@ -51,7 +56,7 @@ export function createFormatBar({ getView }) {
         button.addEventListener('pointerdown', (e) => e.preventDefault());
         button.addEventListener('click', () => {
           const view = getView();
-          if (view) tool.run(view);
+          if (view) tool.run(view, actions);
         });
         return button;
       }),

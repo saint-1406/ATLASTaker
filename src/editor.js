@@ -28,6 +28,13 @@ import { planComment } from './comments.js';
 import { planSlashFence } from './fence.js';
 import { joinDictated } from './dictation.js';
 import { focusDim } from './focusDim.js';
+import { livePreview } from './livePreview.js';
+
+// Markdown's marks hidden (the note reads as it means) or shown as typed (livePreview.js); tags are
+// drawn either way. Two fixed extensions, so the compartment can tell which it holds.
+const markup = new Compartment();
+const MARKS_HIDDEN = livePreview(true);
+const MARKS_SHOWN = livePreview(false);
 import { IMAGE_RE } from './markdown.js';
 import { count, currentLang, t as say, ui } from './i18n.js';
 
@@ -593,7 +600,7 @@ export function createEditor({
     }),
   ];
 
-  const withLanguage = () => [...extensions, language.of(languageExtensions()), editing.of(EDITABLE), focusing.of([])];
+  const withLanguage = () => [...extensions, language.of(languageExtensions()), editing.of(EDITABLE), focusing.of([]), markup.of(MARKS_HIDDEN)];
   const view = new EditorView({ parent, state: EditorState.create({ doc: '', extensions: withLanguage() }) });
   return {
     view,
@@ -618,6 +625,11 @@ export function createEditor({
     setFocusDim(mode, lang = currentLang()) {
       const wanted = dimFor(mode, lang);
       if (focusing.get(view.state) !== wanted) view.dispatch({ effects: focusing.reconfigure(wanted) });
+    },
+    /** Markdown's marks hidden (true) or shown as typed; applied again after show(), like setEditable. */
+    setMarkup(hide) {
+      const wanted = hide ? MARKS_HIDDEN : MARKS_SHOWN;
+      if (markup.get(view.state) !== wanted) view.dispatch({ effects: markup.reconfigure(wanted) });
     },
     /** What the note's history holds: steps that can be undone and redone. */
     steps: () => ({ canUndo: undoDepth(view.state) > 0, canRedo: redoDepth(view.state) > 0 }),

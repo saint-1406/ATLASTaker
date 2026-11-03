@@ -14,6 +14,8 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.print.PrintAttributes;
+import android.print.PrintManager;
 import android.provider.OpenableColumns;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
@@ -100,6 +102,7 @@ public class MainActivity extends ComponentActivity {
     private final List<JSONObject> incoming = new ArrayList<>();
     private final AtomicInteger counter = new AtomicInteger();
     private WebView web;
+    private WebView printing; // a note being printed (printHtml): kept while the print job reads it
     private File incomingDir;
     private ValueCallback<Uri[]> chooserCallback;
     private byte[] pendingSave;
@@ -749,6 +752,29 @@ public class MainActivity extends ComponentActivity {
                     pendingSave = null;
                     Toast.makeText(MainActivity.this, R.string.not_saved, Toast.LENGTH_SHORT).show();
                 }
+            });
+        }
+
+        /**
+         * Prints a page of HTML (a note exported as PDF): Android's own printing, whose "Save as PDF"
+         * printer makes the file. The page is laid out in a WebView of its own, with no scripts.
+         */
+        @JavascriptInterface
+        public void printHtml(String html, String title) {
+            final String name = title == null || title.trim().isEmpty() ? "ATLAS" : title.trim();
+            runOnUiThread(() -> {
+                WebView page = new WebView(MainActivity.this);
+                page.getSettings().setJavaScriptEnabled(false);
+                page.setWebViewClient(new WebViewClient() {
+                    @Override
+                    public void onPageFinished(WebView view, String url) {
+                        PrintManager printer = (PrintManager) getSystemService(Context.PRINT_SERVICE);
+                        if (printer == null) return;
+                        printer.print(name, view.createPrintDocumentAdapter(name), new PrintAttributes.Builder().build());
+                    }
+                });
+                printing = page; // held until the next print: the print job reads from it
+                page.loadDataWithBaseURL(null, html == null ? "" : html, "text/html", "UTF-8", null);
             });
         }
 

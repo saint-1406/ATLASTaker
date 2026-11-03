@@ -92,53 +92,59 @@ function runs(state, from, to, char) {
   return Math.min(before, after);
 }
 
-/** Is a span of this mark already around [from, to]? A `*` counts once for italic, twice for bold. */
-function wrapped(state, from, to, mark) {
-  const n = runs(state, from, to, mark[0]);
-  if (mark === '*') return n === 1 || n >= 3;
-  return n >= mark.length;
+/**
+ * Is a span of this mark already around [from, to]? A `*` counts once for italic, twice for bold; a
+ * pair of different marks (<u> … </u>) must stand right outside.
+ */
+function wrapped(state, from, to, open, close) {
+  if (open !== close) return state.sliceDoc(from - open.length, from) === open && state.sliceDoc(to, to + close.length) === close;
+  const n = runs(state, from, to, open[0]);
+  if (open === '*') return n === 1 || n >= 3;
+  return n >= open.length;
 }
 
-/** Does the selected text carry the mark itself ("**word**" selected)? */
-function carries(text, mark) {
-  if (text.length < 2 * mark.length || !text.startsWith(mark) || !text.endsWith(mark)) return false;
-  if (mark !== '*') return true;
+/** Does the selected text carry the marks itself ("**word**" selected)? */
+function carries(text, open, close) {
+  if (text.length < open.length + close.length || !text.startsWith(open) || !text.endsWith(close)) return false;
+  if (open !== '*') return true;
   return !(text.startsWith('**') && !text.startsWith('***')); // that is bold, not italic
 }
 
 /**
- * Bold (`**`), italic (`*`), strike (`~~`) or code (`` ` ``) around each selection. A selection already
- * in the mark comes out of it; with nothing selected the marks go in as a pair, the cursor between.
+ * Bold (`**`), italic (`*`), strike (`~~`), code (`` ` ``) or underline (`<u>`, `</u>`) around each
+ * selection. A selection already in the marks comes out of them; with nothing selected the marks go
+ * in as a pair, the cursor between.
  */
-export function wrap(state, mark) {
-  const len = mark.length;
+export function wrap(state, open, close = open) {
+  const a = open.length;
+  const b = close.length;
   return {
     ...state.changeByRange((range) => {
       const text = state.sliceDoc(range.from, range.to);
-      if (carries(text, mark)) {
+      if (carries(text, open, close)) {
         return {
           changes: [
-            { from: range.from, to: range.from + len, insert: '' },
-            { from: range.to - len, to: range.to, insert: '' },
+            { from: range.from, to: range.from + a, insert: '' },
+            { from: range.to - b, to: range.to, insert: '' },
           ],
-          range: EditorSelection.range(range.from, range.to - 2 * len),
+          range: EditorSelection.range(range.from, range.to - a - b),
         };
       }
-      if (wrapped(state, range.from, range.to, mark)) {
+      if (wrapped(state, range.from, range.to, open, close)) {
         return {
           changes: [
-            { from: range.from - len, to: range.from, insert: '' },
-            { from: range.to, to: range.to + len, insert: '' },
+            { from: range.from - a, to: range.from, insert: '' },
+            { from: range.to, to: range.to + b, insert: '' },
           ],
-          range: EditorSelection.range(range.from - len, range.to - len),
+          range: EditorSelection.range(range.from - a, range.to - a),
         };
       }
       return {
         changes: [
-          { from: range.from, insert: mark },
-          { from: range.to, insert: mark },
+          { from: range.from, insert: open },
+          { from: range.to, insert: close },
         ],
-        range: EditorSelection.range(range.from + len, range.to + len),
+        range: EditorSelection.range(range.from + a, range.to + a),
       };
     }),
     scrollIntoView: true,

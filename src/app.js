@@ -52,6 +52,8 @@ import { openVersions } from './versions.js';
 import { textStats } from './stats.js';
 import { noteWriting } from './writing.js';
 import { VERSION_EVERY } from './versionRules.js';
+import { htmlPage, toHtml, toText } from './exporters.js';
+import { askTag, collectTags, openTags } from './tags.js';
 
 // a device with a PIN shows nothing of its notes until the PIN is in (lock.js)
 coverEarly();
@@ -108,7 +110,8 @@ let sideMenu = null; // the menu sliding in from the right (sidemenu.js)
 let updater = null; // newer versions: checked, and on Android installed from inside the app (update.js)
 let noteSteps = null; // ↶ ↷ in the title bar: the open note's text, one step back or forward (undo.js)
 // writing (0.17): the statistics strip, the formatting bar, what focus mode dims (all synced settings)
-const writing = { statsBar: true, formatBar: 'touch', formatTools: null, focusDim: 'paragraph' };
+// markup: 'hide' shows a note as it reads (livePreview.js), 'show' as it is typed
+const writing = { statsBar: true, formatBar: 'touch', formatTools: null, focusDim: 'paragraph', markup: 'hide' };
 const writeLog = { writeDays: {}, growDays: {} }; // characters written and the text's growth per day (writing.js)
 let pendingWritten = 0; // not yet in writeLog: it is saved every few seconds, not on every key
 let pendingGrown = 0;
@@ -116,7 +119,7 @@ let writeLogTimer = 0;
 let pinLock = null; // this device's PIN, hashed (lock.js); null: none
 const lockScreen = createLock({ getLock: () => pinLock });
 const statsStrip = createStatsStrip({ onOpen: () => showWritingStats() });
-const formatBar = createFormatBar({ getView: () => editor?.view ?? null });
+const formatBar = createFormatBar({ getView: () => editor?.view ?? null, actions: { image: () => pickImage() } });
 const versionKept = new Map(); // note id → when a version of it was last kept in this window
 let lastStats = null; // the open note's textStats(), for the strip's pace updates in between
 let trashView = null; // the trash: deleted notes, documents and marks, until restored or deleted for good (trash.js)
@@ -925,6 +928,7 @@ function readWriting(saved) {
   if (['touch', 'always', 'off'].includes(saved.formatBar)) writing.formatBar = saved.formatBar;
   if (Array.isArray(saved.formatTools)) writing.formatTools = saved.formatTools;
   if (['paragraph', 'sentence', 'off'].includes(saved.focusDim)) writing.focusDim = saved.focusDim;
+  if (saved.markup === 'hide' || saved.markup === 'show') writing.markup = saved.markup;
   if (saved.writeDays && typeof saved.writeDays === 'object') writeLog.writeDays = saved.writeDays;
   if (saved.growDays && typeof saved.growDays === 'object') writeLog.growDays = saved.growDays;
   pinLock = saved.pinLock && typeof saved.pinLock === 'object' ? saved.pinLock : null;
@@ -953,11 +957,172 @@ function showFormatBar() {
   $('#app').classList.toggle('formatting', show);
 }
 
-/** In focus mode, everything but the paragraph or sentence being written fades (focusDim.js). */
+/**
+ * In focus mode, everything but the paragraph or sentence being written fades (focusDim.js); and the
+ * marks are hidden or shown (livePreview.js). Each note's state carries both, so this follows show().
+ */
 function applyFocusDim() {
   const lit = focusMode && writing.focusDim !== 'off';
   editor?.setFocusDim(lit ? writing.focusDim : null, prefs.lang);
+  editor?.setMarkup(writing.markup !== 'show');
   $('#app').classList.toggle('focus-lit', lit);
+}
+
+// ---------- the note's own menu (⋯ in the title bar): copy, clear, tags, export ----------
+
+function openNoteMenu(anchor) {
+  const note = notes.get(currentId);
+  if (!note) return;
+  const r = anchor.getBoundingClientRect();
+  showMenu(r.right, r.bottom + 4, [
+    { header: titleOf(note) },
+    { icon: '⧉', text: t('noteMenu.copyAll'), run: copyAll },
+    { icon: '#', text: t('noteMenu.tag'), run: tagSelection },
+    { icon: '⌗', text: t('tags.title'), run: showTags },
+    { icon: '◴', text: t('versions.title'), run: showVersions },
+    { icon: '∑', text: t('stats.title'), run: showWritingStats },
+    '-',
+    { header: t('noteMenu.export') },
+    { icon: 'MD', text: t('noteMenu.md'), run: () => exportNote(currentId) },
+    { icon: 'TXT', text: t('noteMenu.txt'), run: () => exportAs('txt') },
+    { icon: 'HTML', text: t('noteMenu.html'), run: () => exportAs('html') },
+    { icon: 'PDF', text: t('noteMenu.pdf'), run: () => exportAs('pdf') },
+    '-',
+    { icon: '⌫', text: t('noteMenu.clear'), className: 'danger', run: clearPage },
+  ]);
+}
+
+async function copyAll() {
+  try {
+    await api.copy(editor.view.state.doc.toString());
+    toast(t('noteMenu.copied'));
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+/** The whole page emptied: one step (↶ brings it back), and the text is kept as a version first. */
+async function clearPage() {
+  const id = currentId;
+  const text = editor.view.state.doc.toString();
+  if (!text) return;
+  await keepVersion(id, text, { force: true });
+  setEditing(true);
+  editor.view.dispatch({ changes: { from: 0, to: text.length, insert: '' }, userEvent: 'delete.clear' });
+  toast(t('noteMenu.cleared'), { timeout: 7000, action: { text: t('trash.undo'), run: () => editor.undo() } });
+}
+
+/** Every note with its text now (the open one as it is in the editor) and its title, for the tags. */
+function notesNow() {
+  return [...notes.values()].map((note) => ({ id: note.id, title: titleOf(note), content: note.id === currentId ? editor.view.state.doc.toString() : note.content }));
+}
+
+/** The selected passage gets a tag right after it (or the word itself becomes the tag). */
+async function tagSelection() {
+  const { state } = editor.view;
+  const range = state.selection.main;
+  const picked = state.sliceDoc(range.from, range.to).trim();
+  const word = /^[\p{L}\p{N}_-]{1,60}$/u.test(picked) ? picked : '';
+  const tag = await askTag({ tags: collectTags(notesNow()), initial: word });
+  if (!tag) return;
+  setEditing(true);
+  const { view } = editor;
+  const sel = view.state.selection.main;
+  // a single word chosen as its own tag: it becomes #word; otherwise the tag goes after the passage
+  if (word && tag === word && view.state.sliceDoc(sel.from, sel.to).trim() === word) {
+    view.dispatch({ changes: { from: sel.from, to: sel.to, insert: `#${word}` }, selection: { anchor: sel.from + word.length + 1 }, userEvent: 'input.tag' });
+  } else {
+    const at = sel.to;
+    const before = view.state.sliceDoc(at - 1, at);
+    const insert = `${at > 0 && before && !/\s/.test(before) ? ' ' : ''}#${tag}`;
+    view.dispatch({ changes: { from: at, insert }, selection: { anchor: at + insert.length }, userEvent: 'input.tag' });
+  }
+  toast(t('tags.added', tag));
+}
+
+function showTags() {
+  openTags({
+    tags: collectTags(notesNow()),
+    onOpen: async (id, line) => {
+      hideNotes();
+      if (id !== currentId) await openNote(id);
+      const { view } = editor;
+      const at = view.state.doc.line(Math.min(line + 1, view.state.doc.lines));
+      view.dispatch({ selection: { anchor: at.from, head: at.to }, scrollIntoView: true });
+    },
+  });
+}
+
+/** A picture from the phone or the computer, put in where the cursor is (as a pasted one is). */
+function pickImage() {
+  const input = h('input', { type: 'file', accept: 'image/*', hidden: true });
+  input.addEventListener('change', () => {
+    const file = input.files?.[0];
+    input.remove();
+    if (file) addImage(file, null);
+  });
+  document.body.append(input);
+  input.click();
+}
+
+/** The note's pictures as data: URLs, so an exported page carries them: "assets/<name>" → URL. */
+async function imagesOf(md) {
+  const images = new Map();
+  const names = new Set([...md.matchAll(/\]\((assets\/([^)\s]+))\)/g)].map((m) => m[2]));
+  for (const name of names) {
+    try {
+      let data = await api.readAsset?.(name);
+      if (!data) continue;
+      if (data instanceof Blob) data = new Uint8Array(await data.arrayBuffer());
+      else if (data instanceof ArrayBuffer) data = new Uint8Array(data);
+      const ext = name.split('.').pop().toLowerCase();
+      const type = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }[ext] ?? 'image/png';
+      let binary = '';
+      for (let i = 0; i < data.length; i += 0x8000) binary += String.fromCharCode(...data.subarray(i, i + 0x8000));
+      images.set(`assets/${name}`, `data:${type};base64,${btoa(binary)}`);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+  return images;
+}
+
+/** The open note as plain text, a web page, or (through printing) a PDF. */
+async function exportAs(kind) {
+  const note = notes.get(currentId);
+  if (!note) return;
+  const md = editor.view.state.doc.toString();
+  const base = fileNameFor(titleOf(note), new Set()).replace(/\.md$/, '');
+  if (kind === 'txt') {
+    api.download(`${base}.txt`, toText(md), 'text/plain;charset=utf-8');
+    return;
+  }
+  const page = htmlPage(titleOf(note), toHtml(md, { images: await imagesOf(md) }), prefs.lang);
+  if (kind === 'html') {
+    api.download(`${base}.html`, page, 'text/html;charset=utf-8');
+    return;
+  }
+  printPage(page, base);
+}
+
+/**
+ * Prints a page; the printer "Save as PDF" makes the PDF. On Android the app's own print service
+ * does it (MainActivity.printHtml); elsewhere the page goes into a hidden frame that is printed.
+ */
+function printPage(page, name) {
+  if (typeof android?.printHtml === 'function') {
+    android.printHtml(page, name);
+    return;
+  }
+  toast(t('noteMenu.printing'), { timeout: 6000 });
+  const frame = h('iframe', { class: 'print-frame', title: name, 'aria-hidden': 'true' });
+  frame.srcdoc = page;
+  frame.addEventListener('load', () => {
+    frame.contentWindow.focus();
+    frame.contentWindow.print();
+    setTimeout(() => frame.remove(), 1000);
+  });
+  document.body.append(frame);
 }
 
 /** The strip over the note: counted again after a change, its typing speed every few seconds. */
@@ -1098,6 +1263,7 @@ function sideChoice(label, values, current, choose, name) {
 function writingSettings(close) {
   return sideGroup(
     t('stats.writing'),
+    sideToggle({ icon: '✱', text: t('markup.hide'), hint: t('markup.hint'), on: writing.markup !== 'show', toggle: () => setWriting({ markup: writing.markup === 'show' ? 'hide' : 'show' }) }),
     sideToggle({ icon: '∑', text: t('stats.bar'), hint: t('stats.barHint'), on: writing.statsBar, toggle: () => setWriting({ statsBar: !writing.statsBar }) }),
     sideChoice(t('format.show'), ['touch', 'always', 'off'], writing.formatBar, (formatBar) => setWriting({ formatBar }), (v) => t(`format.${v}`)),
     sideItem({
@@ -2288,6 +2454,11 @@ function bindChrome() {
   noteSteps = stepButtons({ undo: () => editor.undo(), redo: () => editor.redo(), className: 'tb-steps' });
   $('#btn-edit').before(noteSteps.node);
   showNoteSteps();
+  // ⋯ after ✎: the note's own menu (copy, clear, tags, history, statistics, export)
+  const noteMore = h('button', { type: 'button', class: 'tb-btn icon tb-note-more', id: 'btn-note-more', 'aria-haspopup': 'menu', 'data-i18n-title': 'noteMenu.more', 'data-i18n-label': 'noteMenu.more', title: t('noteMenu.more'), 'aria-label': t('noteMenu.more') }, '⋯');
+  noteMore.addEventListener('pointerdown', (e) => e.preventDefault()); // the selection stays for "Mark with a tag"
+  noteMore.addEventListener('click', () => openNoteMenu(noteMore));
+  $('#btn-edit').after(noteMore);
   // the statistics strip under the title bar, the formatting bar over the status bar (and the keyboard)
   $('.titlebar').after(statsStrip.node);
   $('.statusbar').before(formatBar.node);

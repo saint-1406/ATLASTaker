@@ -128,6 +128,7 @@ export const SETTING_KEYS = [
   'formatBar',
   'formatTools',
   'focusDim',
+  'markup',
   'writeDays',
   'growDays',
 ];

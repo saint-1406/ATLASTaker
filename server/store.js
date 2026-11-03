@@ -54,6 +54,8 @@ const STATE_RULES = {
   formatBar: (v) => v === 'touch' || v === 'always' || v === 'off',
   formatTools: (v) => Array.isArray(v) && v.length <= 40 && v.every((s) => typeof s === 'string' && /^[a-z0-9]{1,16}$/.test(s)),
   focusDim: (v) => v === 'paragraph' || v === 'sentence' || v === 'off',
+  // Markdown's marks hidden (the note as it reads, src/livePreview.js) or shown as typed
+  markup: (v) => v === 'hide' || v === 'show',
   // characters written and the text's growth, per day (src/writing.js)
   writeDays: (v) => dayLog(v, 0),
   growDays: (v) => dayLog(v, -1e7),

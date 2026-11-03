@@ -9,34 +9,77 @@ import { heatCells, lastDays, writingStreak } from './writing.js';
 const number = (n) => new Intl.NumberFormat(currentLocale()).format(Math.round(n));
 const minutes = (m) => (m < 1 ? t('stats.underMinute') : t('stats.minutes', Math.round(m)));
 
-/** The strip. onOpen(): the writing statistics. */
+// folded or open, kept on this device: a phone starts folded, its screen is narrow
+const FOLDED_KEY = 'atlas-notetaker:stats-folded';
+function startsFolded() {
+  try {
+    const kept = localStorage.getItem(FOLDED_KEY);
+    if (kept !== null) return kept === '1';
+  } catch {
+    // only a convenience
+  }
+  return matchMedia('(max-width: 620px)').matches;
+}
+
+/**
+ * The strip. Folded, it is one short line (words · characters · reading time); open, all six counts.
+ * A tap on the counts opens the writing statistics (onOpen), the arrow folds or opens it.
+ */
 export function createStatsStrip({ onOpen }) {
-  const node = h('button', { type: 'button', class: 'stats-strip', hidden: true, onclick: () => onOpen() });
+  let folded = startsFolded();
+  let last = null;
   const cell = (key) => {
     const value = h('b', { class: 'stats-value' });
     const label = h('span', { class: 'stats-label' });
     return { key, value, label, node: h('span', { class: 'stats-cell' }, value, label) };
   };
   const cells = ['chars', 'words', 'sentences', 'paragraphs', 'read', 'pace'].map(cell);
-  node.append(...cells.map((c) => c.node));
+  const line = h('span', { class: 'stats-line' });
+  const counts = h('button', { type: 'button', class: 'stats-counts', onclick: () => onOpen() }, line, ...cells.map((c) => c.node));
+  const fold = h('button', { type: 'button', class: 'stats-fold' });
+  const node = h('div', { class: 'stats-strip', hidden: true }, counts, fold);
+
+  function draw() {
+    node.classList.toggle('folded', folded);
+    fold.textContent = folded ? '▾' : '▴';
+    fold.title = t(folded ? 'stats.unfold' : 'stats.fold');
+    fold.setAttribute('aria-label', fold.title);
+    fold.setAttribute('aria-expanded', String(!folded));
+    counts.title = t('stats.open');
+    if (!last) return;
+    const { stats, pace } = last;
+    const values = {
+      chars: number(stats.chars),
+      words: number(stats.words),
+      sentences: number(stats.sentences),
+      paragraphs: number(stats.paragraphs),
+      read: minutes(stats.readMinutes),
+      pace: t('stats.perMinute', number(pace)),
+    };
+    for (const c of cells) {
+      c.value.textContent = values[c.key];
+      c.label.textContent = t(`stats.${c.key}`);
+    }
+    line.textContent = [count(stats.words, 'wordShort'), count(stats.chars, 'char'), values.read].join(' · ');
+  }
+
+  fold.addEventListener('click', () => {
+    folded = !folded;
+    try {
+      localStorage.setItem(FOLDED_KEY, folded ? '1' : '0');
+    } catch {
+      // only a convenience
+    }
+    draw();
+  });
+  draw();
 
   return {
     node,
     /** stats: textStats(); pace: characters typed in the last minute. */
     update(stats, pace) {
-      const values = {
-        chars: number(stats.chars),
-        words: number(stats.words),
-        sentences: number(stats.sentences),
-        paragraphs: number(stats.paragraphs),
-        read: minutes(stats.readMinutes),
-        pace: t('stats.perMinute', number(pace)),
-      };
-      for (const c of cells) {
-        c.value.textContent = values[c.key];
-        c.label.textContent = t(`stats.${c.key}`);
-      }
-      node.title = t('stats.open');
+      last = { stats, pace };
+      draw();
     },
   };
 }

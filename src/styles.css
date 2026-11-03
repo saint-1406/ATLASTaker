@@ -8440,3 +8440,221 @@ html.locked body > :not(.lock-screen) {
   letter-spacing: 0.3em;
   text-align: center;
 }
+
+/* ---------- 0.18: notices that read as sentences, the folding strip, the note as it reads ---------- */
+
+/* a notice is as wide as its words need, up to the screen: from the middle (left: 50%) it could only
+   take half the screen, and a sentence broke a word or two per line */
+.toast {
+  width: max-content;
+  max-width: min(560px, calc(100vw - 32px));
+  bottom: calc(44px + env(safe-area-inset-bottom, 0px));
+  font-family: var(--font-ui, inherit);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.toast > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.toast button {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* the strip: the counts (a tap: the writing statistics) and the arrow that folds them */
+.stats-strip {
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  cursor: default;
+}
+
+.stats-counts {
+  display: flex;
+  flex: 1;
+  gap: 18px;
+  min-width: 0;
+  padding: 6px 4px 8px 16px;
+  overflow-x: auto;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  scrollbar-width: none;
+}
+
+.stats-counts::-webkit-scrollbar {
+  display: none;
+}
+
+.stats-line {
+  display: none;
+  color: var(--ink-dim);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.stats-fold {
+  flex: none;
+  width: 40px;
+  border: 0;
+  background: none;
+  color: var(--ink-dim);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.stats-strip.folded .stats-cell {
+  display: none;
+}
+
+.stats-strip.folded .stats-line {
+  display: block;
+}
+
+.stats-strip.folded .stats-counts {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+/* a phone's screen: the six counts in three columns, none hidden off the edge */
+@media (max-width: 620px) {
+  .stats-strip:not(.folded) .stats-counts {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px 10px;
+  }
+
+  .stats-strip:not(.folded) .stats-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* the note as it reads (livePreview.js) */
+.cm-underline {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.cm-bullet {
+  display: inline-block;
+  width: 1.2em;
+  color: var(--ink-dim);
+  font-weight: 700;
+}
+
+.cm-check {
+  width: 1.05em;
+  height: 1.05em;
+  margin: 0 0.45em 0 0;
+  vertical-align: -0.15em;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.cm-tag {
+  padding: 0 0.35em;
+  border-radius: 0.6em;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent-text);
+  font-size: 0.92em;
+}
+
+/* the note's menu button */
+.tb-note-more {
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* tags: chips to choose one, its places to go to */
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 4px;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.tag-count {
+  color: var(--ink-dim);
+  font-size: 12px;
+}
+
+.modal-tags {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(86vh - 16px);
+}
+
+.tags-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.tags-found {
+  margin: 4px 0 8px;
+  color: var(--ink-dim);
+  font-size: 13px;
+}
+
+.tag-places {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tag-place {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 9px 4px;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tag-place-title {
+  font-weight: 600;
+}
+
+.tag-place-line {
+  overflow: hidden;
+  color: var(--ink-dim);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* the frame a page is printed from (PDF on a computer): out of sight */
+.print-frame {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  border: 0;
+}
