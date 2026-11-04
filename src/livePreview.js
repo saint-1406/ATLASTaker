@@ -4,9 +4,11 @@
 // link shows its words. The text itself is unchanged, and the marks come back with "Show the markup"
 // (Settings → Writing). Tags (#word) are drawn as small labels in both ways. Code is left as written.
 
-import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view';
+import { Decoration, EditorView, keymap, ViewPlugin, WidgetType } from '@codemirror/view';
+import { Prec } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { TAG_RE } from './tags.js';
+import { exitStrike } from './editingRules.js';
 
 const hidden = Decoration.replace({});
 const underline = Decoration.mark({ class: 'cm-underline' });
@@ -142,5 +144,21 @@ export function livePreview(hide) {
     },
     { decorations: (p) => p.decorations },
   );
-  return [plugin, EditorView.atomicRanges.of((view) => view.plugin(plugin)?.atomic ?? Decoration.none)];
+  const exit = (view, from, to, text) => {
+    const spec = exitStrike(view.state, from, to, text);
+    if (!spec) return false;
+    view.dispatch(spec);
+    return true;
+  };
+  return [
+    plugin,
+    EditorView.atomicRanges.of((view) => view.plugin(plugin)?.atomic ?? Decoration.none),
+    hide ? [
+      Prec.highest(keymap.of([{ key: 'Enter', run: (view) => {
+        const { from, to } = view.state.selection.main;
+        return exit(view, from, to, '\n');
+      } }])),
+      EditorView.inputHandler.of(exit),
+    ] : [],
+  ];
 }

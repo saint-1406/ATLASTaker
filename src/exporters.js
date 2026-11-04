@@ -3,6 +3,7 @@
 // strikethrough), so what is bold there is bold here; pictures go into the page itself.
 
 import { markdownLanguage } from '@codemirror/lang-markdown';
+import { outerAccordions } from './accordion.js';
 
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ESC[c]);
@@ -11,7 +12,20 @@ const safeHref = (url) => (/^(https?:|mailto:)/i.test(url.trim()) ? url.trim() :
 const MARKS = new Set(['EmphasisMark', 'StrikethroughMark', 'CodeMark', 'HeaderMark', 'QuoteMark', 'ListMark', 'LinkMark', 'TaskMarker', 'LinkTitle', 'URL', 'CodeInfo']);
 
 /** The note's body as HTML. images: Map of "assets/<name>" → a data: URL to show in its place. */
-export function toHtml(md, { images = new Map() } = {}) {
+export function toHtml(md, { images = new Map(), expandDetails = false } = {}) {
+  const accordions = outerAccordions(md);
+  if (accordions.length) {
+    let from = 0;
+    let out = '';
+    for (const part of accordions) {
+      out += toHtml(md.slice(from, part.from), { images, expandDetails });
+      out += `<details${expandDetails || part.open ? ' open' : ''}>\n<summary>${esc(part.title)}</summary>\n`;
+      out += toHtml(md.slice(part.bodyFrom, part.closeFrom), { images, expandDetails });
+      out += '</details>\n';
+      from = part.to;
+    }
+    return out + toHtml(md.slice(from), { images, expandDetails });
+  }
   const tree = markdownLanguage.parser.parse(md);
   const slice = (from, to) => md.slice(from, to);
 
@@ -152,6 +166,8 @@ table { border-collapse: collapse; } th, td { border: 1px solid #d8d2c4; padding
 li.task { list-style: none; margin-left: -1.2em; } li.task.done { color: #7a7468; text-decoration: line-through; }
 hr { border: 0; border-top: 1px solid #d8d2c4; margin: 1.5em 0; }
 a { color: #2f5aa8; }
+details { border-left: 2px solid #d8d2c4; padding-left: 1em; margin: 1em 0; }
+summary { cursor: pointer; font-weight: bold; margin-bottom: .5em; }
 @media print { body { margin: 0; max-width: none; } a { color: inherit; } }
 `;
 
@@ -162,6 +178,17 @@ export function htmlPage(title, body, lang = 'ru') {
 
 /** The note as plain text: no marks, lists with •, tasks with ☐ ☑, links as "words (address)". */
 export function toText(md) {
+  const accordions = outerAccordions(md);
+  if (accordions.length) {
+    let from = 0;
+    let out = '';
+    for (const part of accordions) {
+      out += toText(md.slice(from, part.from)) + part.title + '\n';
+      out += toText(md.slice(part.bodyFrom, part.closeFrom));
+      from = part.to;
+    }
+    return out + toText(md.slice(from));
+  }
   const out = [];
   let fence = false;
   for (const raw of md.split('\n')) {

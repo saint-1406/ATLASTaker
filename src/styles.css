@@ -8658,3 +8658,9 @@ html.locked body > :not(.lock-screen) {
   height: 0;
   border: 0;
 }
+/* Portable details blocks in the note editor. */
+.cm-accordion-head { display: flex; align-items: center; gap: 4px; border-left: 2px solid currentColor; padding: 3px 6px; margin: 6px 0; }
+.cm-accordion-head > button { flex: 0 0 36px; min-height: 36px; border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 20px; border-radius: 4px; }
+.cm-accordion-title { flex: 1; min-width: 0; width: 100%; padding: 6px 2px; border: 0; border-radius: 3px; background: transparent; color: inherit; font: inherit; font-weight: 600; }
+.cm-accordion-title:focus, .cm-accordion-head > button:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: 1px; }
+.cm-accordion-title[readonly] { cursor: default; }

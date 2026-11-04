@@ -12,6 +12,7 @@ export const LANGS = [
 const DEFAULT_LOCALES = { ru: 'ru-RU', en: 'en-GB' };
 
 const ru = {
+  accordion: { insert: 'Вставить аккордеон', defaultTitle: 'Раздел', title: 'Название аккордеона', expand: 'Раскрыть', collapse: 'Свернуть' },
   untitled: 'Без названия',
   forms: {
     word: { one: 'слово', few: 'слова', many: 'слов', other: 'слова' },
@@ -405,6 +406,7 @@ const ru = {
       image: 'Картинка',
       rule: 'Линия',
       codeblock: 'Блок кода',
+      accordion: 'Аккордеон',
     },
   },
   // what focus mode dims (focusDim.js)
@@ -917,6 +919,7 @@ const ru = {
 };
 
 const en = {
+  accordion: { insert: 'Insert accordion', defaultTitle: 'Section', title: 'Accordion title', expand: 'Expand', collapse: 'Collapse' },
   untitled: 'Untitled',
   forms: {
     word: { one: 'word', other: 'words' },
@@ -1300,6 +1303,7 @@ const en = {
       image: 'Picture',
       rule: 'Line',
       codeblock: 'Code block',
+      accordion: 'Accordion',
     },
   },
   focusDim: {

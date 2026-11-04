@@ -53,6 +53,7 @@ import { textStats } from './stats.js';
 import { noteWriting } from './writing.js';
 import { VERSION_EVERY } from './versionRules.js';
 import { htmlPage, toHtml, toText } from './exporters.js';
+import { insertAccordionBlock } from './accordionView.js';
 import { askTag, collectTags, openTags } from './tags.js';
 
 // a device with a PIN shows nothing of its notes until the PIN is in (lock.js)
@@ -1097,7 +1098,7 @@ async function exportAs(kind) {
     api.download(`${base}.txt`, toText(md), 'text/plain;charset=utf-8');
     return;
   }
-  const page = htmlPage(titleOf(note), toHtml(md, { images: await imagesOf(md) }), prefs.lang);
+  const page = htmlPage(titleOf(note), toHtml(md, { images: await imagesOf(md), expandDetails: kind !== 'html' }), prefs.lang);
   if (kind === 'html') {
     api.download(`${base}.html`, page, 'text/html;charset=utf-8');
     return;
@@ -1704,6 +1705,7 @@ function openEditorMenu(event, view) {
     { icon: '⎘', text: t('menu.paste'), kbd: 'Ctrl+V', run: () => pasteFromClipboard(view) },
     '-',
     { icon: '⌗', text: t(sel.empty ? 'menu.codeBlock' : 'menu.wrapCode'), kbd: 'Ctrl+E', run: () => insertCodeBlock(view) },
+    { icon: '▸', text: t('accordion.insert'), disabled: inCode, run: () => insertAccordionBlock(view) },
     { icon: '▣', text: t('menu.selectAll'), kbd: 'Ctrl+A', run: () => view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }) },
     { icon: '⇩', text: t('notes.saveCopy'), run: () => exportNote(currentId) },
     { note: t('menu.spelling') },
@@ -2333,6 +2335,10 @@ function commandList() {
       },
     },
     { icon: '⇩', title: t('commands.saveCopy'), keywords: 'export save экспорт скачать', run: () => exportNote(currentId) },
+    { icon: '▸', title: t('accordion.insert'), keywords: 'accordion details collapse раскрыть свернуть аккордеон', run: () => {
+      ensureEditing();
+      insertAccordionBlock(editor.view);
+    } },
     { icon: '⇊', title: t('commands.exportAll'), keywords: 'backup download резервная копия архив экспорт zip', run: exportAll },
     { icon: '⇡', title: t('commands.import'), keywords: 'import upload files импорт загрузить файлы', run: importFiles },
     { icon: '◉', title: t('commands.dictate'), kbd: 'Ctrl+Shift+D', keywords: 'dictate voice speech microphone диктовка голос речь микрофон', run: toggleDictation },

@@ -2,6 +2,7 @@
 // state and returns a transaction (or null when there is nothing to do), so it is one step back with ↶.
 
 import { EditorSelection } from '@codemirror/state';
+import { strikeCloseAt } from './editingRules.js';
 
 const HEADING_RE = /^(\s*)(#{1,6})\s+/;
 // a line's own mark: a task (it starts like an item, so it is told apart first), an item, a numbered
@@ -116,6 +117,10 @@ function carries(text, open, close) {
  * in as a pair, the cursor between.
  */
 export function wrap(state, open, close = open) {
+  if (open === '~~' && close === open && state.selection.ranges.length === 1 && state.selection.main.empty) {
+    const end = strikeCloseAt(state, state.selection.main.head);
+    if (end) return { selection: { anchor: end.to }, scrollIntoView: true };
+  }
   const a = open.length;
   const b = close.length;
   return {

@@ -7,6 +7,7 @@ import { h, openDialog } from './overlays.js';
 import { t } from './i18n.js';
 import { apply, heading, lineMark, link, rule, wrap } from './format.js';
 import { insertCodeBlock } from './editor.js';
+import { insertAccordionBlock } from './accordionView.js';
 
 /** Every button the bar can have. */
 export const TOOLS = [
@@ -29,6 +30,7 @@ export const TOOLS = [
   { id: 'image', glyph: '🖼', run: (view, actions) => actions.image?.() },
   { id: 'rule', glyph: '―', run: (view) => apply(view, rule) },
   { id: 'codeblock', glyph: '{ }', run: (view) => insertCodeBlock(view) },
+  { id: 'accordion', glyph: '▸', run: insertAccordionBlock },
 ];
 const BY_ID = new Map(TOOLS.map((tool) => [tool.id, tool]));
 export const DEFAULT_TOOLS = ['keyboard', 'h1', 'h2', 'h3', 'bold', 'italic', 'underline', 'strike', 'bullet', 'numbered', 'task', 'quote', 'indent', 'outdent', 'link', 'image'];

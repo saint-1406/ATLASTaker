@@ -2,7 +2,7 @@
 // close one), comment lines, task lines, smart paste of code, Ctrl+click on links and the search
 // panel in the interface's language.
 
-import { Compartment, EditorState, StateEffect, StateField } from '@codemirror/state';
+import { Compartment, EditorState, Prec, StateEffect, StateField } from '@codemirror/state';
 import {
   EditorView,
   keymap,
@@ -29,6 +29,8 @@ import { planSlashFence } from './fence.js';
 import { joinDictated } from './dictation.js';
 import { focusDim } from './focusDim.js';
 import { livePreview } from './livePreview.js';
+import { accordionExtension } from './accordionView.js';
+import { continueEmptyTask, emptyTaskEnter } from './editingRules.js';
 
 // Markdown's marks hidden (the note reads as it means) or shown as typed (livePreview.js); tags are
 // drawn either way. Two fixed extensions, so the compartment can tell which it holds.
@@ -546,8 +548,17 @@ export function createEditor({
     EditorView.lineWrapping,
     EditorState.allowMultipleSelections.of(true),
     markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true }),
+    Prec.highest(keymap.of([{ key: 'Enter', run: continueEmptyTask }])),
+    EditorView.inputHandler.of((view, from, to, text) => {
+      if (text !== '\n' || from !== to || from !== view.state.selection.main.head) return false;
+      const spec = emptyTaskEnter(view.state);
+      if (!spec) return false;
+      view.dispatch(spec);
+      return true;
+    }),
     syntaxHighlighting(atlasHighlight),
     structurePlugin(onCopy),
+    accordionExtension,
     imagesField(resolveImage, openImage),
     dictationField,
     slashFence,

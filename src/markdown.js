@@ -34,6 +34,13 @@ function clip(s, max) {
   return s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s;
 }
 
+// Only the portable accordion wrappers: all other HTML keeps its previous literal treatment.
+function accordionLine(line) {
+  if (/^<\/?details(?: open)?>\s*$/.test(line)) return '';
+  const summary = /^<summary>(.*)<\/summary>\s*$/.exec(line);
+  return summary ? summary[1].replace(/&(amp|lt|gt|quot|apos|#39);/g, (_, entity) => ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", '#39': "'" })[entity]) : line;
+}
+
 export function deriveTitle(text) {
   let fence = null;
   for (const raw of text.split('\n', 200)) {
@@ -45,7 +52,7 @@ export function deriveTitle(text) {
     const open = FENCE_OPEN_RE.exec(raw);
     if (open) { fence = open[1]; continue; }
     if (isCommentLine(raw)) continue;
-    const title = cleanInline(raw.trim().replace(/^#{1,6}\s+/, '').replace(/\s+#+\s*$/, ''));
+    const title = cleanInline(accordionLine(raw).trim().replace(/^#{1,6}\s+/, '').replace(/\s+#+\s*$/, ''));
     if (title) return clip(title, 80);
   }
   return '';
@@ -69,7 +76,7 @@ export function analyze(text) {
   };
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    let line = lines[i];
     if (fence) {
       const close = FENCE_CLOSE_RE.exec(line);
       if (close && close[1][0] === fence[0] && close[1].length >= fence.length) { fence = null; continue; }
@@ -78,6 +85,8 @@ export function analyze(text) {
     }
     const opening = FENCE_OPEN_RE.exec(line);
     if (opening) { fence = opening[1]; codeBlocks++; continue; }
+
+    line = accordionLine(line);
 
     const heading = HEADING_RE.exec(line);
     if (heading) {
