@@ -390,6 +390,7 @@ const ru = {
     off: 'Нет',
     tools: {
       keyboard: 'Спрятать клавиатуру',
+      copy: 'Копировать выделенное',
       h1: 'Заголовок 1',
       h2: 'Заголовок 2',
       h3: 'Заголовок 3',
@@ -633,6 +634,7 @@ const ru = {
     label: 'Текст заметки',
     copy: 'Копировать',
     copied: 'Скопировано ✓',
+    nothingSelected: 'Сначала выделите текст',
     noClipboard: 'Нет доступа к буферу',
     // CodeMirror's search panel
     phrases: {
@@ -808,6 +810,8 @@ const ru = {
     pdfFit: 'По страницам PDF вписывается в экран целиком',
     more: 'Файл: скачать, страницы PDF',
     fab: { open: 'Меню: оглавление, поиск, темы', find: 'Искать в книге' },
+    copy: 'Копировать',
+    copied: 'Скопировано ✓',
     find: {
       title: 'Найти в документе (Ctrl+F)',
       placeholder: 'Найти слово или фразу',
@@ -1289,6 +1293,7 @@ const en = {
     off: 'No',
     tools: {
       keyboard: 'Hide the keyboard',
+      copy: 'Copy the selection',
       h1: 'Heading 1',
       h2: 'Heading 2',
       h3: 'Heading 3',
@@ -1528,6 +1533,7 @@ const en = {
     label: 'Note text',
     copy: 'Copy',
     copied: 'Copied ✓',
+    nothingSelected: 'Select some text first',
     noClipboard: 'No clipboard access',
     // CodeMirror speaks English already; listed so both languages have the same keys
     phrases: {
@@ -1701,6 +1707,8 @@ const en = {
     pdfFit: 'In pages, a PDF page fits the screen whole',
     more: 'File: download, PDF pages',
     fab: { open: 'Menu: contents, search, themes', find: 'Search in the book' },
+    copy: 'Copy',
+    copied: 'Copied ✓',
     find: {
       title: 'Find in document (Ctrl+F)',
       placeholder: 'Find a word or phrase',

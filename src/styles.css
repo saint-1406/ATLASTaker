@@ -8736,3 +8736,8 @@ html.locked body > :not(.lock-screen) {
   .format-insert { padding: 0 8px; }
   .rich-details { padding-left: 34px; padding-right: 9px; }
 }
+
+/* the pieces of a book around a selection stay laid out while it lasts (library.js, keepNearSelection) */
+.rd-scroll:not(.paged) .rd-u.rd-near-sel {
+  content-visibility: visible;
+}

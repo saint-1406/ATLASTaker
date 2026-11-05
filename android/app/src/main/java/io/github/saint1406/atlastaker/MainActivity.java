@@ -16,6 +16,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.print.PrintAttributes;
 import android.print.PrintManager;
+import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
@@ -231,10 +232,26 @@ public class MainActivity extends ComponentActivity {
             public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (chooserCallback != null) chooserCallback.onReceiveValue(null);
                 chooserCallback = callback;
-                Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                pick.addCategory(Intent.CATEGORY_OPENABLE);
-                pick.setType("*/*");
-                pick.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE);
+                boolean many = params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE;
+                Intent pick;
+                if (onlyPictures(params.getAcceptTypes())) {
+                    // a picture for a note: straight to the photos (the system's photo picker, or the gallery
+                    // before Android 13), not the file manager with every file on the phone
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        pick = new Intent(MediaStore.ACTION_PICK_IMAGES);
+                        if (many) pick.putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX, MediaStore.getPickImagesMaxLimit());
+                    } else {
+                        pick = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+                        pick.setType("image/*");
+                        pick.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, many);
+                    }
+                } else {
+                    // a book or a document (the library, the reader): the file manager, where files are
+                    pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    pick.addCategory(Intent.CATEGORY_OPENABLE);
+                    pick.setType("*/*");
+                    pick.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, many);
+                }
                 try {
                     chooser.launch(pick);
                     return true;
@@ -521,6 +538,22 @@ public class MainActivity extends ComponentActivity {
         } catch (JSONException ignored) {
             // nothing to say to the page
         }
+    }
+
+    /** True when the page asks for pictures only (accept="image/*", "image/png"…). */
+    private static boolean onlyPictures(String[] accept) {
+        if (accept == null || accept.length == 0) return false;
+        boolean any = false;
+        for (String type : accept) {
+            if (type == null || type.trim().isEmpty()) continue;
+            for (String one : type.split(",")) {
+                String t = one.trim().toLowerCase();
+                if (t.isEmpty()) continue;
+                if (!t.startsWith("image/")) return false;
+                any = true;
+            }
+        }
+        return any;
     }
 
     // ---------- translation: ML Kit, on the phone (src/translate.js asks, window.__atlas.translate hears) ----------

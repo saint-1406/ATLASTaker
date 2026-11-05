@@ -121,7 +121,7 @@ let writeLogTimer = 0;
 let pinLock = null; // this device's PIN, hashed (lock.js); null: none
 const lockScreen = createLock({ getLock: () => pinLock });
 const statsStrip = createStatsStrip({ onOpen: () => showWritingStats() });
-const formatBar = createFormatBar({ getView: () => editor?.view ?? null, actions: { image: () => pickImage() } });
+const formatBar = createFormatBar({ getView: () => editor?.view ?? null, actions: { image: () => pickImage(), copy: () => copyFromBar() } });
 const versionKept = new Map(); // note id → when a version of it was last kept in this window
 let lastStats = null; // the open note's textStats(), for the strip's pace updates in between
 let trashView = null; // the trash: deleted notes, documents and marks, until restored or deleted for good (trash.js)
@@ -1754,6 +1754,18 @@ async function copySelection(view) {
     toast(t('clipboard.blocked', 'Ctrl+C'));
     return false;
   }
+}
+
+/** The format bar's copy: the selection to the clipboard, left selected (the bar never takes the focus). */
+async function copyFromBar() {
+  const view = editor?.view;
+  if (!view) return;
+  const text = view.rich ? view.rich.getSelectedText() : view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to);
+  if (!text) {
+    toast(t('editor.nothingSelected'), { timeout: 2000 });
+    return;
+  }
+  if (await copySelection(view)) toast(t('editor.copied'), { timeout: 1500 });
 }
 
 async function cutSelection(view) {

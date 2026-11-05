@@ -12,6 +12,8 @@ import { insertAccordionBlock } from './accordionView.js';
 /** Every button the bar can have. */
 export const TOOLS = [
   { id: 'keyboard', glyph: '⌨', run: (view) => view.contentDOM.blur() },
+  // the selected words to the clipboard; the selection stays, to quote or format it next
+  { id: 'copy', glyph: '⧉', run: (view, actions) => actions.copy?.() },
   { id: 'h1', glyph: 'H1', run: (view) => apply(view, (s) => heading(s, 1)) },
   { id: 'h2', glyph: 'H2', run: (view) => apply(view, (s) => heading(s, 2)) },
   { id: 'h3', glyph: 'H3', run: (view) => apply(view, (s) => heading(s, 3)) },
@@ -33,7 +35,7 @@ export const TOOLS = [
   { id: 'accordion', glyph: '▸', run: insertAccordionBlock },
 ];
 const BY_ID = new Map(TOOLS.map((tool) => [tool.id, tool]));
-export const DEFAULT_TOOLS = ['keyboard', 'h1', 'h2', 'h3', 'bold', 'italic', 'underline', 'strike', 'bullet', 'numbered', 'task', 'quote', 'indent', 'outdent', 'link', 'image'];
+export const DEFAULT_TOOLS = ['keyboard', 'copy', 'h1', 'h2', 'h3', 'bold', 'italic', 'underline', 'strike', 'bullet', 'numbered', 'task', 'quote', 'indent', 'outdent', 'link', 'image'];
 
 /** A saved list of buttons, made safe: known ones, each once; nothing saved yet: the default ones. */
 export function normalizeTools(list) {
@@ -53,6 +55,7 @@ export function createFormatBar({ getView, actions = {} }) {
   function run(id) {
     const view = getView(); if (!view) return;
     if (id === 'image') { actions.image?.(); return; }
+    if (id === 'copy') { actions.copy?.(); return; }
     if (id === 'keyboard') { view.contentDOM.blur(); return; }
     if (view.rich) {
       if (id === 'link') { askLink(view); return; }
@@ -114,8 +117,10 @@ export function createFormatBar({ getView, actions = {} }) {
         button.addEventListener('click', () => run(id));
         return button;
       }));
-    for (const button of [typeButton, insertButton]) button.addEventListener('pointerdown', (event) => event.preventDefault());
-    node.replaceChildren(typeButton, row, insertButton);
+    // copying is always there: the selected words to the clipboard, the selection left as it was
+    const copyButton = h('button', { type: 'button', class: 'format-btn format-copy', title: t('format.tools.copy'), 'aria-label': t('format.tools.copy'), onclick: () => run('copy') }, '⧉');
+    for (const button of [typeButton, copyButton, insertButton]) button.addEventListener('pointerdown', (event) => event.preventDefault());
+    node.replaceChildren(typeButton, row, copyButton, insertButton);
     refresh();
   }
   draw();

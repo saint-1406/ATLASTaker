@@ -165,10 +165,13 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   // a bookmark at the selected passage, its words kept with it (addBookmark)
   const bookmarkSelButton = h('button', { type: 'button', class: 'rd-sel-btn rd-sel-icon', onclick: () => addBookmark() }, h('span', { 'aria-hidden': 'true' }, '🔖'));
   const translateButton = h('button', { type: 'button', class: 'rd-sel-btn', onclick: () => translateSelection() }, h('span', { 'aria-hidden': 'true' }, '🌐'), translateText);
+  const copyText = h('span');
+  const copyButton = h('button', { type: 'button', class: 'rd-sel-btn', onclick: () => copySelected() }, h('span', { 'aria-hidden': 'true' }, '⧉'), copyText);
   const selBar = h(
     'div',
     { class: 'rd-selbar', hidden: true, role: 'toolbar' },
     h('div', { class: 'rd-swatches' }, swatches),
+    copyButton,
     commentButton,
     translator ? translateButton : null,
     quoteButton,
@@ -389,6 +392,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     bookmarkSelButton.title = t('reader.bookmarks.addTitle');
     bookmarkSelButton.setAttribute('aria-label', t('reader.bookmarks.addTitle'));
     translateText.textContent = t('translate.button');
+    copyText.textContent = t('reader.copy');
     translateButton.title = t('commands.translate');
     selBar.setAttribute('aria-label', t('reader.marks.bar'));
     for (const swatch of swatches) {
@@ -1257,9 +1261,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     if (sel && !sel.isCollapsed && sel.rangeCount && scroll.contains(sel.anchorNode) && sel.toString().trim()) {
       selected = sel.getRangeAt(0).cloneRange();
       selBar.hidden = false;
-      // in the lower half the bar would sit on the selection's handles: it goes to the top instead
-      const box = selected.getBoundingClientRect();
-      selBar.classList.toggle('rd-selbar-top', box.bottom > innerHeight * 0.55);
+      placeSelBar(selected);
+      keepNearSelection(sel);
       closeMark();
     } else if (!selBar.contains(document.activeElement)) hideSelBar();
   });
@@ -1267,6 +1270,68 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   function hideSelBar() {
     selBar.hidden = true;
     selected = null;
+    keepNearSelection(null);
+  }
+
+  // a press on the bar keeps the selection (and its handles) where it is
+  selBar.addEventListener('pointerdown', (e) => e.preventDefault());
+
+  /**
+   * The bar beside the selection, never over it: above its first line when there is room, else under
+   * its last one (past the handle), else at the foot of the screen.
+   */
+  function placeSelBar(range) {
+    const box = range.getBoundingClientRect();
+    const barH = selBar.offsetHeight || 56;
+    const top = parseFloat(getComputedStyle(scroll).paddingTop) || 0;
+    const room = scroll.getBoundingClientRect();
+    selBar.classList.remove('rd-selbar-top');
+    selBar.style.top = '';
+    selBar.style.bottom = '';
+    if (box.top - barH - 14 > room.top + top + 8) selBar.style.top = `${Math.round(box.top - barH - 14)}px`;
+    else if (box.bottom + 46 + barH < innerHeight - 8) selBar.style.top = `${Math.round(box.bottom + 46)}px`;
+    if (selBar.style.top) selBar.style.bottom = 'auto';
+  }
+
+  // Scrolling a book lays out only the pieces near the screen (content-visibility); the pieces around
+  // the selection stay laid out while it lasts, so its start does not jump when the page moves under it.
+  let nearSelection = [];
+  function keepNearSelection(sel) {
+    for (const el of nearSelection) el.classList.remove('rd-near-sel');
+    nearSelection = [];
+    if (!sel || reading?.controller?.kind === 'pdf') return;
+    const around = (node) => {
+      const el = node?.nodeType === 1 ? node : node?.parentElement;
+      const unit = el?.closest?.('.rd-u');
+      if (!unit) return;
+      let a = unit;
+      let b = unit;
+      for (let i = 0; i < 6 && a.previousElementSibling; i++) a = a.previousElementSibling;
+      for (let i = 0; i < 6 && b.nextElementSibling; i++) b = b.nextElementSibling;
+      for (let e = a; e; e = e === b ? null : e.nextElementSibling) nearSelection.push(e);
+    };
+    around(sel.anchorNode);
+    around(sel.focusNode);
+    for (const el of nearSelection) el.classList.add('rd-near-sel');
+  }
+
+  /** The selected words to the clipboard; the selection stays, to mark or quote it next. */
+  async function copySelected() {
+    const controller = reading?.controller;
+    if (!selected || !controller) return;
+    const range = selected;
+    const text = passage(controller, range.toString(), 200_000);
+    try {
+      await api.copy(text);
+      toast(t('reader.copied'), { timeout: 1500 });
+    } catch {
+      toast(t('clipboard.blocked', 'Ctrl+C'));
+    }
+    const sel = document.getSelection();
+    if (sel && (sel.isCollapsed || !sel.rangeCount)) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
   }
 
   /** The words of a passage, tidied: a PDF's lines are broken where the page broke them, so they become one paragraph. */
