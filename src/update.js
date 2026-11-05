@@ -8,6 +8,7 @@ import { formatDay, t } from './i18n.js';
 
 const CHECK_KEY = 'atlas-notetaker:update-checked';
 const DAY = 24 * 60 * 60 * 1000;
+const HOUR = 60 * 60 * 1000;
 
 /**
  * android: window.AtlasAndroid or null; api: the bridge (api.update() on Windows); beforeInstall():
@@ -170,7 +171,8 @@ export function createUpdater({ api, android, beforeInstall, h, toast }) {
 
   /** The settings group (the account tab): this version, the newest one, the buttons. */
   function draw() {
-    if (!panel?.isConnected) return;
+    // drawn even before it is on screen: the menu puts the section in place after asking for it
+    if (!panel) return;
     const button = (text, run, primary = false) => h('button', { type: 'button', class: `seg-btn${primary ? ' primary' : ''}`, onclick: run }, text);
     const current = canAndroid ? android.appVersion?.() || '' : latest?.current || '';
     const lines = [];
@@ -195,6 +197,8 @@ export function createUpdater({ api, android, beforeInstall, h, toast }) {
   function section() {
     panel ??= h('section', { class: 'set-group set-update' });
     draw();
+    // the account tab opened: the answer is checked again when the last one is older than an hour
+    if (!checking && !installing && Date.now() - lastCheck() > HOUR) setTimeout(() => check({ quiet: true }), 0);
     return panel;
   }
 
