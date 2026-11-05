@@ -8695,6 +8695,7 @@ html.locked body > :not(.lock-screen) {
 .rich-details-toggle { position: absolute; left: 4px; top: 7px; width: 32px; height: 36px; border: 0; border-radius: 7px; color: var(--ink); background: transparent; font-size: 20px; cursor: pointer; }
 .rich-details summary { display: block; font-weight: 650; cursor: text; min-height: 1.5em; margin-bottom: 10px; list-style: none; }
 .rich-details summary::marker { content: ''; }
+.atlas-rich-content [data-details-content] > p { margin-bottom: .08em; line-height: 1.45; }
 .rich-details.is-closed > .rich-details-content > [data-details-content] { display: none; }
 .rich-block-after { display: block; width: auto; margin: 5px 0 10px auto; padding: 4px 7px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-faint); font: 11px var(--font-ui, sans-serif); cursor: pointer; }
 .rich-readonly .rich-block-after { display: none; }

@@ -19,7 +19,7 @@ This is the browser version of the notepad: one file, nothing to install. Everyt
 
 ## Writing and formatting
 
-Use the paragraph selector for headings and the buttons for bold, italic, underline and strike. Buttons show the active format; spaces keep it active. Enter always starts a plain paragraph. Shift+Enter makes a line inside the current block. To continue a list intentionally, choose Insert → Next list item.
+Use the paragraph selector for headings and the buttons for bold, italic, underline and strike. Buttons show the active format; spaces keep it active. In bulleted and numbered lists, Enter after a filled item adds the next one. On an empty item it exits the list or moves up one level. In other blocks, Enter starts a plain paragraph. Shift+Enter adds a line inside the current block.
 
 Insert → Accordion creates a collapsible section. Edit its title, press Enter for its content, and use Paragraph after block to continue outside. Markdown source is a separate mode in the note menu or Settings → Writing.
 

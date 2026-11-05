@@ -9,7 +9,7 @@ import { sinkListItem, liftListItem } from 'prosemirror-schema-list';
 import { columnResizing, tableEditing, goToNextCell } from 'prosemirror-tables';
 import { richSchema as schema, safeLink } from './schema.js';
 import { parseMarkdown, serializeMarkdown } from './markdown.js';
-import { activeFormats, insertDetails, nextItem, normalParagraph, paragraphAfterBlock, setParagraphType, toggleFormat } from './commands.js';
+import { activeFormats, enterParagraph, insertDetails, nextItem, paragraphAfterBlock, setParagraphType, toggleFormat } from './commands.js';
 import { nodeViews } from './nodeViews.js';
 import { findMatches, focusKey, focusPlugin, searchKey, searchPlugin } from './plugins.js';
 import { t } from '../i18n.js';
@@ -97,7 +97,7 @@ export function createRichEditor(options) {
   }, 'input.type');
   const keys = {
     ...baseKeymap,
-    Enter: () => !view.composing && command(normalParagraph, 'input.type'),
+    Enter: () => !view.composing && command(enterParagraph, 'input.type'),
     'Shift-Enter': softBreak,
     'Mod-b': () => command(toggleFormat('strong')),
     'Mod-i': () => command(toggleFormat('em')),
@@ -122,7 +122,7 @@ export function createRichEditor(options) {
       beforeinput(pm, event) {
         if (!editable || pm.composing || event.isComposing) return false;
         if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') { event.preventDefault(); command(event.inputType === 'historyUndo' ? undo : redo, event.inputType === 'historyUndo' ? 'undo' : 'redo'); return true; }
-        if (event.inputType === 'insertParagraph') { event.preventDefault(); command(normalParagraph, 'input.type'); return true; }
+        if (event.inputType === 'insertParagraph') { event.preventDefault(); command(enterParagraph, 'input.type'); return true; }
         return false;
       },
       contextmenu(pm, event) {

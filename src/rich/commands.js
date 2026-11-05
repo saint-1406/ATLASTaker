@@ -1,7 +1,7 @@
 import { Fragment } from 'prosemirror-model';
 import { Selection, TextSelection } from 'prosemirror-state';
 import { createParagraphNear, lift, setBlockType, splitBlockAs, toggleMark, wrapIn } from 'prosemirror-commands';
-import { splitListItem, wrapInList } from 'prosemirror-schema-list';
+import { liftListItem, splitListItem, wrapInList } from 'prosemirror-schema-list';
 
 function composeCommand(state, transaction, command) {
   return command(state.apply(transaction), (next) => {
@@ -34,6 +34,18 @@ export function normalParagraph(state, dispatch) {
   tr.setStoredMarks([]);
   if (dispatch) dispatch(tr.scrollIntoView());
   return true;
+}
+
+export function enterParagraph(state, dispatch) {
+  const { $from, $to } = state.selection;
+  const { list_item } = state.schema.nodes;
+  if ($from.depth > 1 && $from.node(-1).type === list_item && $from.sameParent($to)) {
+    if (state.selection.empty && !$from.parent.content.size && $from.node(-1).childCount === 1) {
+      return liftListItem(list_item)(state, dispatch && ((tr) => dispatch(tr.setStoredMarks([]))));
+    }
+    if ($from.parent.content.size && nextItem(state, dispatch)) return true;
+  }
+  return normalParagraph(state, dispatch);
 }
 
 export function nextItem(state, dispatch) {

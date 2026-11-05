@@ -51,6 +51,23 @@ try {
   assert.equal(await visual.locator('p').last().locator('strong').count(), 0);
   assert.equal(await page.getByRole('button', { name: 'Жирный', exact: true }).getAttribute('aria-pressed'), 'false');
 
+  for (const [source, list] of [['- Первый', 'ul'], ['4. Первый', 'ol']]) {
+    await page.evaluate((md) => { qa.set(md); qa.end(); }, source);
+    await page.keyboard.press('Enter');
+    const items = visual.locator(`:scope > ${list} > li`);
+    assert.equal(await items.count(), 2);
+    assert.equal(await items.last().textContent(), '');
+    if (list === 'ol') assert.equal(await visual.locator('ol').getAttribute('start'), '4');
+
+    await visual.evaluate((element) => element.dispatchEvent(new InputEvent('beforeinput', {
+      bubbles: true, cancelable: true, inputType: 'insertParagraph',
+    })));
+    await page.keyboard.type('После списка');
+    assert.equal(await items.count(), 1);
+    assert.equal(await items.first().innerText(), 'Первый');
+    assert.equal(await visual.locator(':scope > p').last().innerText(), 'После списка');
+  }
+
   await page.evaluate(() => qa.set('- [ ] ')); await page.evaluate(() => qa.end());
   await page.keyboard.press('Enter'); await page.keyboard.type('После чекбокса');
   assert.equal(await visual.locator('input[type=checkbox]').count(), 1);
@@ -62,6 +79,11 @@ try {
   await page.keyboard.type('Планы'); await page.keyboard.press('Enter'); await page.keyboard.type('Подробности');
   assert.equal(await visual.locator('summary').innerText(), 'Планы');
   assert.match(await visual.locator('[data-details-content]').innerText(), /Подробности/);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Вторая строка');
+  const paragraphGap = await visual.locator('[data-details-content] > p').evaluateAll(([first, second]) =>
+    second.getBoundingClientRect().top - first.getBoundingClientRect().bottom);
+  assert.ok(paragraphGap >= 0 && paragraphGap < 3, `Accordion paragraph gap: ${paragraphGap}px`);
   await page.getByRole('button', { name: 'Свернуть: Планы', exact: true }).click();
   assert.equal(await visual.locator('[data-details-content]').isVisible(), false);
   await page.getByRole('button', { name: 'Абзац после блока', exact: true }).click();
