@@ -1,3 +1,4 @@
+@import "prosemirror-view/style/prosemirror.css";
 @import "@fontsource-variable/inter/index.css";
 @import "@fontsource-variable/jetbrains-mono/index.css";
 @import "@fontsource-variable/literata/index.css";
@@ -8664,3 +8665,73 @@ html.locked body > :not(.lock-screen) {
 .cm-accordion-title { flex: 1; min-width: 0; width: 100%; padding: 6px 2px; border: 0; border-radius: 3px; background: transparent; color: inherit; font: inherit; font-weight: 600; }
 .cm-accordion-title:focus, .cm-accordion-head > button:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: 1px; }
 .cm-accordion-title[readonly] { cursor: default; }
+/* The visual document editor shares the note's typography and scroll container with source mode. */
+.note-editor-scroll { height: 100%; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--ink-faint) transparent; }
+.note-visual-host[hidden], .note-source-host[hidden] { display: none; }
+.note-visual-host { min-height: 100%; color: var(--ink); font-family: var(--font-text); font-size: calc(var(--text-size) * var(--fs)); line-height: var(--text-leading); }
+.atlas-rich-content { position: relative; max-width: var(--measure); min-height: 70vh; box-sizing: border-box; margin: 0 auto; padding: var(--content-pad); outline: none; white-space: pre-wrap; overflow-wrap: anywhere; caret-color: var(--accent-text); }
+.atlas-rich-content:has(> p:only-child > br.ProseMirror-trailingBreak:only-child)::before { position: absolute; content: attr(data-placeholder); color: var(--ink-faint); pointer-events: none; }
+.atlas-rich-content p { margin: 0 0 .8em; min-height: 1.4em; }
+.atlas-rich-content h1, .atlas-rich-content h2, .atlas-rich-content h3, .atlas-rich-content h4 { line-height: 1.3; margin: 1em 0 .5em; }
+.atlas-rich-content h1 { font-size: 1.65em; } .atlas-rich-content h2 { font-size: 1.4em; } .atlas-rich-content h3 { font-size: 1.2em; }
+.atlas-rich-content h1:first-child, .atlas-rich-content h2:first-child, .atlas-rich-content h3:first-child { margin-top: 0; }
+.atlas-rich-content ul, .atlas-rich-content ol { padding-left: 1.5em; margin: .4em 0 1em; }
+.atlas-rich-content li > p { margin-bottom: .25em; }
+.atlas-rich-content blockquote { border-left: 3px solid var(--accent-text); margin: .6em 0; padding-left: 1em; color: var(--ink-soft); }
+.atlas-rich-content pre { font: .85em/1.6 var(--font-code, monospace); padding: 14px; border: 1px solid var(--hairline); border-radius: 10px; overflow-x: auto; background: var(--panel, var(--bg)); white-space: pre; }
+.atlas-rich-content code { font-family: var(--font-code, monospace); background: var(--hover, var(--hairline)); border-radius: 3px; padding: .05em .15em; }
+.atlas-rich-content pre code { background: none; padding: 0; }
+.atlas-rich-content a { color: var(--accent-text); text-decoration: underline; }
+.atlas-rich-content img { max-width: 100%; height: auto; border-radius: 10px; }
+.atlas-rich-content hr { border: 0; border-top: 1px solid var(--hairline); margin: 1.5em 0; }
+.atlas-rich-content [data-task-list] { padding-left: 0; list-style: none; }
+.atlas-rich-content .rich-task { display: flex; align-items: flex-start; gap: .6em; }
+.rich-task-control { display: flex; align-items: flex-start; justify-content: center; flex: 0 0 36px; min-height: 44px; margin-left: -7px; padding-top: .3em; cursor: pointer; }
+.rich-task-control > input { width: 21px; height: 21px; margin: 0; accent-color: var(--accent-text); cursor: pointer; }
+.rich-task-text { flex: 1; min-width: 0; }
+.rich-task[data-checked="true"] > .rich-task-text > p:first-child { opacity: .65; text-decoration: line-through; }
+.rich-details { position: relative; border: 1px solid var(--hairline); border-radius: 12px; margin: 1em 0; padding: 12px 14px 4px 40px; }
+.rich-details-controls { position: static; display: contents; }
+.rich-details-toggle { position: absolute; left: 4px; top: 7px; width: 32px; height: 36px; border: 0; border-radius: 7px; color: var(--ink); background: transparent; font-size: 20px; cursor: pointer; }
+.rich-details summary { display: block; font-weight: 650; cursor: text; min-height: 1.5em; margin-bottom: 10px; list-style: none; }
+.rich-details summary::marker { content: ''; }
+.rich-details.is-closed > .rich-details-content > [data-details-content] { display: none; }
+.rich-block-after { display: block; width: auto; margin: 5px 0 10px auto; padding: 4px 7px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-faint); font: 11px var(--font-ui, sans-serif); cursor: pointer; }
+.rich-readonly .rich-block-after { display: none; }
+.rich-details .rich-block-after { position: absolute; right: 7px; bottom: 1px; color: var(--ink-soft); background: var(--hover, var(--hairline)); min-height: 36px; padding: 4px 9px; border-radius: 7px; opacity: 1; }
+.rich-details-content { padding-bottom: 38px; }
+.rich-details.is-closed .rich-details-content { padding-bottom: 32px; }
+.rich-source-block { border: 1px dashed var(--hairline); border-radius: 9px; padding: 12px; margin: 1em 0; font: 12px var(--font-ui, sans-serif); color: var(--ink-soft); }
+.rich-source-block pre { max-height: 90px; overflow: auto; font-size: 11px; }
+.rich-comment { color: var(--ink-soft); font-size: .86em; margin: .2em 0 .7em; padding-left: .6em; border-left: 2px solid var(--hairline); }
+.rich-comment-stamp { color: var(--ink-faint); font: .8em var(--font-ui, sans-serif); }
+.rich-source-block button { color: var(--accent-text); background: transparent; border: 0; padding: 6px 0; cursor: pointer; }
+.atlas-rich-content table { border-collapse: collapse; table-layout: fixed; width: 100%; margin: 1em 0; }
+.atlas-rich-content td, .atlas-rich-content th { border: 1px solid var(--hairline); min-width: 40px; padding: 6px 9px; vertical-align: top; position: relative; }
+.atlas-rich-content td > p, .atlas-rich-content th > p { margin-bottom: 0; }
+.atlas-rich-content .selectedCell:after { position: absolute; inset: 0; background: var(--selection); pointer-events: none; content: ''; }
+.atlas-rich-content .column-resize-handle { position: absolute; right: -2px; top: 0; bottom: 0; width: 4px; background: var(--accent-text); pointer-events: none; }
+.atlas-rich-content .ProseMirror-selectednode { outline: 2px solid var(--accent-text); }
+.atlas-rich-content .rich-dimmed { opacity: .28; }
+.rich-search { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 5px; padding: 8px; background: var(--bg); border-bottom: 1px solid var(--hairline); font: 12px var(--font-ui, sans-serif); }
+.rich-search[hidden] { display: none; }
+.rich-search input { min-width: 80px; width: 145px; flex: 1; border: 1px solid var(--hairline); border-radius: 6px; background: transparent; color: var(--ink); padding: 6px; }
+.rich-search button { min-height: 32px; border: 1px solid var(--hairline); border-radius: 6px; background: transparent; color: var(--ink); padding: 4px 8px; cursor: pointer; }
+.rich-search-match { background: var(--selection, #ffe082); }
+.rich-dictation-preview { display: block; padding: 0 24px 16px; color: var(--ink-faint); font-style: italic; }
+.note-source-host .cm-editor { height: auto; min-height: 70vh; }
+.note-source-host .cm-scroller { overflow: visible; }
+.visual-format-bar { display: grid; grid-template-columns: minmax(75px, 130px) minmax(0, 1fr) auto; gap: 7px; align-items: center; overflow: visible; padding: 6px 10px; }
+.format-inline-tools { display: flex; gap: 3px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+.format-inline-tools::-webkit-scrollbar { display: none; }
+.format-type, .format-insert { min-height: 38px; border: 1px solid var(--hairline); border-radius: 9px; background: transparent; color: var(--ink); font: 12px var(--font-ui, sans-serif); cursor: pointer; padding: 0 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.format-insert { background: var(--accent-text); color: var(--bg); font-weight: 650; }
+.visual-format-bar .format-btn { min-width: 36px; flex: 0 0 36px; }
+.format-btn.active { color: var(--accent-text); background: var(--selection, var(--hairline)); box-shadow: inset 0 0 0 1px var(--accent-text); }
+.format-italic { font-style: italic; } .format-underline { text-decoration: underline; } .format-strike { text-decoration: line-through; }
+@media (max-width: 820px) {
+  .atlas-rich-content { padding: 25px 20px 40vh; width: 100%; max-width: 100%; font-size: 1em; }
+  .visual-format-bar { grid-template-columns: 85px minmax(0, 1fr) auto; gap: 5px; padding: 5px 7px; }
+  .format-insert { padding: 0 8px; }
+  .rich-details { padding-left: 34px; padding-right: 9px; }
+}

@@ -5,7 +5,8 @@ import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { android, api, rescue } from './bridge.js';
 import { createLibrary } from './library.js';
-import { createEditor, insertComment, insertCodeBlock, insertDictation, pasteText, codeLanguageAt, showDictationPreview, urlAt } from './editor.js';
+import { insertComment, insertCodeBlock, insertDictation, pasteText, codeLanguageAt, showDictationPreview, urlAt } from './editor.js';
+import { createEditor } from './noteEditor.js';
 import { createDictation } from './dictation.js';
 import { createTranslator } from './translateCard.js';
 import { analyze, imageRefs } from './markdown.js';
@@ -112,7 +113,7 @@ let updater = null; // newer versions: checked, and on Android installed from in
 let noteSteps = null; // ↶ ↷ in the title bar: the open note's text, one step back or forward (undo.js)
 // writing (0.17): the statistics strip, the formatting bar, what focus mode dims (all synced settings)
 // markup: 'hide' shows a note as it reads (livePreview.js), 'show' as it is typed
-const writing = { statsBar: true, formatBar: 'touch', formatTools: null, focusDim: 'paragraph', markup: 'hide' };
+const writing = { statsBar: true, formatBar: 'always', formatTools: null, focusDim: 'paragraph', editorMode: 'visual' };
 const writeLog = { writeDays: {}, growDays: {} }; // characters written and the text's growth per day (writing.js)
 let pendingWritten = 0; // not yet in writeLog: it is saved every few seconds, not on every key
 let pendingGrown = 0;
@@ -247,6 +248,7 @@ async function boot() {
     resolveImage: (name) => (api.assetUrl ? api.assetUrl(name) : Promise.resolve(null)),
     openImage: showImage,
     touch: phone,
+    onModeChange: (editorMode) => setWriting({ editorMode }),
   });
   editor.view.scrollDOM.addEventListener(
     'scroll',
@@ -256,6 +258,7 @@ async function boot() {
     },
     { passive: true },
   );
+  $('#editor').addEventListener('formatstatechange', () => formatBar.refresh());
   outline = new Outline($('#outline'), { onJump: jumpToLine });
   terrain = new TerrainView($('#terrain'), { getLayout, onPeakClick: jumpToLine });
   atlas = new AtlasView($('#atlas'), {
@@ -929,7 +932,7 @@ function readWriting(saved) {
   if (['touch', 'always', 'off'].includes(saved.formatBar)) writing.formatBar = saved.formatBar;
   if (Array.isArray(saved.formatTools)) writing.formatTools = saved.formatTools;
   if (['paragraph', 'sentence', 'off'].includes(saved.focusDim)) writing.focusDim = saved.focusDim;
-  if (saved.markup === 'hide' || saved.markup === 'show') writing.markup = saved.markup;
+  if (saved.editorMode === 'visual' || saved.editorMode === 'source') writing.editorMode = saved.editorMode;
   if (saved.writeDays && typeof saved.writeDays === 'object') writeLog.writeDays = saved.writeDays;
   if (saved.growDays && typeof saved.growDays === 'object') writeLog.growDays = saved.growDays;
   pinLock = saved.pinLock && typeof saved.pinLock === 'object' ? saved.pinLock : null;
@@ -953,7 +956,7 @@ function setWriting(patch) {
 /** The formatting bar shows while a note is written: on a phone, or everywhere if so chosen. */
 function showFormatBar() {
   const wanted = writing.formatBar === 'always' || (writing.formatBar === 'touch' && phone);
-  const show = wanted && editing && normalizeTools(writing.formatTools).length > 0;
+  const show = wanted && editing;
   formatBar.node.hidden = !show;
   $('#app').classList.toggle('formatting', show);
 }
@@ -965,7 +968,7 @@ function showFormatBar() {
 function applyFocusDim() {
   const lit = focusMode && writing.focusDim !== 'off';
   editor?.setFocusDim(lit ? writing.focusDim : null, prefs.lang);
-  editor?.setMarkup(writing.markup !== 'show');
+  editor?.setMode(writing.editorMode);
   $('#app').classList.toggle('focus-lit', lit);
 }
 
@@ -977,6 +980,9 @@ function openNoteMenu(anchor) {
   const r = anchor.getBoundingClientRect();
   showMenu(r.right, r.bottom + 4, [
     { header: titleOf(note) },
+    { icon: '＋', text: t('rich.insertBlock'), run: () => { ensureEditing(); formatBar.openInsert(anchor); } },
+    { icon: '¶', text: t('rich.visual'), run: () => setWriting({ editorMode: 'visual' }) },
+    { icon: '</>', text: t('rich.source'), run: () => setWriting({ editorMode: 'source' }) },
     { icon: '⧉', text: t('noteMenu.copyAll'), run: copyAll },
     { icon: '#', text: t('noteMenu.tag'), run: tagSelection },
     { icon: '⌗', text: t('tags.title'), run: showTags },
@@ -995,7 +1001,7 @@ function openNoteMenu(anchor) {
 
 async function copyAll() {
   try {
-    await api.copy(editor.view.state.doc.toString());
+    await api.copy(editor.getPlainText());
     toast(t('noteMenu.copied'));
   } catch (err) {
     toast(err.message);
@@ -1129,7 +1135,7 @@ function printPage(page, name) {
 /** The strip over the note: counted again after a change, its typing speed every few seconds. */
 function refreshStats({ text = true } = {}) {
   if (statsStrip.node.hidden || !editor) return;
-  if (text || !lastStats) lastStats = textStats(editor.view.state.doc.toString(), prefs.lang);
+  if (text || !lastStats) lastStats = textStats(editor.view.rich ? editor.getPlainText() : editor.view.state.doc.toString(), prefs.lang);
   statsStrip.update(lastStats, pace.slice(-6).reduce((a, b) => a + b, 0));
 }
 
@@ -1168,7 +1174,7 @@ function showWritingStats() {
   const note = notes.get(currentId);
   if (!note) return;
   flushWriting();
-  openWritingStats({ title: titleOf(note), stats: textStats(editor.view.state.doc.toString(), prefs.lang), log: writeLog });
+  openWritingStats({ title: titleOf(note), stats: textStats(editor.view.rich ? editor.getPlainText() : editor.view.state.doc.toString(), prefs.lang), log: writeLog });
 }
 
 /**
@@ -1264,7 +1270,7 @@ function sideChoice(label, values, current, choose, name) {
 function writingSettings(close) {
   return sideGroup(
     t('stats.writing'),
-    sideToggle({ icon: '✱', text: t('markup.hide'), hint: t('markup.hint'), on: writing.markup !== 'show', toggle: () => setWriting({ markup: writing.markup === 'show' ? 'hide' : 'show' }) }),
+    sideChoice(t('rich.mode'), ['visual', 'source'], writing.editorMode, (editorMode) => setWriting({ editorMode }), (mode) => t(`rich.${mode}`)),
     sideToggle({ icon: '∑', text: t('stats.bar'), hint: t('stats.barHint'), on: writing.statsBar, toggle: () => setWriting({ statsBar: !writing.statsBar }) }),
     sideChoice(t('format.show'), ['touch', 'always', 'off'], writing.formatBar, (formatBar) => setWriting({ formatBar }), (v) => t(`format.${v}`)),
     sideItem({
@@ -1476,13 +1482,14 @@ function refreshChrome() {
   const comments = info.comments ? count(info.comments, 'comment') : '';
   const words = `${count(info.words, 'word')} · ${count(info.chars, 'char')}`;
   $('#sb-words').textContent = !isAtlas() && comments ? `${words} · ${comments}` : words;
-  const peaks = info.headings.length ? t('status.peaks', count(info.headings.length, 'peak')) : copy().noHeadings;
+  const peaks = info.headings.length ? t('status.peaks', count(info.headings.length, 'peak')) : editor.view.rich ? t('rich.enterHint') : copy().noHeadings;
   $('#sb-peaks').textContent = comments ? `${peaks} · 💬 ${comments}` : peaks;
   outline.setHeadings(info.headings);
   outline.setCursorLine(editor.view.state.doc.lineAt(editor.view.state.selection.main.head).number);
 }
 
 function onSelectionChange(update) {
+  formatBar.refresh?.();
   showCursorStatus(update.state);
   schedulePositionSave();
   // on a phone a long press shows the phone's own copy bar: "Translate" floats over the text instead
@@ -1496,7 +1503,7 @@ function translateSelection(view = editor.view) {
     toast(t('translate.nothingSelected'));
     return;
   }
-  const text = view.state.sliceDoc(sel.from, sel.to);
+  const text = view.rich ? view.rich.getSelectedText() : view.state.sliceDoc(sel.from, sel.to);
   const start = view.coordsAtPos(sel.from);
   const end = view.coordsAtPos(sel.to);
   const rect = start && end ? { left: start.left, top: start.top, bottom: Math.max(start.bottom, end.bottom) } : null;
@@ -1521,8 +1528,13 @@ function translateSelection(view = editor.view) {
 function showCursorStatus(state) {
   const sel = state.selection.main;
   const line = state.doc.lineAt(sel.head);
-  $('#sb-coords').textContent = copy().coords(line.number, sel.head - line.from + 1);
-  const selected = state.selection.ranges.reduce((n, r) => n + r.to - r.from, 0);
+  const rich = editor?.view.rich;
+  if (rich) {
+    let paragraph = 0;
+    rich.view.state.doc.descendants((node, pos) => { if (node.isTextblock && pos < rich.view.state.selection.head) paragraph++; });
+    $('#sb-coords').textContent = t('richPosition', paragraph || 1, rich.view.state.selection.$from.parentOffset + 1);
+  } else $('#sb-coords').textContent = copy().coords(line.number, sel.head - line.from + 1);
+  const selected = rich ? rich.getSelectedText().length : state.selection.ranges.reduce((n, r) => n + r.to - r.from, 0);
   const selEl = $('#sb-sel');
   selEl.hidden = !selected;
   selEl.textContent = t('status.selected', count(selected, 'char'));
@@ -1727,7 +1739,7 @@ async function requestComment(view, lineNumber) {
   const body = await openCommentDialog({
     kicker: copy().commentKicker,
     quote: lines[target - 1].trim() || t('comment.emptyLine'),
-    history: commentsUnder(lines, target),
+    history: commentsUnder(lines, target).map((comment) => ({ ...comment, text: toText(comment.text) })),
   });
   view.focus();
   if (body) insertComment(view, n, body);
@@ -1736,7 +1748,7 @@ async function requestComment(view, lineNumber) {
 async function copySelection(view) {
   const sel = view.state.selection.main;
   try {
-    await api.copy(view.state.sliceDoc(sel.from, sel.to));
+    await api.copy(view.rich ? view.rich.getSelectedText() : view.state.sliceDoc(sel.from, sel.to));
     return true;
   } catch {
     toast(t('clipboard.blocked', 'Ctrl+C'));
@@ -1745,7 +1757,10 @@ async function copySelection(view) {
 }
 
 async function cutSelection(view) {
-  if (await copySelection(view)) view.dispatch(view.state.replaceSelection(''), { userEvent: 'delete.cut' });
+  if (await copySelection(view)) {
+    if (view.rich) view.rich.deleteSelection();
+    else view.dispatch(view.state.replaceSelection(''), { userEvent: 'delete.cut' });
+  }
 }
 
 async function pasteFromClipboard(view) {
@@ -1792,6 +1807,7 @@ async function addImage(file, pos) {
   // a clipboard screenshot arrives as "image.png"; a dropped file keeps its own name
   const named = file.name && !/^image\.\w+$/i.test(file.name);
   const alt = (named ? file.name.replace(/\.[^.]+$/, '') : t('image.screenshot', formatStamp(new Date()))).replace(/[[\]\n]/g, ' ');
+  if (view.rich) { view.rich.command('image', { src: `assets/${name}`, alt, title: '' }); view.focus(); return; }
   const blank = !line.text.trim();
   const at = blank ? line.from : line.to;
   const text = `${blank ? '' : '\n'}![${alt}](assets/${name})\n`;
@@ -2025,7 +2041,7 @@ function menuSections() {
         t('side.write'),
         sideItem({ icon: '⌂', text: t('home.title'), run: () => close(() => showHome()) }),
         sideItem({ icon: '＋', text: c().newNote, kbd: 'Ctrl+N', run: () => close(() => createNote()) }),
-        sideItem({ icon: '▤', text: t('side.list'), kbd: 'Ctrl+B', run: () => close(toggleIndex) }),
+        sideItem({ icon: '▤', text: t('side.list'), kbd: 'Ctrl+Shift+B', run: () => close(toggleIndex) }),
         sideItem({ icon: '⌕', text: t('side.find'), kbd: 'Ctrl+K', run: () => close(() => openPalette()) }),
         isAtlas() ? sideItem({ icon: '▦', text: t('side.atlas'), kbd: 'Ctrl+M', run: () => close(toggleAtlas) }) : null,
         sideToggle({ icon: '◎', text: t('side.focus'), on: focusMode, toggle: () => close(() => toggleFocus()) }),
@@ -2326,7 +2342,7 @@ function commandList() {
       keywords: 'language язык english английский русский russian interface интерфейс',
       run: () => setLanguage(prefs.lang === 'ru' ? 'en' : 'ru'),
     },
-    { icon: '▤', title: t('commands.sidebar'), kbd: 'Ctrl+B', keywords: 'sidebar list панель список', run: toggleIndex },
+    { icon: '▤', title: t('commands.sidebar'), kbd: 'Ctrl+Shift+B', keywords: 'sidebar list панель список', run: toggleIndex },
     { icon: '◎', title: t(focusMode ? 'commands.unfocus' : 'commands.focus'), kbd: 'Ctrl+.', keywords: 'focus фокус', run: () => toggleFocus() },
     { icon: '❝', title: t('commands.comment'), kbd: 'Ctrl+Shift+M', keywords: 'comment комментарий', run: () => requestComment(editor.view) },
     { icon: '⌗', title: t('commands.codeBlock'), kbd: 'Ctrl+E', keywords: 'code код', run: () => {
@@ -2397,6 +2413,7 @@ function toggleAtlas() {
 }
 
 function onGlobalKey(e) {
+  if (e.defaultPrevented) return;
   if (e.key === 'Escape' && translator.isOpen()) {
     e.preventDefault();
     e.stopPropagation();
@@ -2430,7 +2447,7 @@ function onGlobalKey(e) {
   else if ((code === 'KeyP' || code === 'KeyK') && !shiftKey) openPalette();
   else if (code === 'KeyM' && shiftKey) requestComment(editor.view);
   else if (code === 'KeyM' && isAtlas()) toggleAtlas();
-  else if (code === 'KeyB' && !shiftKey) toggleIndex();
+  else if (code === 'KeyB' && (shiftKey || !editor.view.rich)) toggleIndex();
   else if (code === 'KeyD' && shiftKey) toggleDictation();
   else if (code === 'KeyX' && shiftKey) translateSelection();
   else if (code === 'KeyO' && !shiftKey && library) {

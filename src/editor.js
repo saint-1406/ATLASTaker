@@ -350,6 +350,7 @@ function structurePlugin(copy) {
 
 /** Ctrl+E: an empty block at the cursor, or the selected lines wrapped (with a guessed language selected). */
 export function insertCodeBlock(view) {
+  if (view.rich) return view.rich.command('codeblock');
   const { state } = view;
   const sel = state.selection.main;
   if (sel.empty) {
@@ -421,12 +422,14 @@ const dictationField = StateField.define({
 
 /** Shows (or, with an empty text, clears) the words being heard at the cursor; the note itself is untouched. */
 export function showDictationPreview(view, text) {
+  if (view.rich) { view.rich.preview(text); return; }
   const pos = view.state.selection.main.head;
   view.dispatch({ effects: setDictationPreview.of(text ? { pos, text: joinDictated(view.state.sliceDoc(Math.max(0, pos - 3), pos), text) } : null) });
 }
 
 /** Puts a finished phrase in at the cursor (over the selection), spaced and capitalised to fit. */
 export function insertDictation(view, text) {
+  if (view.rich) { view.rich.preview(''); view.rich.insertText(joinDictated(view.rich.getContextText().slice(-3), text)); return; }
   const { from, to } = view.state.selection.main;
   const insert = joinDictated(view.state.sliceDoc(Math.max(0, from - 3), from), text);
   if (!insert) return;
@@ -464,6 +467,7 @@ const slashFence = EditorView.inputHandler.of((view, from, to, text) => {
  * separate history step that wraps it in a fence, so Ctrl+Z undoes only the wrapping.
  */
 export function pasteText(view, raw, onSmartPaste) {
+  if (view.rich) { view.rich.insertText(raw); return; }
   const text = raw.replace(/\r\n?/g, '\n');
   const from = view.state.selection.main.from;
   // with several cursors the paste lands in several places; only a single paste gets wrapped
@@ -531,6 +535,9 @@ export function createEditor({
   resolveImage,
   openImage,
   touch = false,
+  raw = false,
+  onUndo = null,
+  onRedo = null,
 }) {
   const extensions = [
     history(),
@@ -547,10 +554,11 @@ export function createEditor({
     search({ top: true }),
     EditorView.lineWrapping,
     EditorState.allowMultipleSelections.of(true),
-    markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true }),
-    Prec.highest(keymap.of([{ key: 'Enter', run: continueEmptyTask }])),
+    markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: !raw }),
+    raw && onUndo ? Prec.highest(keymap.of([{ key: 'Mod-z', run: onUndo }, { key: 'Mod-y', run: onRedo }, { key: 'Mod-Shift-z', run: onRedo }])) : [],
+    raw ? [] : Prec.highest(keymap.of([{ key: 'Enter', run: continueEmptyTask }])),
     EditorView.inputHandler.of((view, from, to, text) => {
-      if (text !== '\n' || from !== to || from !== view.state.selection.main.head) return false;
+      if (raw || text !== '\n' || from !== to || from !== view.state.selection.main.head) return false;
       const spec = emptyTaskEnter(view.state);
       if (!spec) return false;
       view.dispatch(spec);
@@ -558,13 +566,20 @@ export function createEditor({
     }),
     syntaxHighlighting(atlasHighlight),
     structurePlugin(onCopy),
-    accordionExtension,
-    imagesField(resolveImage, openImage),
+    raw ? [] : accordionExtension,
+    raw ? [] : imagesField(resolveImage, openImage),
     dictationField,
     slashFence,
     EditorView.contentAttributes.of({ spellcheck: 'true', autocapitalize: 'sentences' }),
     keymap.of([{ key: 'Mod-e', run: insertCodeBlock }, ...searchKeymap, ...historyKeymap, ...defaultKeymap, indentWithTab]),
     EditorView.domEventHandlers({
+      beforeinput(event) {
+        if (!raw) return false;
+        if (event.inputType === 'historyUndo' && onUndo || event.inputType === 'historyRedo' && onRedo) {
+          event.preventDefault(); (event.inputType === 'historyUndo' ? onUndo : onRedo)(); return true;
+        }
+        return false;
+      },
       paste(event, view) {
         // a screenshot in the clipboard (Win+Shift+S, then Ctrl+V) becomes a picture in the note
         const image = imageFile(event.clipboardData);
@@ -611,7 +626,7 @@ export function createEditor({
     }),
   ];
 
-  const withLanguage = () => [...extensions, language.of(languageExtensions()), editing.of(EDITABLE), focusing.of([]), markup.of(MARKS_HIDDEN)];
+  const withLanguage = () => [...extensions, language.of(languageExtensions()), editing.of(EDITABLE), focusing.of([]), markup.of(raw ? MARKS_SHOWN : MARKS_HIDDEN)];
   const view = new EditorView({ parent, state: EditorState.create({ doc: '', extensions: withLanguage() }) });
   return {
     view,

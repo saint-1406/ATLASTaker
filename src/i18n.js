@@ -12,6 +12,8 @@ export const LANGS = [
 const DEFAULT_LOCALES = { ru: 'ru-RU', en: 'en-GB' };
 
 const ru = {
+  richPosition: (paragraph, col) => `Абзац ${paragraph} · ${col}`,
+  rich: { mode: 'Редактор', visual: 'Визуальный редактор', source: 'Исходник Markdown', paragraph: 'Абзац', blockType: 'Тип абзаца', insert: 'Вставить', insertBlock: 'Вставить блок', nextItem: 'Следующий пункт списка', innerLine: 'Новая строка внутри блока · Shift+Enter', afterBlock: 'Абзац после блока', summary: 'Название раздела', taskDone: 'Отметить задачу выполненной', sourceFragment: 'Фрагмент исходника', editSource: 'Редактировать исходник', find: 'Найти в заметке', replace: 'Заменить на', replaceOne: 'Заменить', replaceAll: 'Все', placeholder: 'Начните писать…', enterHint: 'Enter — обычный абзац · Shift+Enter — перенос строки' },
   accordion: { insert: 'Вставить аккордеон', defaultTitle: 'Раздел', title: 'Название аккордеона', expand: 'Раскрыть', collapse: 'Свернуть' },
   untitled: 'Без названия',
   forms: {
@@ -92,7 +94,7 @@ const ru = {
   chrome: {
     actions: 'Действия',
     notesList: 'Список заметок',
-    notesListKey: 'Список заметок (Ctrl+B)',
+    notesListKey: 'Список заметок (Ctrl+Shift+B)',
     findKey: 'Заметки и команды (Ctrl+K)',
     atlas: 'Атлас',
     atlasKey: 'Все заметки на одной карте (Ctrl+M)',
@@ -919,6 +921,8 @@ const ru = {
 };
 
 const en = {
+  richPosition: (paragraph, col) => `Paragraph ${paragraph} · ${col}`,
+  rich: { mode: 'Editor', visual: 'Visual editor', source: 'Markdown source', paragraph: 'Paragraph', blockType: 'Paragraph type', insert: 'Insert', insertBlock: 'Insert block', nextItem: 'Next list item', innerLine: 'New line inside block · Shift+Enter', afterBlock: 'Paragraph after block', summary: 'Section title', taskDone: 'Mark task as done', sourceFragment: 'Source fragment', editSource: 'Edit source', find: 'Find in note', replace: 'Replace with', replaceOne: 'Replace', replaceAll: 'All', placeholder: 'Start writing…', enterHint: 'Enter — plain paragraph · Shift+Enter — new line' },
   accordion: { insert: 'Insert accordion', defaultTitle: 'Section', title: 'Accordion title', expand: 'Expand', collapse: 'Collapse' },
   untitled: 'Untitled',
   forms: {
@@ -997,7 +1001,7 @@ const en = {
   chrome: {
     actions: 'Actions',
     notesList: 'Notes list',
-    notesListKey: 'Notes list (Ctrl+B)',
+    notesListKey: 'Notes list (Ctrl+Shift+B)',
     findKey: 'Notes and commands (Ctrl+K)',
     atlas: 'Atlas',
     atlasKey: 'All notes on one map (Ctrl+M)',

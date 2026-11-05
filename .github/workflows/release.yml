@@ -30,7 +30,8 @@ jobs:
 
       - run: npm ci
       - run: npm test
-      - run: npm run build
+      - run: npx playwright install chromium
+      - run: npm run test:editor
       # sign-in with Google (sync): the desktop client's secret travels with the app, not in the repository
       - name: Google client
         shell: pwsh

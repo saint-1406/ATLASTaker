@@ -39,7 +39,7 @@ export function closeMenu(restoreFocus = true) {
  * items: { icon, text, kbd, run, disabled } | { header } | { note } | '-'
  */
 /** above: the menu opens up and to the left of (x, y) — for a button at the foot of the screen. */
-export function showMenu(x, y, items, { onClose, above = false } = {}) {
+export function showMenu(x, y, items, { onClose, above = false, preserveFocus = false } = {}) {
   closeMenu(false);
   const node = h('div', { class: 'ctx', role: 'menu' });
   const buttons = [];
@@ -109,7 +109,8 @@ export function showMenu(x, y, items, { onClose, above = false } = {}) {
       window.removeEventListener('resize', onDismiss);
     },
   };
-  buttons[0]?.focus({ preventScroll: true });
+  if (preserveFocus) for (const button of buttons) button.addEventListener('pointerdown', (event) => event.preventDefault());
+  else buttons[0]?.focus({ preventScroll: true });
 }
 
 function trapTab(e, box) {

@@ -3,7 +3,7 @@
 // quote, indents. Which buttons and in what order is the person's choice (prefs.formatTools).
 
 import { indentLess, indentMore } from '@codemirror/commands';
-import { h, openDialog } from './overlays.js';
+import { h, openDialog, showMenu } from './overlays.js';
 import { t } from './i18n.js';
 import { apply, heading, lineMark, link, rule, wrap } from './format.js';
 import { insertCodeBlock } from './editor.js';
@@ -48,21 +48,75 @@ export function normalizeTools(list) {
 export function createFormatBar({ getView, actions = {} }) {
   const node = h('div', { class: 'format-bar', role: 'toolbar', hidden: true });
   let tools = [...DEFAULT_TOOLS];
+  let typeButton, insertButton;
+
+  function run(id) {
+    const view = getView(); if (!view) return;
+    if (id === 'image') { actions.image?.(); return; }
+    if (id === 'keyboard') { view.contentDOM.blur(); return; }
+    if (view.rich) {
+      if (id === 'link') { askLink(view); return; }
+      view.rich.command(id); view.focus(); refresh();
+    } else BY_ID.get(id)?.run(view, actions);
+  }
+  function askLink(view) {
+    openDialog((box, close) => {
+      const field = h('input', { class: 'field', type: 'url', placeholder: 'https://', 'aria-label': t('format.tools.link'), 'data-autofocus': true });
+      const save = h('button', { type: 'button', class: 'btn primary', onclick: () => { if (view.rich.command('link', field.value)) close(null); } }, t('settings.done'));
+      box.append(h('h2', { class: 'modal-title' }, t('format.tools.link')), field, h('div', { class: 'modal-actions' }, save));
+      field.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); save.click(); } });
+    }, { onClose: () => view.focus() });
+  }
+  function menu(anchor, items) {
+    const rect = anchor.getBoundingClientRect();
+    showMenu(rect.right, rect.top, items, { onClose: () => getView()?.focus(), above: rect.top > innerHeight / 2, preserveFocus: matchMedia('(pointer: coarse)').matches });
+  }
+  function blockMenu() {
+    menu(typeButton, ['paragraph', 'h1', 'h2', 'h3', 'bullet', 'numbered', 'task', 'quote', 'codeblock'].map((id) => ({ text: id === 'paragraph' ? t('rich.paragraph') : t(`format.tools.${id}`), run: () => run(id) })));
+  }
+  function insertMenu(anchor = insertButton) {
+    const rich = getView()?.rich;
+    const items = ['accordion', 'task', 'bullet', 'numbered', 'quote', 'image', 'link', 'rule', 'codeblock'].map((id) => ({ icon: BY_ID.get(id)?.glyph || '＋', text: t(`format.tools.${id}`), run: () => run(id) }));
+    if (rich) items.push('-', { icon: '↳', text: t('rich.nextItem'), disabled: !rich.formats().inList, run: () => run('next') }, { icon: '↵', text: t('rich.innerLine'), run: () => run('newline') }, { icon: '¶', text: t('rich.afterBlock'), run: () => run('after') });
+    items.push('-', { icon: '⌨', text: t('format.tools.keyboard'), run: () => run('keyboard') });
+    menu(anchor, items);
+  }
+
+  function refresh() {
+    const view = getView(), rich = view?.rich;
+    if (!typeButton) return;
+    const state = rich?.formats();
+    const block = state?.block || 'paragraph';
+    const names = { paragraph: t('rich.paragraph'), heading: t(`format.tools.h${Math.min(3, state?.level || 1)}`), bullet_list: t('format.tools.bullet'), ordered_list: t('format.tools.numbered'), task_list: t('format.tools.task'), blockquote: t('format.tools.quote'), code_block: t('format.tools.codeblock'), summary: t('rich.summary') };
+    const shortName = block === 'heading' ? `H${state?.level || 1}` : names[block] || t('rich.paragraph');
+    typeButton.textContent = rich ? `${shortName} ▾` : 'Markdown ▾';
+    typeButton.setAttribute('aria-label', t('rich.blockType') + ': ' + (rich ? names[block] || t('rich.paragraph') : 'Markdown'));
+    typeButton.title = t('rich.blockType');
+    const markNames = { bold: 'strong', italic: 'em', underline: 'underline', strike: 'strike', code: 'code' };
+    for (const button of node.querySelectorAll('[data-format]')) {
+      const on = state?.marks.has(markNames[button.dataset.format]) || false;
+      button.classList.toggle('active', on); button.setAttribute('aria-pressed', String(on));
+      button.disabled = !view;
+    }
+  }
 
   function draw() {
     node.setAttribute('aria-label', t('format.title'));
-    node.replaceChildren(
-      ...tools.map((id) => {
+    node.classList.add('visual-format-bar');
+    typeButton = h('button', { type: 'button', class: 'format-type', 'aria-label': t('rich.blockType'), 'aria-haspopup': 'menu', onclick: blockMenu }, t('rich.paragraph') + ' ▾');
+    insertButton = h('button', { type: 'button', class: 'format-insert', 'aria-label': t('rich.insertBlock'), 'aria-haspopup': 'menu', onclick: () => insertMenu() }, '＋ ', t('rich.insert'));
+    const preferred = tools.filter((id) => ['bold', 'italic', 'underline', 'strike', 'code'].includes(id));
+    const marks = [...new Set(preferred)];
+    const row = h('div', { class: 'format-inline-tools' }, marks.map((id) => {
         const tool = BY_ID.get(id);
-        const button = h('button', { type: 'button', class: `format-btn format-${id}`, title: t(`format.tools.${id}`), 'aria-label': t(`format.tools.${id}`) }, tool.glyph);
+        const button = h('button', { type: 'button', class: `format-btn format-${id}`, 'data-format': id, title: t(`format.tools.${id}`), 'aria-label': t(`format.tools.${id}`), 'aria-pressed': 'false' }, tool.glyph);
         button.addEventListener('pointerdown', (e) => e.preventDefault());
-        button.addEventListener('click', () => {
-          const view = getView();
-          if (view) tool.run(view, actions);
-        });
+        button.addEventListener('click', () => run(id));
         return button;
-      }),
-    );
+      }));
+    for (const button of [typeButton, insertButton]) button.addEventListener('pointerdown', (event) => event.preventDefault());
+    node.replaceChildren(typeButton, row, insertButton);
+    refresh();
   }
   draw();
 
@@ -73,17 +127,20 @@ export function createFormatBar({ getView, actions = {} }) {
       draw();
     },
     localize: draw,
+    refresh,
+    openInsert: (anchor) => insertMenu(anchor),
   };
 }
 
 /** Which buttons the bar has, and in what order: switches and arrows. onSave(list). */
 export function openToolsDialog({ current, onSave }) {
-  let chosen = normalizeTools(current);
+  const inlineTools = new Set(['bold', 'italic', 'underline', 'strike', 'code']);
+  let chosen = normalizeTools(current).filter((id) => inlineTools.has(id));
   openDialog(
     (box, close) => {
       const list = h('ol', { class: 'format-tools' });
       const draw = () => {
-        const order = [...chosen, ...TOOLS.map((tool) => tool.id).filter((id) => !chosen.includes(id))];
+        const order = [...chosen, ...TOOLS.map((tool) => tool.id).filter((id) => inlineTools.has(id) && !chosen.includes(id))];
         list.replaceChildren(
           ...order.map((id) => {
             const on = chosen.includes(id);
@@ -133,7 +190,7 @@ export function openToolsDialog({ current, onSave }) {
               type: 'button',
               class: 'btn',
               onclick: () => {
-                chosen = [...DEFAULT_TOOLS];
+                chosen = DEFAULT_TOOLS.filter((id) => inlineTools.has(id));
                 draw();
               },
             },

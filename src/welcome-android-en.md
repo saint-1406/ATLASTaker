@@ -19,9 +19,15 @@ This is ATLAS for Android: notes and a reading library in one app. Everything yo
 ## How it works
 
 - Text is saved half a second after the last letter. There is no Save button: the bottom bar shows it is all there.
-- Lines starting with “# ” become sections.
+- Choose a heading from the paragraph selector; sections appear in the contents.
 - The button at the top left is the notes list, ＋ makes a new note, the magnifier searches the notes and runs every command.
 - Settings (the sliders button): theme, the Atlas look, text size and language, Russian included.
+
+## Writing and formatting
+
+Use the paragraph selector for headings and the buttons for bold, italic, underline and strike. Buttons show the active format; spaces keep it active. Enter always starts a plain paragraph. Shift+Enter makes a line inside the current block. To continue a list intentionally, choose Insert → Next list item.
+
+Insert → Accordion creates a collapsible section. Edit its title, press Enter for its content, and use Paragraph after block to continue outside. Markdown source is a separate mode in the note menu or Settings → Writing.
 
 ## Tasks and comments
 
@@ -31,7 +37,7 @@ This is ATLAS for Android: notes and a reading library in one app. Everything yo
 
 ## Code
 
-For a code block, type /# at the start of a line: the block opens with the cursor inside. Another /# leaves the block. Add a language after the three backticks and highlighting turns on by itself:
+Choose Insert → Code block or press Ctrl+E. Shift+Enter adds a code line; Enter starts a plain paragraph after the block. Language highlighting and the /# syntax are available in source mode:
 
 ```python
 def outline(note: str) -> list[str]:

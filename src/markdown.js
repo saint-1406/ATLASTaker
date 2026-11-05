@@ -1,6 +1,7 @@
 // Reads a note's markdown just enough for the map: title, headings with their section sizes, counts.
 
 import { isCommentLine } from './comments.js';
+import { decodeEntities } from './entities.js';
 
 const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})/;
 const FENCE_CLOSE_RE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
@@ -13,15 +14,17 @@ export const IMAGE_RE = /!\[([^\]\n]*)\]\(assets\/(a-[a-z0-9]{6,40}\.(?:png|jpg|
 
 /** File names of the pictures a note shows, each once. */
 export function imageRefs(text) {
-  return [...new Set([...text.matchAll(IMAGE_RE)].map((m) => m[2]))];
+  const html = [...text.matchAll(/\bsrc="assets\/(a-[a-z0-9]{6,40}\.(?:png|jpg|gif|webp))"/g)].map((match) => match[1]);
+  return [...new Set([...text.matchAll(IMAGE_RE)].map((m) => m[2]).concat(html))];
 }
 
 export function countWords(text) {
-  return (text.match(WORD_RE) ?? []).length;
+  return (decodeEntities(text.replace(/<\/?(?:u|strong|em|s|del|b|i|code)>/gi, '')).match(WORD_RE) ?? []).length;
 }
 
 export function cleanInline(s) {
-  return s
+  return decodeEntities(s)
+    .replace(/<\/?(?:u|strong|em|s|del|b|i|code)>/gi, '')
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+|>\s*)+/, '')
@@ -36,6 +39,7 @@ function clip(s, max) {
 
 // Only the portable accordion wrappers: all other HTML keeps its previous literal treatment.
 function accordionLine(line) {
+  if (/^<p><\/p>\s*$/.test(line)) return '';
   if (/^<\/?details(?: open)?>\s*$/.test(line)) return '';
   const summary = /^<summary>(.*)<\/summary>\s*$/.exec(line);
   return summary ? summary[1].replace(/&(amp|lt|gt|quot|apos|#39);/g, (_, entity) => ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", '#39': "'" })[entity]) : line;

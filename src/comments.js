@@ -6,7 +6,7 @@
 // so they survive restarts, exports and opening the .md in any other editor.
 
 export const COMMENT_MARK = '💬';
-export const COMMENT_RE = /^(\s*)💬 (\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}) · (.*)$/u;
+export const COMMENT_RE = /^(\s*(?:>\s*)*)💬 (\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}) · (.*)$/u;
 
 const LIST_PREFIX_RE = /^(\s*)((?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?/;
 

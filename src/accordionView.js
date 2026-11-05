@@ -99,6 +99,7 @@ export const accordionExtension = [accordionField, EditorView.atomicRanges.of((v
 
 /** Inserts and focuses the title without making the phone keyboard disappear. */
 export function insertAccordionBlock(view) {
+  if (view.rich) return view.rich.command('accordion');
   const spec = insertAccordion(view.state, t('accordion.defaultTitle'));
   if (!spec) return false;
   view.dispatch(spec);

@@ -12,10 +12,16 @@ This is the browser version of the notepad: one file, nothing to install. Everyt
 ## How it works
 
 - Text is saved half a second after the last keystroke. There is no Save button: the bottom right corner shows that everything is in place.
-- A line that starts with “# ” becomes a section. A table of contents appears on the right, with the section under the cursor highlighted.
+- Choose a heading from the paragraph selector; sections appear in the contents.
 - Screenshots go straight into a note: Win+Shift+S, then Ctrl+V. You can also drag a picture into the text. Click it to see it full screen.
 - Ctrl+K opens the palette: search across your notes and every command. Ctrl+, opens the settings, the language among them.
 - In the mood for atmosphere? Switch to the Atlas look: the note becomes a relief map and its headings become peaks.
+
+## Writing and formatting
+
+Use the paragraph selector for headings and the buttons for bold, italic, underline and strike. Buttons show the active format; spaces keep it active. Enter always starts a plain paragraph. Shift+Enter makes a line inside the current block. To continue a list intentionally, choose Insert → Next list item.
+
+Insert → Accordion creates a collapsible section. Edit its title, press Enter for its content, and use Paragraph after block to continue outside. Markdown source is a separate mode in the note menu or Settings → Writing.
 
 ## Tasks and comments
 
@@ -25,7 +31,7 @@ This is the browser version of the notepad: one file, nothing to install. Everyt
 
 ## Code
 
-For a code block, type /# at the start of a line (or press Ctrl+E): the block opens with the cursor inside. Another /# leaves the block. Add a language after the three backticks and highlighting turns on by itself:
+Choose Insert → Code block or press Ctrl+E. Shift+Enter adds a code line; Enter starts a plain paragraph after the block. Language highlighting and the /# syntax are available in source mode:
 
 ```python
 def outline(note: str) -> list[str]:
@@ -33,7 +39,7 @@ def outline(note: str) -> list[str]:
     return [line.lstrip("# ") for line in note.splitlines() if line.startswith("#")]
 ```
 
-Paste code from the clipboard and ATLAS wraps it in a block and guesses the language. Guessed wrong? Ctrl+Z.
+Ordinary paste keeps the text type. Choose a code block before pasting code. Source mode retains language highlighting and smart code paste.
 
 ## Shortcuts
 
@@ -43,7 +49,7 @@ Paste code from the clipboard and ATLAS wraps it in a block and guesses the lang
 | Ctrl+N | new note |
 | Ctrl+, | settings, language and backup copy |
 | Ctrl+. | focus mode |
-| /# or Ctrl+E | code block (/# inside one leaves it) |
+| Ctrl+E | code block |
 | Ctrl+Shift+M | comment on the line |
 | Ctrl+F | find in the note |
 | Ctrl+Shift+L | light / dark theme |

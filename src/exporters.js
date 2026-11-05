@@ -4,6 +4,8 @@
 
 import { markdownLanguage } from '@codemirror/lang-markdown';
 import { outerAccordions } from './accordion.js';
+import { parseTableHtml, renderSafeHtml } from './rich/html.js';
+import { decodeEntities } from './entities.js';
 
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ESC[c]);
@@ -19,7 +21,8 @@ export function toHtml(md, { images = new Map(), expandDetails = false } = {}) {
     let out = '';
     for (const part of accordions) {
       out += toHtml(md.slice(from, part.from), { images, expandDetails });
-      out += `<details${expandDetails || part.open ? ' open' : ''}>\n<summary>${esc(part.title)}</summary>\n`;
+      const title = toHtml(md.slice(part.titleFrom, part.titleTo), { images, expandDetails }).replace(/^<p>|<\/p>\n?$/g, '').trim();
+      out += `<details${expandDetails || part.open ? ' open' : ''}>\n<summary>${title}</summary>\n`;
       out += toHtml(md.slice(part.bodyFrom, part.closeFrom), { images, expandDetails });
       out += '</details>\n';
       from = part.to;
@@ -36,6 +39,11 @@ export function toHtml(md, { images = new Map(), expandDetails = false } = {}) {
     for (let c = node.firstChild; c; c = c.nextSibling) {
       if (c.to <= from || c.from >= to) continue;
       if (c.from > pos) out += esc(slice(pos, c.from));
+      if (c.name === 'HTMLTag' && slice(c.from, c.to).toLowerCase() === '<code>') {
+        let end = c.nextSibling;
+        while (end && !(end.name === 'HTMLTag' && slice(end.from, end.to).toLowerCase() === '</code>')) end = end.nextSibling;
+        if (end && end.to <= to) { out += `<code>${esc(decodeEntities(slice(c.to, end.from)))}</code>`; pos = end.to; c = end; continue; }
+      }
       out += inlineNode(c);
       pos = c.to;
     }
@@ -76,10 +84,12 @@ export function toHtml(md, { images = new Map(), expandDetails = false } = {}) {
       }
       case 'HTMLTag': {
         const tag = slice(n.from, n.to).toLowerCase().replace(/\s+/g, '');
-        return ['<u>', '</u>', '<br>', '<br/>'].includes(tag) ? tag : esc(slice(n.from, n.to));
+        return /^<\/?(?:u|strong|em|s|del|b|i)>$/.test(tag) || ['<br>', '<br/>'].includes(tag) ? tag : esc(slice(n.from, n.to));
       }
       case 'Escape':
         return esc(slice(n.from + 1, n.to));
+      case 'Entity':
+        return esc(decodeEntities(slice(n.from, n.to)));
       case 'HardBreak':
         return '<br>';
       default:
@@ -143,6 +153,11 @@ export function toHtml(md, { images = new Map(), expandDetails = false } = {}) {
       case 'ProcessingInstructionBlock':
         return '';
       case 'HTMLBlock':
+        if (/^<table\s+data-atlas-table/i.test(slice(n.from, n.to))) {
+          const table = parseTableHtml(slice(n.from, n.to));
+          if (table) return renderSafeHtml(table) + '\n';
+        }
+        if (/^<p><\/p>\s*$/.test(slice(n.from, n.to))) return '<p></p>\n';
         return `<p>${esc(slice(n.from, n.to))}</p>\n`;
       default:
         return n.firstChild ? blocks(n) : '';
@@ -183,11 +198,24 @@ export function toText(md) {
     let from = 0;
     let out = '';
     for (const part of accordions) {
-      out += toText(md.slice(from, part.from)) + part.title + '\n';
+      out += toText(md.slice(from, part.from)) + toText(md.slice(part.titleFrom, part.titleTo)) + '\n';
       out += toText(md.slice(part.bodyFrom, part.closeFrom));
       from = part.to;
     }
     return out + toText(md.slice(from));
+  }
+  const tables = [];
+  markdownLanguage.parser.parse(md).iterate({ enter(node) {
+    if (node.name !== 'HTMLBlock') return;
+    const raw = md.slice(node.from, node.to);
+    if (!/^<table\s+data-atlas-table/i.test(raw)) return;
+    const table = parseTableHtml(raw);
+    if (table) tables.push({ from: node.from, to: node.to, text: table.textBetween(0, table.content.size, '\n') });
+  } });
+  if (tables.length) {
+    let from = 0, result = '';
+    for (const table of tables) { result += toText(md.slice(from, table.from)) + table.text; from = table.to; }
+    return result + toText(md.slice(from));
   }
   const out = [];
   let fence = false;
@@ -200,7 +228,9 @@ export function toText(md) {
       out.push(raw);
       continue;
     }
-    let line = raw
+    const codes = [];
+    const protectedLine = raw.replace(/<code>(.*?)<\/code>|`([^`]+)`/g, (_, html, code) => { codes.push(html === undefined ? code : decodeEntities(html)); return `\u0000${codes.length - 1}\u0000`; });
+    let line = protectedLine
       .replace(/^(\s*)#{1,6}\s+/, '$1')
       .replace(/^(\s*)[-*+]\s\[[xX]\]\s/, '$1☑ ')
       .replace(/^(\s*)[-*+]\s\[ \]\s/, '$1☐ ')
@@ -210,13 +240,14 @@ export function toText(md) {
     line = line
       .replace(/!\[([^\]]*)\]\([^)]*\)/g, (_, alt) => (alt ? `[${alt}]` : ''))
       .replace(/\[([^\]]+)\]\(([^)\s]+)[^)]*\)/g, (_, words, url) => (words === url ? url : `${words} (${url})`))
-      .replace(/<\/?u>/gi, '')
+      .replace(/<\/?(?:u|strong|em|s|del|b|i)>/gi, '')
+      .replace(/^<p><\/p>$/, '')
       .replace(/(\*\*|__)(?=\S)(.*?\S)\1/g, '$2')
       .replace(/(\*|_)(?=\S)(.*?\S)\1(?![\p{L}\p{N}])/gu, '$2')
       .replace(/~~(?=\S)(.*?\S)~~/g, '$1')
       .replace(/`([^`]+)`/g, '$1')
       .replace(/\\([\\`*_{}[\]()#+\-.!>~|])/g, '$1');
-    out.push(line);
+    out.push(decodeEntities(line).replace(/\u0000(\d+)\u0000/g, (_, index) => codes[Number(index)]));
   }
   return out.join('\n');
 }
