@@ -8741,3 +8741,24 @@ html.locked body > :not(.lock-screen) {
 .rd-scroll:not(.paged) .rd-u.rd-near-sel {
   content-visibility: visible;
 }
+
+/* a row in the list of marks with its ⧉ at the end, as the bookmarks have their ✕ */
+.rd-marks-item.rd-has-copy {
+  display: flex;
+  align-items: stretch;
+}
+
+.rd-marks-item.rd-has-copy > button:first-child {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.rd-row-copy {
+  font-size: 15px;
+}
+
+/* the mark's and the text's cards: the buttons wrap on a narrow phone instead of squeezing */
+.rd-mark-actions {
+  flex-wrap: wrap;
+}

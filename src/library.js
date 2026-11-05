@@ -1280,18 +1280,28 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
    * The bar beside the selection, never over it: above its first line when there is room, else under
    * its last one (past the handle), else at the foot of the screen.
    */
-  function placeSelBar(range) {
-    const box = range.getBoundingClientRect();
-    const barH = selBar.offsetHeight || 56;
-    const top = parseFloat(getComputedStyle(scroll).paddingTop) || 0;
-    const room = scroll.getBoundingClientRect();
+  function placeSelBar() {
+    // at the foot of the screen, always: the phone puts its own Copy / Share menu by the selection, above
+    // it, and a bar there would hide under that menu
     selBar.classList.remove('rd-selbar-top');
     selBar.style.top = '';
     selBar.style.bottom = '';
-    if (box.top - barH - 14 > room.top + top + 8) selBar.style.top = `${Math.round(box.top - barH - 14)}px`;
-    else if (box.bottom + 46 + barH < innerHeight - 8) selBar.style.top = `${Math.round(box.bottom + 46)}px`;
-    if (selBar.style.top) selBar.style.bottom = 'auto';
   }
+
+  /** Words of the reader's own (a mark, a bookmark, a text on a page) to the clipboard. */
+  async function copyWords(text) {
+    if (!text?.trim()) return;
+    try {
+      await api.copy(text.trim());
+      toast(t('reader.copied'), { timeout: 1500 });
+    } catch {
+      toast(t('clipboard.blocked', 'Ctrl+C'));
+    }
+  }
+  const markWords = (mark) => (mark.note?.trim() ? `${mark.text}\n\n💬 ${mark.note.trim()}` : mark.text);
+  /** A small ⧉ at the end of a row in the list of marks and bookmarks. */
+  const copyRowButton = (text) =>
+    h('button', { type: 'button', class: 'rd-bm-remove rd-row-copy', title: t('reader.copy'), 'aria-label': t('reader.copy'), onclick: (e) => (e.stopPropagation(), copyWords(text)) }, '⧉');
 
   // Scrolling a book lays out only the pieces near the screen (content-visibility); the pieces around
   // the selection stay laid out while it lasts, so its start does not jump when the page moves under it.
@@ -1656,6 +1666,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
         'div',
         { class: 'rd-mark-actions' },
         toNote,
+        h('button', { type: 'button', class: 'tb-btn', onclick: () => copyWords(markWords(mark)) }, '⧉ ', t('reader.copy')),
         h('button', { type: 'button', class: 'tb-btn rd-mark-remove', onclick: () => removeMark(mark.id) }, t('reader.marks.remove')),
         h('button', { type: 'button', class: 'tb-btn accent', onclick: () => closeMark() }, t('reader.marks.done')),
       ),
@@ -1825,6 +1836,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       h(
         'div',
         { class: 'rd-mark-actions' },
+        h('button', { type: 'button', class: 'tb-btn', onclick: () => copyWords(item.text) }, '⧉ ', t('reader.copy')),
         h('button', { type: 'button', class: 'tb-btn rd-mark-remove', onclick: () => removeText(item.id) }, t('reader.texts.remove')),
         h('button', { type: 'button', class: 'tb-btn accent', onclick: () => closeText() }, t('reader.marks.done')),
       ),
@@ -2321,13 +2333,14 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
           h('span', { class: 'rd-bm-icon', 'aria-hidden': 'true' }, '🔖'),
           h('span', { class: 'rd-marks-body' }, h('span', { class: 'rd-marks-text' }, b.label), b.snippet ? h('span', { class: 'rd-marks-where' }, b.snippet) : null),
         ),
+        copyRowButton(b.snippet ? `${b.label}\n${b.snippet}` : b.label),
         h('button', { type: 'button', class: 'rd-bm-remove', title: t('reader.bookmarks.remove'), 'aria-label': t('reader.bookmarks.remove'), onclick: () => removeBookmark(b.id) }, '✕'),
       ),
     );
     const markItem = (mark) =>
       h(
         'li',
-        { class: 'rd-marks-item' },
+        { class: 'rd-marks-item rd-has-copy' },
         h(
           'button',
           { type: 'button', 'data-color': mark.color, onclick: () => showMark(mark.id) },
@@ -2340,6 +2353,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
             mark.where ? h('span', { class: 'rd-marks-where' }, mark.where) : null,
           ),
         ),
+        copyRowButton(markWords(mark)),
       );
     // by colour: a heading for each colour that has marks, in the order of the swatches
     const markItems = marksByColor
@@ -2364,13 +2378,14 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     const textItems = (doc ? sortTexts(liveTexts(doc).filter((x) => x.text.trim())) : []).map((item) =>
       h(
         'li',
-        { class: 'rd-marks-item rd-text-item' },
+        { class: 'rd-marks-item rd-text-item rd-has-copy' },
         h(
           'button',
           { type: 'button', 'data-color': item.color, onclick: () => showText(item.id) },
           h('span', { class: 'rd-text-icon', 'aria-hidden': 'true' }, 'T'),
           h('span', { class: 'rd-marks-body' }, h('span', { class: 'rd-marks-text' }, item.text), h('span', { class: 'rd-marks-where' }, t('reader.pageN', item.page))),
         ),
+        copyRowButton(item.text),
       ),
     );
     const rows = [
