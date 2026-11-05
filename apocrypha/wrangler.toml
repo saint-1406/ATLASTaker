@@ -1,0 +1,24 @@
+# The Apocrypha catalogue: a Cloudflare Worker (free plan) over a D1 database.
+# Cloudflare builds it from this folder (Workers Builds, root directory "apocrypha"); see README.md.
+# The name is the Worker's in the dashboard: https://atlastaker.en-safarov.workers.dev
+name = "atlastaker"
+main = "src/worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+preview_urls = false
+
+[observability]
+enabled = true
+
+[vars]
+# ATLAS's Google sign-in clients: Windows (desktop) and Android
+GOOGLE_CLIENT_IDS = "276842939452-j5549p5rm3v4shg9tckhcs6u5jkkvlbt.apps.googleusercontent.com,276842939452-ocdg8ps2ftc3ijjjns8e7ktt62b5ckms.apps.googleusercontent.com"
+# who may hide files and read complaints
+ADMIN_EMAIL = "en.safarov@gmail.com"
+# Secrets, set in the dashboard (Settings → Variables and Secrets), never here: GOOGLE_API_KEY, IP_SALT
+
+[[d1_databases]]
+binding = "DB"
+database_name = "apocrypha"
+# the id the dashboard shows for the "apocrypha" database (Storage & Databases → D1)
+database_id = "00000000-0000-0000-0000-000000000000"

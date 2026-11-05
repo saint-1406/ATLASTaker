@@ -234,7 +234,15 @@ test('the page may start the pdf.js worker from a blob: URL, and nothing else ch
   assert.match(csp, /worker-src blob:/);
   // scripts only from the app itself; WebAssembly may compile (the translator's models), JavaScript may not be eval'd
   assert.match(csp, /script-src 'self' 'wasm-unsafe-eval'(;|$)/);
-  assert.match(csp, /connect-src 'self'(;|$)/);
+  // the network: the app itself, Google Drive and the Apocrypha catalogue (src/apocrypha), nothing else
+  assert.match(csp, /connect-src 'self' https:\/\/www\.googleapis\.com https:\/\/atlastaker\.en-safarov\.workers\.dev(;|$)/);
+});
+
+test('the page and the server allow the same places (index.html and the CSP header)', async () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const { APOCRYPHA_URL } = await import('../src/apocrypha/client.js');
+  assert.ok(html.includes(`connect-src 'self' https://www.googleapis.com ${APOCRYPHA_URL};`), 'the catalogue is reachable from the page');
+  assert.ok(html.includes(`img-src 'self' data: blob: ${APOCRYPHA_URL};`), 'and its covers show');
 });
 
 test('the translator’s files: only the allowed ones, only with the token, served once downloaded', async (t) => {

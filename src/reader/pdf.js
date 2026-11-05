@@ -35,7 +35,8 @@ const NOT_A_TITLE = /^(microsoft (word|powerpoint|excel) - |untitled|document\d*
 const clean = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
 
 /** Title, author, page count and a small picture of the first page. */
-export async function pdfInfo(bytes, coverWidth = 240) {
+/** sample: also some text of the first pages (Apocrypha guesses the language from it). */
+export async function pdfInfo(bytes, coverWidth = 240, { sample = false } = {}) {
   const doc = await loadPdf(bytes);
   try {
     const meta = await doc.getMetadata().catch(() => null);
@@ -55,7 +56,17 @@ export async function pdfInfo(bytes, coverWidth = 240) {
     } catch {
       // no picture: the card shows the format instead
     }
-    return { title: NOT_A_TITLE.test(title) ? '' : title, author: clean(meta?.info?.Author), pages: doc.numPages, cover };
+    let text = '';
+    for (let n = 1; sample && n <= Math.min(doc.numPages, 4) && text.length < 6000; n++) {
+      try {
+        const content = await (await doc.getPage(n)).getTextContent();
+        text += ` ${content.items.map((item) => item.str ?? '').join(' ')}`;
+      } catch {
+        break;
+      }
+    }
+    const lang = String(meta?.info?.Language ?? '');
+    return { title: NOT_A_TITLE.test(title) ? '' : title, author: clean(meta?.info?.Author), pages: doc.numPages, cover, text: text.trim(), lang };
   } finally {
     closeDoc(doc);
   }

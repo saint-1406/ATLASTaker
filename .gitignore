@@ -15,3 +15,5 @@ android/local.properties
 # the Google sign-in client of the Windows app (CI writes it from a secret; see server/sync.js)
 server/google-client.json
 .dev-data2/
+# the Apocrypha Worker's local state (wrangler dev)
+apocrypha/.wrangler/

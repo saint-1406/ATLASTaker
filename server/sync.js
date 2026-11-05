@@ -19,7 +19,9 @@ import { emptyBase, syncOnce } from '../src/sync/engine.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const CLIENT_ID = '276842939452-j5549p5rm3v4shg9tckhcs6u5jkkvlbt.apps.googleusercontent.com';
-const SCOPES = 'openid email https://www.googleapis.com/auth/drive.appdata';
+// drive.file: the files this app made on the person's Drive (and only those) — Apocrypha shares them
+export const SHARE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const SCOPES = `openid email https://www.googleapis.com/auth/drive.appdata ${SHARE_SCOPE}`;
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
@@ -145,7 +147,7 @@ export function createSync({ dataDir, store, library, fetchImpl = (...args) => f
     if (!force && access && access.until > Date.now() + 60_000) return access.token;
     try {
       const body = await tokenRequest({ grant_type: 'refresh_token', refresh_token: account.refreshToken });
-      access = { token: body.access_token, until: Date.now() + (body.expires_in ?? 3600) * 1000 };
+      access = { token: body.access_token, until: Date.now() + (body.expires_in ?? 3600) * 1000, scope: body.scope ?? '' };
       needsLogin = false;
       return access.token;
     } catch (err) {
@@ -208,7 +210,7 @@ export function createSync({ dataDir, store, library, fetchImpl = (...args) => f
       if (!body.refresh_token) throw new Error('Google gave no refresh token');
       if (saved.email && saved.email !== email) saved = {}; // another account: start from nothing
       account = { email, refreshToken: body.refresh_token };
-      access = { token: body.access_token, until: Date.now() + (body.expires_in ?? 3600) * 1000 };
+      access = { token: body.access_token, until: Date.now() + (body.expires_in ?? 3600) * 1000, scope: body.scope ?? '' };
       needsLogin = false;
       lastError = '';
       await writeJson(accountFile, account);
@@ -255,7 +257,23 @@ export function createSync({ dataDir, store, library, fetchImpl = (...args) => f
     return running;
   }
 
-  return { status, signIn, callback, cancelSignIn, signOut, run };
+  /**
+   * An access token for the page (Apocrypha talks to Drive and to its catalogue itself). An account
+   * signed in before drive.file was asked for has to sign in once more: 409 needs-consent.
+   */
+  async function accessToken({ force = false } = {}) {
+    if (!account?.refreshToken) throw httpError(409, 'not signed in');
+    let token;
+    try {
+      token = await getToken(force);
+    } catch (err) {
+      throw Object.assign(err, { status: err.auth ? 401 : err.offline ? 503 : 502 });
+    }
+    if (access?.scope && !access.scope.split(' ').includes(SHARE_SCOPE)) throw httpError(409, 'needs-consent');
+    return { token, until: access?.until ?? 0 };
+  }
+
+  return { status, signIn, callback, cancelSignIn, signOut, run, accessToken };
 }
 
 /** The page the browser shows after Google, in both languages (the page has no idea which one is set). */

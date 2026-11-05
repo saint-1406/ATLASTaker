@@ -17,11 +17,11 @@ for (const built of ['app.js', 'reader.js', 'styles.css']) {
 
 fs.rmSync(WWW, { recursive: true, force: true });
 fs.mkdirSync(path.join(WWW, 'assets'), { recursive: true });
-// the app talks to Google Drive from the page (sync, src/sync/android.js); the desktop page does not
-const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-const androidHtml = html.replace("connect-src 'self'", "connect-src 'self' https://www.googleapis.com");
-if (androidHtml === html) {
-  console.error('index.html: connect-src не найден, синхронизация на Android не сможет достучаться до Google Диска');
+// the app talks to Google Drive from the page (sync, src/sync/android.js; Apocrypha, src/apocrypha):
+// index.html lets it already; this stops a build whose page could not
+const androidHtml = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+if (!/connect-src 'self'[^;"]* https:\/\/www\.googleapis\.com/.test(androidHtml)) {
+  console.error('index.html: в connect-src нет https://www.googleapis.com — синхронизация и Апокриф на Android не достучатся до Google Диска');
   process.exit(1);
 }
 fs.writeFileSync(path.join(WWW, 'index.html'), androidHtml);

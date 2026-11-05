@@ -57,8 +57,9 @@ const CSP = [
   "script-src 'self' 'wasm-unsafe-eval'", // the translator's models run on WebAssembly (src/translateModel.js)
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self'",
-  "img-src 'self' data: blob:",
-  "connect-src 'self'",
+  // Apocrypha (src/apocrypha): its catalogue, its covers, and the person's Google Drive to share files
+  "img-src 'self' data: blob: https://atlastaker.en-safarov.workers.dev",
+  "connect-src 'self' https://www.googleapis.com https://atlastaker.en-safarov.workers.dev",
   "worker-src blob:", // pdf.js parses PDFs in a worker started from its own code
   "object-src 'none'",
   "base-uri 'none'",
@@ -345,6 +346,17 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
         // Drive or Google said no, or there is no network: the page says so in the settings
         if (!err.auth && !err.offline && err.status !== 502 && err.status !== 409) throw err;
         return send(res, 200, { ok: false, error: err.message, auth: Boolean(err.auth || err.status === 409), offline: Boolean(err.offline) });
+      }
+    }
+    if (route === 'sync/token' && req.method === 'POST') {
+      // Apocrypha (src/apocrypha): the page shares a file on Drive and lists it in the catalogue itself
+      const { force } = await readJson(req);
+      try {
+        return send(res, 200, { ok: true, ...(await sync.accessToken({ force: Boolean(force) })) });
+      } catch (err) {
+        const reason = err.message === 'needs-consent' ? 'needs-consent' : err.offline ? 'offline' : err.auth || err.status === 409 ? 'auth' : '';
+        if (!reason) throw err;
+        return send(res, 200, { ok: false, error: reason });
       }
     }
     if (route === 'ping' && req.method === 'POST') return send(res, 204);

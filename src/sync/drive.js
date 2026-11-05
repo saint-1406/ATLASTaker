@@ -66,10 +66,13 @@ export function createDrive({ getToken, fetchImpl = (...args) => fetch(...args) 
     return (await request(`${API}/files/${id}?alt=media`)).text();
   }
 
-  /** Writes a file: a new one when `id` is empty, else that file's content. Returns its id. */
-  async function put(name, data, { id = '', type = 'application/octet-stream' } = {}) {
+  /**
+   * Writes a file: a new one when `id` is empty, else that file's content. Returns its id.
+   * parents: where a new file goes (the app folder unless said otherwise).
+   */
+  async function put(name, data, { id = '', type = 'application/octet-stream', parents = ['appDataFolder'] } = {}) {
     const body = typeof data === 'string' ? new TextEncoder().encode(data) : data;
-    const meta = id ? {} : { name, parents: ['appDataFolder'] };
+    const meta = id ? {} : { name, parents };
     if (body.length >= RESUMABLE_FROM) {
       const start = await request(`${UPLOAD}/files${id ? `/${id}` : ''}?uploadType=resumable&fields=id`, {
         method: id ? 'PATCH' : 'POST',
@@ -116,5 +119,31 @@ export function createDrive({ getToken, fetchImpl = (...args) => fetch(...args) 
     }
   }
 
-  return { list, bytes, text, put, remove, modified };
+  /** A folder in the Drive's root that this app made (drive.file sees no other), made if missing. */
+  async function folder(name) {
+    const q = new URLSearchParams({
+      q: `mimeType = 'application/vnd.google-apps.folder' and name = '${name.replace(/['\\]/g, (c) => `\\${c}`)}' and 'root' in parents and trashed = false`,
+      fields: 'files(id)',
+      pageSize: '1',
+    });
+    const found = (await (await request(`${API}/files?${q}`)).json()).files?.[0];
+    if (found) return found.id;
+    const made = await request(`${API}/files?fields=id`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+      body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: ['root'] }),
+    });
+    return (await made.json()).id;
+  }
+
+  /** Opens a file to anyone with its link, for reading. */
+  async function makePublic(id) {
+    await request(`${API}/files/${id}/permissions?fields=id`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+      body: JSON.stringify({ role: 'reader', type: 'anyone' }),
+    });
+  }
+
+  return { list, bytes, text, put, remove, modified, folder, makePublic };
 }

@@ -23,18 +23,37 @@ function unsupported(format) {
   return Object.assign(new Error(`unsupported ${format}`), { unsupported: format.replace(/^unknown:/, '') || '?' });
 }
 
-/** What a library card needs to know about a file: { format, title, author, cover }. */
-async function inspect(name, bytes) {
+/** Up to `max` characters of a book's text, from its first blocks. */
+function textSample(blocks, max = 6000) {
+  let out = '';
+  const walk = (node) => {
+    if (out.length >= max) return;
+    if (typeof node === 'string') out += node;
+    else if (Array.isArray(node)) node.forEach(walk);
+    else if (node?.children) {
+      node.children.forEach(walk);
+      out += ' ';
+    }
+  };
+  walk(blocks);
+  return out.slice(0, max);
+}
+
+/**
+ * What a library card needs to know about a file: { format, title, author, cover }. With sample, also
+ * { lang, text }: the language the book says it is in, and a piece of its text (Apocrypha).
+ */
+async function inspect(name, bytes, { sample = false } = {}) {
   const format = detectFormat(name, bytes);
   if (format.startsWith('unknown')) throw unsupported(format);
   if (format === 'pdf') {
-    const info = await pdfInfo(bytes);
-    return { format, title: info.title || baseName(name), author: info.author, cover: info.cover };
+    const info = await pdfInfo(bytes, 240, { sample });
+    return { format, title: info.title || baseName(name), author: info.author, cover: info.cover, ...(sample ? { lang: info.lang, text: info.text } : {}) };
   }
   const book = await loadBook(name, bytes, format);
   const res = book.cover && book.resources.get(book.cover);
   const cover = res ? await thumbnail(new Blob([res.bytes], { type: res.type ?? '' })).catch(() => null) : null;
-  return { format, title: book.title, author: book.author, cover };
+  return { format, title: book.title, author: book.author, cover, ...(sample ? { lang: book.lang ?? '', text: textSample(book.blocks) } : {}) };
 }
 
 /** Shows the document in `host` (a scrolling element); resolves to its controller. */

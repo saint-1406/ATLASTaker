@@ -118,6 +118,11 @@ public class MainActivity extends ComponentActivity {
     // SHA-1 is registered with the app's Android OAuth client), so a debug-signed build cannot sign in.
     private static final List<Scope> SYNC_SCOPES = Arrays.asList(
             new Scope("https://www.googleapis.com/auth/drive.appdata"), new Scope("email"), new Scope("openid"));
+    // Apocrypha: sync's access and the files this app makes on the Drive (drive.file), to share them.
+    // Asked for only when the person shares a file, so sync keeps working without a second consent.
+    private static final List<Scope> SHARE_SCOPES = Arrays.asList(
+            new Scope("https://www.googleapis.com/auth/drive.appdata"), new Scope("https://www.googleapis.com/auth/drive.file"),
+            new Scope("email"), new Scope("openid"));
     private ActivityResultLauncher<IntentSenderRequest> authorizer;
     private String authorizeId; // the page's request waiting for the Google sheet
     // A book is open in the page: the page then runs under the status and navigation bars, and they hide
@@ -370,7 +375,11 @@ public class MainActivity extends ComponentActivity {
 
     /** interactive: may show Google's sheet (account, consent); otherwise answers "needs-login" instead. */
     private void authorize(String id, boolean interactive) {
-        AuthorizationRequest request = AuthorizationRequest.builder().setRequestedScopes(SYNC_SCOPES).build();
+        authorize(id, interactive, SYNC_SCOPES);
+    }
+
+    private void authorize(String id, boolean interactive, List<Scope> scopes) {
+        AuthorizationRequest request = AuthorizationRequest.builder().setRequestedScopes(scopes).build();
         Identity.getAuthorizationClient(this).authorize(request)
                 .addOnSuccessListener(result -> {
                     if (!result.hasResolution()) {
@@ -815,6 +824,12 @@ public class MainActivity extends ComponentActivity {
         @JavascriptInterface
         public void syncAuthorize(String id, boolean interactive) {
             runOnUiThread(() -> authorize(id, interactive));
+        }
+
+        /** The same, with access to the files this app makes on the Drive: Apocrypha shares them. */
+        @JavascriptInterface
+        public void shareAuthorize(String id, boolean interactive) {
+            runOnUiThread(() -> authorize(id, interactive, SHARE_SCOPES));
         }
 
         /** The newest release on GitHub; the answer comes as window.__atlas.updateEvent({ type: 'check', … }). */

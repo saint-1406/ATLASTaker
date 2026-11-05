@@ -70,13 +70,16 @@ export function createAndroidSync({ android, opened, library }) {
     },
   };
 
-  function authorize(interactive) {
+  /** share: with access to the files the app makes on the Drive too (Apocrypha). */
+  function authorize(interactive, { share = false } = {}) {
     const id = `s${++nextId}`;
     return new Promise((resolve, reject) => {
       waiting.set(id, { resolve, reject });
-      android.syncAuthorize(id, interactive);
+      if (share) android.shareAuthorize(id, interactive);
+      else android.syncAuthorize(id, interactive);
     });
   }
+  let shareAccess = null; // { token, until }: sync's token does not reach the shared files
 
   const store = async (name, mode = 'readonly') => (await opened).transaction(name, mode).objectStore(name);
   async function load() {
@@ -239,6 +242,22 @@ export function createAndroidSync({ android, opened, library }) {
       return {};
     },
     async cancel() {},
+    /**
+     * An access token for Apocrypha: { ok, token } or { ok: false, error }. The first time it shows
+     * Google's sheet, asking for the files the app makes on the Drive.
+     */
+    async token(force = false) {
+      if (!android.shareAuthorize) return { ok: false, error: 'needs-update' };
+      if (!force && shareAccess && shareAccess.until > Date.now() + 60_000) return { ok: true, token: shareAccess.token };
+      if (force && shareAccess?.token) android.syncClearToken?.(shareAccess.token);
+      try {
+        const token = await authorize(true, { share: true });
+        shareAccess = { token, until: Date.now() + 50 * 60_000 };
+        return { ok: true, token };
+      } catch (err) {
+        return { ok: false, error: err.code === 'cancelled' ? 'cancelled' : err.auth ? 'auth' : err.message };
+      }
+    },
     async signOut() {
       // Google forgets the app's access (signing in again asks for an account) and the phone its token
       const token = access?.token ?? (await authorize(false).catch(() => ''));

@@ -211,14 +211,16 @@ function when(time) {
 const TAB_ICONS = {
   home: '<path d="M2.5 7.2 8 2.7l5.5 4.5V13a.8.8 0 0 1-.8.8H9.8V10H6.2v3.8H3.3a.8.8 0 0 1-.8-.8Z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/>',
   library: '<path d="M2 3.4c2-.6 4-.5 6 .5v9.6c-2-1-4-1.1-6-.5ZM14 3.4c-2-.6-4-.5-6 .5v9.6c2-1 4-1.1 6-.5Z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/>',
+  // Apocrypha: a scroll
+  apocrypha: '<path d="M4.2 2.2h7.6a1.6 1.6 0 0 1 0 3.2H4.2Zm0 0a1.6 1.6 0 0 0 0 3.2M4.2 5.4v7.2a1.4 1.4 0 0 0 1.4 1.4h7a1.4 1.4 0 0 1-1.4-1.4V5.4" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M6.6 8.4h3.4M6.6 10.8h2.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>',
   notes: '<path d="M4 1.8h5.5L12.5 5v9.2H4Z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M9.3 1.9V5h3M6 8h4.5M6 10.5h3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>',
   profile: '<circle cx="8" cy="5.4" r="2.7" fill="none" stroke="currentColor" stroke-width="1.25"/><path d="M2.8 14c.6-2.9 2.7-4.3 5.2-4.3s4.6 1.4 5.2 4.3" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/>',
 };
-export const TABS = ['home', 'library', 'notes', 'profile'];
+export const TABS = ['home', 'library', 'apocrypha', 'notes', 'profile'];
 
-/** onPick(tab); returns { node, select(tab) }. */
-export function createTabBar(onPick) {
-  const buttons = TABS.map((tab) => {
+/** onPick(tab); returns { node, select(tab) }. without: tabs this copy of the app has not got. */
+export function createTabBar(onPick, { without = [] } = {}) {
+  const buttons = TABS.filter((tab) => !without.includes(tab)).map((tab) => {
     const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     icon.setAttribute('viewBox', '0 0 16 16');
     icon.setAttribute('aria-hidden', 'true');

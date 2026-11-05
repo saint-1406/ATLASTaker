@@ -43,6 +43,7 @@ import welcomeBrowserTextEn from './welcome-browser-en.md';
 import welcomeAndroidTextEn from './welcome-android-en.md';
 import { addReading, avatarNode, createTabBar, dayKey, drawHome, GOALS, shrinkPicture, streakOf } from './home.js';
 import { createNotesScreen } from './notesScreen.js';
+import { createApocryphaScreen } from './apocrypha/screen.js';
 import { createTrash } from './trash.js';
 import { createUpdater } from './update.js';
 import { stepButtons } from './undo.js';
@@ -129,7 +130,9 @@ const profile = { avatar: null, name: '' }; // the picture and the name the pers
 const homeEl = h('section', { class: 'home', hidden: true }); // the main page (home.js)
 const readingLog = { days: {}, goal: 20 }; // minutes read per day, and the day's goal (home.js)
 let readingClock = 0;
-const tabBar = createTabBar((tab) => pickTab(tab)); // the tabs at the foot of the main page and the library
+// the tabs at the foot of the main page and the library; Apocrypha needs Google (Windows and Android apps)
+const tabBar = createTabBar((tab) => pickTab(tab), { without: api.sync?.token ? [] : ['apocrypha'] });
+let apocrypha = null; // the shared library (src/apocrypha/screen.js)
 let readingTimer = 0;
 let noteFolders = []; // the notes' folders in order (noteFolders.js); each note names its own
 const notesScreen = createNotesScreen({
@@ -296,8 +299,22 @@ async function boot() {
       onLink: (url) => api.openExternal(url),
       onOpenTrash: (tab) => trashView?.open(tab),
       onTrash: () => trashView?.refresh(),
+      onShare: api.sync?.token ? (doc) => apocrypha?.share(doc) : null,
       // the main page stays under the library: back there (its progress drawn again), or back to the note
       onClose: () => (notesScreen.isOpen() ? notesScreen.refresh() : homeEl.hidden ? editor.view.focus() : showHome()),
+    });
+  }
+  if (library && api.sync?.token) {
+    apocrypha = createApocryphaScreen({
+      api,
+      getReader: () => library.reader(),
+      addToLibrary: (file) => library.add([file]),
+      readDoc: (id) => {
+        hideApocrypha();
+        library.readDoc(id);
+      },
+      onBack: () => showHome(),
+      onShown: () => updateTabs(),
     });
   }
   trashView = createTrash({ getNotes: () => [...trashedNotes.values()], restoreNote, purgeNote, library });
@@ -315,7 +332,7 @@ async function boot() {
   setInterval(tickPace, 10_000);
   markReady();
   // the app opens on the main page, where the person picks where to go
-  document.body.append(homeEl, notesScreen.node, tabBar.node);
+  document.body.append(homeEl, notesScreen.node, ...(apocrypha ? [apocrypha.node] : []), tabBar.node);
   new MutationObserver(updateTabs).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
   readingClock = setInterval(countReading, 30_000);
   showAvatar();
@@ -1898,6 +1915,7 @@ function applyLanguage({ persist = true } = {}) {
   renderIndex();
   sideMenu?.refresh();
   library?.relocalize();
+  apocrypha?.relocalize();
   if (!homeEl.hidden) showHome();
   else updateTabs();
 }
@@ -2146,6 +2164,7 @@ function menuSections() {
 /** The main page over everything: the book read last, the notes, the library. */
 async function showHome() {
   hideNotes();
+  hideApocrypha();
   closeIndexPanel();
   sideMenu?.close?.();
   const list = [...notes.values()].sort((a, b) => b.updated - a.updated).map((n) => ({ id: n.id, title: titleOf(n), updated: n.updated }));
@@ -2207,6 +2226,7 @@ function showNotes() {
     if (note.content !== text) notes.set(currentId, { ...note, content: text, info: analyze(text) });
   }
   hideHome();
+  hideApocrypha();
   notesScreen.show({ focus: !phone });
   document.body.classList.add('at-notes');
   updateTabs();
@@ -2217,6 +2237,20 @@ function hideNotes() {
   notesScreen.hide();
   document.body.classList.remove('at-notes');
   updateTabs();
+}
+
+/** The shared library over everything but the tab bar. */
+async function showApocrypha() {
+  closeIndexPanel();
+  sideMenu?.close?.();
+  if (library?.isOpen()) library.close();
+  hideNotes();
+  hideHome();
+  await apocrypha?.show();
+}
+
+function hideApocrypha() {
+  apocrypha?.hide();
 }
 
 function hideHome() {
@@ -2230,9 +2264,10 @@ function hideHome() {
 function updateTabs() {
   const libraryOpen = document.documentElement.classList.contains('library-open');
   const notesOpen = notesScreen.isOpen();
-  tabBar.node.hidden = homeEl.hidden && !libraryOpen && !notesOpen;
+  const apocryphaOpen = Boolean(apocrypha?.isOpen());
+  tabBar.node.hidden = homeEl.hidden && !libraryOpen && !notesOpen && !apocryphaOpen;
   document.body.classList.toggle('has-tabbar', !tabBar.node.hidden);
-  tabBar.select(libraryOpen ? 'library' : notesOpen ? 'notes' : 'home');
+  tabBar.select(libraryOpen ? 'library' : notesOpen ? 'notes' : apocryphaOpen ? 'apocrypha' : 'home');
 }
 
 function pickTab(tab) {
@@ -2241,7 +2276,12 @@ function pickTab(tab) {
     return;
   }
   if (tab === 'library') {
+    hideApocrypha();
     openLibrary();
+    return;
+  }
+  if (tab === 'apocrypha') {
+    showApocrypha();
     return;
   }
   // the library closes onto whatever is under it
@@ -2641,7 +2681,7 @@ window.__atlas = {
       toggleFocus(false);
       return true;
     }
-    if (notesScreen.isOpen()) {
+    if (notesScreen.isOpen() || apocrypha?.isOpen()) {
       showHome();
       return true;
     }

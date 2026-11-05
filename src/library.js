@@ -50,7 +50,7 @@ function loadReader() {
  * onOpenNote(id) shows a note; onLink(url) opens a web link; onClose() runs when the shelf goes away.
  * translator: translateCard.js, for the selection bar's "Translate".
  */
-export function createLibrary({ api, phone = false, getReading, onReading, onCustomize, onReaderColors, onSystemBars, onQuote, onOpenNote, onLink, onClose, onOpenTrash = null, onTrash = null, translator = null }) {
+export function createLibrary({ api, phone = false, getReading, onReading, onCustomize, onReaderColors, onSystemBars, onQuote, onOpenNote, onLink, onClose, onOpenTrash = null, onTrash = null, onShare = null, translator = null }) {
   const lib = api.library;
   let docs = []; // the documents on the shelf
   let trashedDocs = []; // those in the trash: whole (file, place, marks), out of every list until restored
@@ -428,6 +428,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
         { icon: '↗', text: t('library.read'), run: () => read(doc.id) },
         { icon: doc.finished ? '○' : '✓', text: t(doc.finished ? 'library.markUnread' : 'library.markRead'), run: () => onShelf(() => toggleFinished(doc)) },
         { icon: '▤', text: t('library.moveToShelf'), run: () => moveMenu(doc, x, y) },
+        // Apocrypha (src/apocrypha): the book goes to the shared library, after a warning and a tick
+        onShare ? { icon: '⇪', text: t('apocrypha.share'), run: () => onShare(doc) } : null,
         '-',
         { icon: '✕', text: t('library.remove'), kbd: 'Del', className: 'danger', run: () => onShelf(() => remove(doc.id)) },
       ]);
@@ -2562,6 +2564,10 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     },
     /** Files handed over by another app (Android "Open with" / "Share"). */
     receive: (files) => addFiles(files, { openSingle: true }),
+    /** Files onto the shelf (Apocrypha's downloads): the cards made. */
+    add: (files) => addFiles(files),
+    /** The reader's code: detectFormat, inspect (Apocrypha checks a file before sharing it). */
+    reader: () => loadReader(),
     /** atlas:<document>#<mark> from a note; false when the link is not one of these. */
     openLink,
     back,

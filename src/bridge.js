@@ -98,6 +98,8 @@ function serverApi() {
       cancel: () => call('POST', 'sync/cancel'),
       signOut: () => call('POST', 'sync/signout'),
       run: (options) => call('POST', 'sync/run', options),
+      /** An access token for Apocrypha: { ok, token } or { ok: false, error: 'needs-consent' | 'auth' | 'offline' }. */
+      token: (force = false) => call('POST', 'sync/token', { force }),
     },
     openNotesFolder: () => call('POST', 'open-folder'),
     openBackupsFolder: () => call('POST', 'open-backups'),

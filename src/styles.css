@@ -8741,3 +8741,360 @@ html.locked body > :not(.lock-screen) {
 .rd-scroll:not(.paged) .rd-u.rd-near-sel {
   content-visibility: visible;
 }
+
+/* ---------- Apocrypha (src/apocrypha/screen.js): the library ATLAS users share ---------- */
+
+.apo-tagline {
+  margin: 0 0 12px;
+  color: var(--ink-dim);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.apo-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: -6px 0 16px;
+}
+
+.apo-select {
+  flex: 1 1 160px;
+  max-width: 260px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--bg-raised);
+}
+
+.apo-sort {
+  border-radius: 999px;
+  background: var(--bg-raised);
+}
+
+.apo-sort .seg-btn {
+  border-radius: 999px;
+}
+
+.apo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 18px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.apo-card {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.apo-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 12px;
+}
+
+.apo-cover-wrap {
+  position: relative;
+  display: block;
+  aspect-ratio: 2 / 3;
+  margin-bottom: 6px;
+  overflow: hidden;
+  border: 1px solid var(--sheet-edge);
+  border-radius: 14px;
+  background: var(--bg-raised);
+  box-shadow: var(--lift, 0 6px 18px color-mix(in srgb, var(--ink) 14%, transparent));
+  transition: transform 0.15s, border-color 0.15s;
+}
+
+.apo-card:hover .apo-cover-wrap {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--sheet-edge));
+}
+
+.apo-cover,
+.apo-detail-cover {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.apo-cover-blank {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  padding: 12px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--accent-text) 18%, var(--bg-raised)), var(--bg-raised) 72%);
+  color: var(--accent-text);
+  font: 600 13px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+}
+
+.apo-card-title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.25;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+
+.apo-card-author,
+.apo-card-meta {
+  overflow: hidden;
+  color: var(--ink-dim);
+  font-size: 12.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.apo-card-meta {
+  font-size: 11.5px;
+}
+
+.apo-note {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 36px 12px;
+  color: var(--ink-dim);
+  text-align: center;
+}
+
+.apo-note[hidden],
+.apo-more[hidden] {
+  display: none;
+}
+
+.apo-note p {
+  max-width: 420px;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.apo-more {
+  display: block;
+  margin: 22px auto 0;
+}
+
+/* a file's card */
+.modal.apo-detail {
+  width: min(520px, calc(100vw - 24px));
+}
+
+.apo-detail-head {
+  display: grid;
+  grid-template-columns: 104px 1fr;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 10px;
+}
+
+.apo-detail-head > .apo-detail-cover,
+.apo-detail-head > .apo-cover-blank {
+  aspect-ratio: 2 / 3;
+  height: auto;
+  overflow: hidden;
+  border: 1px solid var(--sheet-edge);
+  border-radius: 12px;
+}
+
+.apo-detail-text .modal-title {
+  margin: 0 0 4px;
+  overflow-wrap: anywhere;
+}
+
+.apo-detail-author {
+  margin: 0 0 8px;
+  color: var(--ink-soft);
+}
+
+.apo-detail-meta {
+  margin: 0 0 3px;
+  color: var(--ink-dim);
+  font-size: 12.5px;
+}
+
+.apo-detail-description {
+  max-height: 34vh;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.apo-detail-actions {
+  flex-wrap: wrap;
+}
+
+/* sharing */
+.modal.apo-share {
+  width: min(540px, calc(100vw - 24px));
+}
+
+.apo-warning {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--ink-soft);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.apo-field {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.apo-field-label {
+  color: var(--ink-dim);
+  font-size: 12px;
+}
+
+.apo-field .field,
+.apo-textarea {
+  width: 100%;
+}
+
+.apo-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.apo-textarea {
+  min-height: 64px;
+  padding: 8px 10px;
+  resize: vertical;
+  font: inherit;
+}
+
+.apo-check,
+.apo-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 6px 0;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.apo-check input,
+.apo-radio input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  accent-color: var(--accent);
+}
+
+.apo-check {
+  margin: 12px 0 4px;
+  font-weight: 600;
+}
+
+.apo-radios {
+  margin-bottom: 10px;
+}
+
+.apo-status {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  margin: 10px 0 0;
+  color: var(--danger, #c0392b);
+  font-size: 13.5px;
+}
+
+.apo-status[hidden] {
+  display: none;
+}
+
+/* my shares, reports */
+.modal.apo-list-dialog {
+  width: min(560px, calc(100vw - 24px));
+}
+
+.apo-list {
+  display: grid;
+  gap: 8px;
+  max-height: 60vh;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.apo-list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--sheet-edge);
+  border-radius: 14px;
+  background: var(--bg-raised);
+}
+
+.apo-list-text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.apo-list-text span {
+  color: var(--ink-dim);
+  font-size: 12.5px;
+}
+
+.apo-list-text .apo-list-reason {
+  color: var(--ink-soft);
+}
+
+.apo-list-note {
+  padding: 16px 4px;
+  color: var(--ink-dim);
+}
+
+@media (max-width: 520px) {
+  .apo-grid {
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    gap: 16px 12px;
+  }
+
+  .apo-detail-head {
+    grid-template-columns: 84px 1fr;
+  }
+
+  .apo-field-row {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .tabbar-btn {
+    font-size: 10px;
+  }
+}
+
+.modal.apo-share .btn:disabled,
+.modal.apo-detail .btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
