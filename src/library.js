@@ -7,6 +7,7 @@ import { h, toast, confirmDialog, showMenu, isOverlayOpen, openDialog } from './
 import { count, STRINGS, t } from './i18n.js';
 import { addShelf, groupShelves, isShelf, renameShelf, shelfList } from './shelves.js';
 import { shownTheme } from './skins.js';
+import { icon } from './icons.js';
 import { drawQuickPanel, paintTheme, setDim } from './readLook.js';
 import { live, MARK_COLORS, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, MAX_TEXT_LENGTH, MAX_TEXTS, newBookmarkId, newEditId, newMarkId, newTextId, remapPdf, remapTexts, sortMarks, sortTexts, TEXT_COLORS, TEXT_SIZES } from './marks.js';
 import { openPageEditor } from './pageEditor.js';
@@ -137,12 +138,12 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   const subtitle = h('span', { class: 'rd-sub' });
   // the page number (or how far, when scrolling a book) at the foot of the screen; taps go through it
   const percent = h('div', { class: 'rd-pct', 'aria-live': 'off' });
-  const readerBack = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => closeReader() }, '←');
+  const readerBack = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => closeReader() }, icon('back'));
   const viewButton = h('button', { type: 'button', class: 'tb-btn icon rd-size', onclick: () => toggleView() }, 'Aa');
-  const tocButton = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => toggleToc() }, '☰');
-  const moreButton = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => openMore() }, '⋯');
-  const findButton = h('button', { type: 'button', class: 'tb-btn icon rd-find-btn', onclick: () => finder.open() }, '⌕');
-  const marksButton = h('button', { type: 'button', class: 'tb-btn icon rd-marks-btn', onclick: () => toggleMarks() }, '✎', h('span', { class: 'rd-marks-count' }));
+  const tocButton = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => toggleToc() }, icon('contents'));
+  const moreButton = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => openMore() }, icon('more'));
+  const findButton = h('button', { type: 'button', class: 'tb-btn icon rd-find-btn', onclick: () => finder.open() }, icon('find'));
+  const marksButton = h('button', { type: 'button', class: 'tb-btn icon rd-marks-btn', onclick: () => toggleMarks() }, icon('marks'), h('span', { class: 'rd-marks-count' }));
   // PDF only: the next press on a page puts a text there
   const textButton = h('button', { type: 'button', class: 'tb-btn icon rd-text-btn', 'aria-pressed': 'false', hidden: true, onclick: () => setPlacing(!reader.classList.contains('placing-text')) }, 'T');
   const prevButton = h('button', { type: 'button', class: 'rd-nav rd-nav-prev', onclick: () => reading?.controller?.prev() }, '‹');
@@ -151,22 +152,22 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   const status = h('div', { class: 'rd-status', role: 'status' });
   const line = h('div', { class: 'rd-line', 'aria-hidden': 'true' }, h('i'));
   const quoteText = h('span');
-  const quoteButton = h('button', { type: 'button', class: 'rd-quote', onclick: quote }, h('span', { 'aria-hidden': 'true' }, '❝'), quoteText);
+  const quoteButton = h('button', { type: 'button', class: 'rd-quote', onclick: quote }, icon('quote'), quoteText);
   // the bar over a selection: a colour makes a highlight, 💬 a highlight with a comment, ❝ a quote in the note
   const swatches = MARK_COLORS.map((color) => h('button', { type: 'button', class: 'rd-swatch', 'data-color': color, onclick: () => addMark(color) }));
   const commentText = h('span');
   const commentButton = h(
     'button',
     { type: 'button', class: 'rd-sel-btn', onclick: () => addMark(MARK_COLORS[0], { comment: true }) },
-    h('span', { 'aria-hidden': 'true' }, '💬'),
+    icon('comment'),
     commentText,
   );
   const translateText = h('span');
   // a bookmark at the selected passage, its words kept with it (addBookmark)
-  const bookmarkSelButton = h('button', { type: 'button', class: 'rd-sel-btn rd-sel-icon', onclick: () => addBookmark() }, h('span', { 'aria-hidden': 'true' }, '🔖'));
-  const translateButton = h('button', { type: 'button', class: 'rd-sel-btn', onclick: () => translateSelection() }, h('span', { 'aria-hidden': 'true' }, '🌐'), translateText);
+  const bookmarkSelButton = h('button', { type: 'button', class: 'rd-sel-btn rd-sel-icon', onclick: () => addBookmark() }, icon('bookmark'));
+  const translateButton = h('button', { type: 'button', class: 'rd-sel-btn', onclick: () => translateSelection() }, icon('translate'), translateText);
   const copyText = h('span');
-  const copyButton = h('button', { type: 'button', class: 'rd-sel-btn', onclick: () => copySelected() }, h('span', { 'aria-hidden': 'true' }, '⧉'), copyText);
+  const copyButton = h('button', { type: 'button', class: 'rd-sel-btn', onclick: () => copySelected() }, icon('copy'), copyText);
   const selBar = h(
     'div',
     { class: 'rd-selbar', hidden: true, role: 'toolbar' },
@@ -251,17 +252,17 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     const marks = liveMarks(doc).length + liveBookmarks(doc).length + liveTexts(doc).length;
     sheet.replaceChildren(
       h('div', { class: 'rd-acts-title' }, h('span', { class: 'rd-acts-name' }, nameOf(doc)), doc.author ? h('span', { class: 'rd-acts-sub' }, doc.author) : null),
-      row(`${t('reader.toc')} · ${t('library.progress', lastPct)}`, '☰', () => toggleToc(true)),
-      row(t('reader.fab.find'), '⌕', () => finder.open()),
+      row(`${t('reader.toc')} · ${t('library.progress', lastPct)}`, icon('contents'), () => toggleToc(true)),
+      row(t('reader.fab.find'), icon('find'), () => finder.open()),
       row(t('appearance.quick'), 'AA', () => toggleView(true)),
       h(
         'div',
         { class: 'rd-acts-rounds' },
-        round(t('reader.back'), '←', () => closeReader()),
-        round(t('reader.bookmarks.add'), '🔖', () => addBookmark()),
-        round(`${t('reader.marks.list')}${marks ? ` (${marks})` : ''}`, '✎', () => toggleMarks(true)),
+        round(t('reader.back'), icon('back'), () => closeReader()),
+        round(t('reader.bookmarks.add'), icon('bookmark'), () => addBookmark()),
+        round(`${t('reader.marks.list')}${marks ? ` (${marks})` : ''}`, icon('marks'), () => toggleMarks(true)),
         pdf ? round(t('reader.texts.button'), 'T', () => setPlacing(true)) : null,
-        round(t('reader.more'), '⋯', () => openMore(fab)),
+        round(t('reader.more'), icon('more'), () => openMore(fab)),
       ),
     );
     sheet.hidden = false;
@@ -296,7 +297,22 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   /** A phone's own bars (clock, battery) hide while a book is read and come back with the chrome. */
   function systemBars() {
     onSystemBars?.(!reader.hidden, reader.classList.contains('chrome-on'));
+    quietSelection();
   }
+  /**
+   * In a book the phone's own menu by a selection (Copy, Share, Google's suggestions) stays away: it
+   * would cover the book's own bar at the foot. A field being typed in keeps it, for Paste.
+   */
+  let selectionQuiet = null;
+  function quietSelection() {
+    const field = document.activeElement?.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
+    const quiet = !reader.hidden && !field;
+    if (quiet === selectionQuiet) return;
+    selectionQuiet = quiet;
+    api.quietSelection?.(quiet);
+  }
+  document.addEventListener('focusin', quietSelection);
+  document.addEventListener('focusout', () => setTimeout(quietSelection, 0));
   /** Something was touched: the chrome stays another few seconds (not while a menu or a panel is open). */
   function holdChrome() {
     clearTimeout(chromeTimer);
@@ -1301,7 +1317,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   const markWords = (mark) => (mark.note?.trim() ? `${mark.text}\n\n💬 ${mark.note.trim()}` : mark.text);
   /** A small ⧉ at the end of a row in the list of marks and bookmarks. */
   const copyRowButton = (text) =>
-    h('button', { type: 'button', class: 'rd-bm-remove rd-row-copy', title: t('reader.copy'), 'aria-label': t('reader.copy'), onclick: (e) => (e.stopPropagation(), copyWords(text)) }, '⧉');
+    h('button', { type: 'button', class: 'rd-bm-remove rd-row-copy', title: t('reader.copy'), 'aria-label': t('reader.copy'), onclick: (e) => (e.stopPropagation(), copyWords(text)) }, icon('copy'));
 
   // Scrolling a book lays out only the pieces near the screen (content-visibility); the pieces around
   // the selection stay laid out while it lasts, so its start does not jump when the page moves under it.
@@ -1666,7 +1682,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
         'div',
         { class: 'rd-mark-actions' },
         toNote,
-        h('button', { type: 'button', class: 'tb-btn', onclick: () => copyWords(markWords(mark)) }, '⧉ ', t('reader.copy')),
+        h('button', { type: 'button', class: 'tb-btn', onclick: () => copyWords(markWords(mark)) }, icon('copy'), t('reader.copy')),
         h('button', { type: 'button', class: 'tb-btn rd-mark-remove', onclick: () => removeMark(mark.id) }, t('reader.marks.remove')),
         h('button', { type: 'button', class: 'tb-btn accent', onclick: () => closeMark() }, t('reader.marks.done')),
       ),
@@ -1836,7 +1852,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       h(
         'div',
         { class: 'rd-mark-actions' },
-        h('button', { type: 'button', class: 'tb-btn', onclick: () => copyWords(item.text) }, '⧉ ', t('reader.copy')),
+        h('button', { type: 'button', class: 'tb-btn', onclick: () => copyWords(item.text) }, icon('copy'), t('reader.copy')),
         h('button', { type: 'button', class: 'tb-btn rd-mark-remove', onclick: () => removeText(item.id) }, t('reader.texts.remove')),
         h('button', { type: 'button', class: 'tb-btn accent', onclick: () => closeText() }, t('reader.marks.done')),
       ),

@@ -8,6 +8,7 @@ import { t } from './i18n.js';
 import { apply, heading, lineMark, link, rule, wrap } from './format.js';
 import { insertCodeBlock } from './editor.js';
 import { insertAccordionBlock } from './accordionView.js';
+import { hasIcon, icon } from './icons.js';
 
 /** Every button the bar can have. */
 export const TOOLS = [
@@ -79,9 +80,9 @@ export function createFormatBar({ getView, actions = {} }) {
   }
   function insertMenu(anchor = insertButton) {
     const rich = getView()?.rich;
-    const items = ['accordion', 'task', 'bullet', 'numbered', 'quote', 'image', 'link', 'rule', 'codeblock'].map((id) => ({ icon: BY_ID.get(id)?.glyph || '＋', text: t(`format.tools.${id}`), run: () => run(id) }));
-    if (rich) items.push('-', { icon: '↳', text: t('rich.nextItem'), disabled: !rich.formats().inList, run: () => run('next') }, { icon: '↵', text: t('rich.innerLine'), run: () => run('newline') }, { icon: '¶', text: t('rich.afterBlock'), run: () => run('after') });
-    items.push('-', { icon: '⌨', text: t('format.tools.keyboard'), run: () => run('keyboard') });
+    const items = ['accordion', 'task', 'bullet', 'numbered', 'quote', 'image', 'link', 'rule', 'codeblock'].map((id) => ({ icon: hasIcon(id) ? icon(id) : BY_ID.get(id)?.glyph || '＋', text: t(`format.tools.${id}`), run: () => run(id) }));
+    if (rich) items.push('-', { icon: icon('next'), text: t('rich.nextItem'), disabled: !rich.formats().inList, run: () => run('next') }, { icon: icon('newline'), text: t('rich.innerLine'), run: () => run('newline') }, { icon: icon('after'), text: t('rich.afterBlock'), run: () => run('after') });
+    items.push('-', { icon: icon('keyboard'), text: t('format.tools.keyboard'), run: () => run('keyboard') });
     menu(anchor, items);
   }
 
@@ -107,7 +108,7 @@ export function createFormatBar({ getView, actions = {} }) {
     node.setAttribute('aria-label', t('format.title'));
     node.classList.add('visual-format-bar');
     typeButton = h('button', { type: 'button', class: 'format-type', 'aria-label': t('rich.blockType'), 'aria-haspopup': 'menu', onclick: blockMenu }, t('rich.paragraph') + ' ▾');
-    insertButton = h('button', { type: 'button', class: 'format-insert', 'aria-label': t('rich.insertBlock'), 'aria-haspopup': 'menu', onclick: () => insertMenu() }, '＋ ', t('rich.insert'));
+    insertButton = h('button', { type: 'button', class: 'format-insert', 'aria-label': t('rich.insertBlock'), 'aria-haspopup': 'menu', onclick: () => insertMenu() }, icon('plus'), h('span', {}, t('rich.insert')));
     const preferred = tools.filter((id) => ['bold', 'italic', 'underline', 'strike', 'code'].includes(id));
     const marks = [...new Set(preferred)];
     const row = h('div', { class: 'format-inline-tools' }, marks.map((id) => {
@@ -118,7 +119,7 @@ export function createFormatBar({ getView, actions = {} }) {
         return button;
       }));
     // copying is always there: the selected words to the clipboard, the selection left as it was
-    const copyButton = h('button', { type: 'button', class: 'format-btn format-copy', title: t('format.tools.copy'), 'aria-label': t('format.tools.copy'), onclick: () => run('copy') }, '⧉');
+    const copyButton = h('button', { type: 'button', class: 'format-btn format-copy', title: t('format.tools.copy'), 'aria-label': t('format.tools.copy'), onclick: () => run('copy') }, icon('copy'));
     for (const button of [typeButton, copyButton, insertButton]) button.addEventListener('pointerdown', (event) => event.preventDefault());
     node.replaceChildren(typeButton, row, copyButton, insertButton);
     refresh();

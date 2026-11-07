@@ -4,6 +4,7 @@
 import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { android, api, rescue } from './bridge.js';
+import { icon } from './icons.js';
 import { createLibrary } from './library.js';
 import { insertComment, insertCodeBlock, insertDictation, pasteText, codeLanguageAt, showDictationPreview, urlAt } from './editor.js';
 import { createEditor } from './noteEditor.js';
@@ -983,7 +984,7 @@ function openNoteMenu(anchor) {
     { icon: '＋', text: t('rich.insertBlock'), run: () => { ensureEditing(); formatBar.openInsert(anchor); } },
     { icon: '¶', text: t('rich.visual'), run: () => setWriting({ editorMode: 'visual' }) },
     { icon: '</>', text: t('rich.source'), run: () => setWriting({ editorMode: 'source' }) },
-    { icon: '⧉', text: t('noteMenu.copyAll'), run: copyAll },
+    { icon: icon('copy'), text: t('noteMenu.copyAll'), run: copyAll },
     { icon: '#', text: t('noteMenu.tag'), run: tagSelection },
     { icon: '⌗', text: t('tags.title'), run: showTags },
     { icon: '◴', text: t('versions.title'), run: showVersions },
@@ -1691,7 +1692,7 @@ function openEditorMenu(event, view) {
   if (url) items.push({ icon: '↗', text: t('menu.openLink'), kbd: t('menu.ctrlClick'), run: () => openLink(url) }, '-');
   if (!editing) {
     items.push(
-      { icon: '⧉', text: t('menu.copy'), kbd: 'Ctrl+C', disabled: sel.empty, run: () => copySelection(view) },
+      { icon: icon('copy'), text: t('menu.copy'), kbd: 'Ctrl+C', disabled: sel.empty, run: () => copySelection(view) },
       { icon: '🌐', text: t('menu.translate'), kbd: 'Ctrl+Shift+X', disabled: sel.empty, run: () => translateSelection(view) },
       { icon: '▣', text: t('menu.selectAll'), kbd: 'Ctrl+A', run: () => view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }) },
       { icon: '⇩', text: t('notes.saveCopy'), run: () => exportNote(currentId) },
@@ -1713,7 +1714,7 @@ function openEditorMenu(event, view) {
     { icon: '🌐', text: t('menu.translate'), kbd: 'Ctrl+Shift+X', disabled: sel.empty, run: () => translateSelection(view) },
     '-',
     { icon: '✂', text: t('menu.cut'), kbd: 'Ctrl+X', disabled: sel.empty, run: () => cutSelection(view) },
-    { icon: '⧉', text: t('menu.copy'), kbd: 'Ctrl+C', disabled: sel.empty, run: () => copySelection(view) },
+    { icon: icon('copy'), text: t('menu.copy'), kbd: 'Ctrl+C', disabled: sel.empty, run: () => copySelection(view) },
     { icon: '⎘', text: t('menu.paste'), kbd: 'Ctrl+V', run: () => pasteFromClipboard(view) },
     '-',
     { icon: '⌗', text: t(sel.empty ? 'menu.codeBlock' : 'menu.wrapCode'), kbd: 'Ctrl+E', run: () => insertCodeBlock(view) },

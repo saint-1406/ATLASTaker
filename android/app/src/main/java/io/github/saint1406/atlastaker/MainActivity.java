@@ -22,6 +22,11 @@ import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.util.Base64;
+import android.graphics.Rect;
+import android.view.ActionMode;
+import android.view.Menu;
+import android.view.MenuItem;
+import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
@@ -124,6 +129,11 @@ public class MainActivity extends ComponentActivity {
     // until the reading chrome comes up (a tap in the middle of the book). --sys-insets tells the page
     // where they appear, so showing them moves no text (applyReading).
     private boolean reading;
+    // In a book the page has its own bar for a selection (copy, mark, quote, translate) at the foot of the
+    // screen. The phone's own menu by the selection (Copy, Share, Google's suggestions) would cover it
+    // there, so while the page says so (quietSelection) that menu comes up empty, and Android shows none.
+    // A field being typed in keeps it: Paste lives there.
+    private volatile boolean quietSelection;
     private boolean barsShown = true;
     private String sysInsets = "";
     private String keyboardInset = "";
@@ -203,7 +213,12 @@ public class MainActivity extends ComponentActivity {
                 .addPathHandler("/incoming/", new WebViewAssetLoader.InternalStoragePathHandler(this, incomingDir))
                 .build();
 
-        web = new WebView(this);
+        web = new WebView(this) {
+            @Override
+            public ActionMode startActionMode(ActionMode.Callback callback, int type) {
+                return super.startActionMode(quieted(callback), type);
+            }
+        };
         web.setBackgroundColor(Color.parseColor("#09090b"));
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -745,6 +760,42 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
+    /** The selection's menu as WebView builds it, emptied while quietSelection is on (see there). */
+    private ActionMode.Callback quieted(ActionMode.Callback inner) {
+        return new ActionMode.Callback2() {
+            @Override
+            public boolean onCreateActionMode(ActionMode mode, Menu menu) {
+                boolean made = inner.onCreateActionMode(mode, menu);
+                if (quietSelection) menu.clear();
+                return made;
+            }
+
+            @Override
+            public boolean onPrepareActionMode(ActionMode mode, Menu menu) {
+                boolean changed = inner.onPrepareActionMode(mode, menu);
+                if (!quietSelection) return changed;
+                menu.clear();
+                return true;
+            }
+
+            @Override
+            public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
+                return inner.onActionItemClicked(mode, item);
+            }
+
+            @Override
+            public void onDestroyActionMode(ActionMode mode) {
+                inner.onDestroyActionMode(mode);
+            }
+
+            @Override
+            public void onGetContentRect(ActionMode mode, View view, Rect outRect) {
+                if (inner instanceof ActionMode.Callback2) ((ActionMode.Callback2) inner).onGetContentRect(mode, view, outRect);
+                else super.onGetContentRect(mode, view, outRect);
+            }
+        };
+    }
+
     /** window.AtlasAndroid in the page (src/bridge.js). Called on a background thread. */
     private class Bridge {
         /** The files waiting for the page, as JSON [{ file, name, type }]; each is handed out once. */
@@ -925,6 +976,12 @@ public class MainActivity extends ComponentActivity {
             if (clip == null || clip.getItemCount() == 0) return "";
             CharSequence text = clip.getItemAt(0).coerceToText(MainActivity.this);
             return text == null ? "" : text.toString();
+        }
+
+        /** A book is open and nothing is being typed: the phone's menu by a selection stays away (quieted). */
+        @JavascriptInterface
+        public void quietSelection(boolean on) {
+            quietSelection = on;
         }
 
         /** A book is open (or not), and its chrome is up (or not): the system bars follow (applyReading). */

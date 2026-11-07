@@ -8762,3 +8762,100 @@ html.locked body > :not(.lock-screen) {
 .rd-mark-actions {
   flex-wrap: wrap;
 }
+
+/* the formatting bar has four parts: the block's type, the marks, copy, Insert (a third column dropped
+   Insert onto a second row that the bar's height hid, and Picture with it) */
+.visual-format-bar {
+  grid-template-columns: minmax(75px, 130px) minmax(0, 1fr) auto auto;
+}
+
+@media (max-width: 820px) {
+  .visual-format-bar {
+    grid-template-columns: 85px minmax(0, 1fr) auto auto;
+  }
+}
+
+/* drawn icons (icons.js) */
+svg.ico {
+  display: block;
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+.format-insert {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.format-insert svg.ico,
+.ctx-ico svg.ico {
+  width: 16px;
+  height: 16px;
+}
+
+.ctx-ico {
+  display: inline-flex;
+  justify-content: center;
+}
+
+.format-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tb-btn.icon svg.ico {
+  width: 18px;
+  height: 18px;
+}
+
+.rd-head .tb-btn.icon {
+  justify-content: center;
+}
+
+.rd-row-copy svg.ico {
+  width: 16px;
+  height: 16px;
+}
+
+/* a phone: the selection bar holds all of it (colours, copy, comment, translate, quote, bookmark) without
+   its last button running off the screen's edge */
+@media (max-width: 480px) {
+  .rd-selbar {
+    gap: 3px;
+    padding: 5px;
+  }
+
+  .rd-selbar .rd-swatches {
+    gap: 5px;
+    padding: 0 3px;
+  }
+
+  .rd-selbar .rd-swatch {
+    width: 24px;
+    height: 24px;
+  }
+
+  .rd-selbar .rd-sel-btn,
+  .rd-selbar .rd-quote {
+    padding: 8px 10px;
+  }
+
+  .rd-selbar .rd-sel-icon {
+    min-width: 38px;
+  }
+}
+
+/* the phone's sheet of a book's actions: drawn icons */
+.rd-acts-ico svg.ico {
+  width: 20px;
+  height: 20px;
+}
+
+.rd-acts-round svg.ico {
+  width: 20px;
+  height: 20px;
+  margin: auto;
+}

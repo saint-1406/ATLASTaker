@@ -515,6 +515,8 @@ export const api = {
   // a WebView has no clipboard permission of its own: on Android the app's native side does it
   copy: async (text) => (android ? android.copy(text) : navigator.clipboard.writeText(text)),
   readClipboard: async () => (android ? android.paste() : navigator.clipboard.readText()),
+  /** Android: the phone's own menu by a selection stays away (a book's own bar is at the foot). */
+  quietSelection: (on) => android?.quietSelection?.(on),
   openExternal: (url) => (android ? android.openExternal(url) : window.open(url, '_blank', 'noopener,noreferrer')),
   /** Hands the user a file: `data` is text (saved as Markdown) or bytes with their own `type`. */
   download(filename, data, type = 'text/markdown;charset=utf-8') {
