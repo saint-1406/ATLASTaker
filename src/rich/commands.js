@@ -48,6 +48,48 @@ export function enterParagraph(state, dispatch) {
   return normalParagraph(state, dispatch);
 }
 
+/**
+ * Where Enter gives a new line instead of a new paragraph: a plain paragraph with words in it, also in a
+ * quote or an accordion. Not a list (Enter is the next item there), a heading, code or a table's cell.
+ */
+function lineHere(state) {
+  const { $from, node } = state.selection;
+  if (node || $from.parent.type !== state.schema.nodes.paragraph || !$from.parent.content.size || !$from.parentOffset) return false;
+  const around = $from.depth > 1 ? $from.node(-1).type.name : 'doc';
+  return !['list_item', 'task_item', 'table_cell', 'table_header'].includes(around);
+}
+
+/**
+ * Enter while writing: the next line of the same paragraph. A second Enter on the line just begun makes
+ * it the gap before a new paragraph instead (Markdown keeps no empty line inside a paragraph). Elsewhere
+ * Enter is what it was (enterParagraph).
+ */
+export function enterLine(state, dispatch) {
+  if (!lineHere(state)) return enterParagraph(state, dispatch);
+  const { $from, empty } = state.selection;
+  const { hard_break } = state.schema.nodes;
+  if (empty && $from.nodeBefore?.type === hard_break) {
+    const tr = state.tr.delete($from.pos - 1, $from.pos);
+    if (!composeCommand(state, tr, enterParagraph)) return false;
+    if (dispatch) dispatch(tr.setStoredMarks([]).scrollIntoView());
+    return true;
+  }
+  if (dispatch) dispatch(state.tr.replaceSelectionWith(hard_break.create()).scrollIntoView());
+  return true;
+}
+
+/** Shift+Enter: the other one of the two. A new paragraph where Enter gives a line; a line where it does not. */
+export function shiftEnter(state, dispatch) {
+  if (lineHere(state)) return enterParagraph(state, dispatch);
+  const { $from } = state.selection;
+  if ($from.parent.type === state.schema.nodes.code_block) {
+    if (dispatch) dispatch(state.tr.insertText('\n').scrollIntoView());
+    return true;
+  }
+  if (dispatch) dispatch(state.tr.replaceSelectionWith(state.schema.nodes.hard_break.create()).scrollIntoView());
+  return true;
+}
+
 export function nextItem(state, dispatch) {
   const { $from } = state.selection;
   let depth = $from.depth;

@@ -91,3 +91,35 @@ test('rich Enter and after-block action work after an atom such as a horizontal 
     assert.equal(next.selection.$from.parent.type.name, 'paragraph');
   }
 });
+
+test('rich Enter in a paragraph: a new line in it; twice: a new paragraph; saved as Markdown and back', async () => {
+  const { serializeMarkdown } = await import('../src/rich/markdown.js');
+  let state = run('first', 'first', commands.enterLine);
+  assert.equal(state.doc.childCount, 1);
+  assert.equal(state.doc.firstChild.lastChild.type.name, 'hard_break');
+  state = state.apply(state.tr.insertText('second'));
+  const saved = serializeMarkdown(state.doc).text;
+  assert.match(saved, /^first {2}\nsecond/);
+  assert.equal(parseMarkdown(saved).doc.firstChild.childCount, 3);
+  // Enter twice: the empty line becomes the gap before a new paragraph
+  let twice = run('first', 'first', commands.enterLine);
+  assert.equal(commands.enterLine(twice, (tr) => { twice = twice.apply(tr); }), true);
+  assert.equal(twice.doc.childCount, 2);
+  assert.equal(twice.doc.firstChild.textContent, 'first');
+  assert.equal(twice.doc.firstChild.childCount, 1);
+  assert.equal(twice.selection.$from.parent, twice.doc.lastChild);
+});
+
+test('rich Enter: lists, headings and an empty paragraph keep their own Enter; Shift+Enter is the other one', () => {
+  assert.equal(run('- word', 'word', commands.enterLine).doc.firstChild.childCount, 2);
+  const heading = run('# word', 'word', commands.enterLine);
+  assert.equal(heading.doc.lastChild.type.name, 'paragraph');
+  assert.equal(heading.doc.childCount, 2);
+  const shift = run('word', 'word', commands.shiftEnter);
+  assert.equal(shift.doc.childCount, 2);
+  const inList = run('- word', 'word', commands.shiftEnter);
+  assert.equal(inList.doc.firstChild.childCount, 1);
+  let hasBreak = false;
+  inList.doc.descendants((node) => { if (node.type.name === 'hard_break') hasBreak = true; });
+  assert.equal(hasBreak, true);
+});

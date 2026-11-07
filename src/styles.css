@@ -6383,6 +6383,7 @@ textarea {
   padding: 2px 18px 10px;
   overflow-x: auto;
   scroll-snap-type: x proximity;
+  scroll-padding-inline: 12px;
   scrollbar-width: none;
 }
 
@@ -8858,4 +8859,160 @@ svg.ico {
   width: 20px;
   height: 20px;
   margin: auto;
+}
+
+/* Copy for words selected in a note (app.js, noteCopy): a pill at the foot, over the status bar */
+.note-copy {
+  position: fixed;
+  bottom: calc(var(--status-h, 24px) + 18px + max(var(--kb, 0px), env(safe-area-inset-bottom, 0px)));
+  left: 50%;
+  z-index: 46;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--bg-raised, var(--bg));
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  font: 600 14px var(--font-ui, sans-serif);
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+
+.note-copy[hidden] {
+  display: none;
+}
+
+/* ---------- the bar at the foot as a carousel (formatBar.js): one row that scrolls sideways ---------- */
+.visual-format-bar {
+  display: block;
+  padding: 4px 0;
+  overflow: hidden;
+}
+
+.format-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+  padding: 0 12px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: 12px;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 18px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 18px), transparent);
+}
+
+.format-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.format-group {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  padding-right: 6px;
+  border-right: 1px solid var(--hairline);
+  scroll-snap-align: start;
+}
+
+.format-group:last-child {
+  padding-right: 12px;
+  border-right: 0;
+}
+
+.format-group[hidden],
+.format-strip .format-btn[hidden] {
+  display: none;
+}
+
+.format-strip .format-btn {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 38px;
+  padding: 0 6px;
+  font-size: 14px;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+.format-strip .format-md,
+.format-strip .format-txt,
+.format-strip .format-html,
+.format-strip .format-pdf {
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+
+.format-strip .format-h1,
+.format-strip .format-h2,
+.format-strip .format-h3 {
+  font-size: 13px;
+}
+
+.format-strip .format-btn.danger {
+  color: var(--danger, #c4553f);
+}
+
+/* a mark kept on (pressed with nothing selected): a dot under it until it is pressed again */
+.format-strip .format-btn.sticky::after {
+  content: "";
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent-text);
+  transform: translateX(-50%);
+}
+
+/* held down: what the button does */
+.format-tip {
+  position: fixed;
+  z-index: 90;
+  display: grid;
+  gap: 2px;
+  max-width: min(260px, calc(100vw - 16px));
+  padding: 8px 11px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--bg);
+  box-shadow: var(--shadow);
+  font: 12.5px/1.35 var(--font-ui, sans-serif);
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+.format-tip strong {
+  font-weight: 650;
+}
+
+.format-tip[hidden] {
+  display: none;
+}
+
+/* Copy for a selection rises above the bar when the bar is there */
+html:has(.app.formatting) .note-copy {
+  bottom: calc(var(--status-h, 24px) + var(--format-h, 46px) + 14px + max(var(--kb, 0px), env(safe-area-inset-bottom, 0px)));
+}
+
+/* Copy sits on the left in the row of Translate (on the right), never on top of it */
+.note-copy {
+  left: 16px;
+  bottom: calc(var(--status-h, 28px) + 74px + env(safe-area-inset-bottom, 0px));
+  transform: none;
+}
+
+html:has(.app.formatting) .note-copy {
+  bottom: calc(var(--status-h, 28px) + var(--format-h, 46px) + 74px + env(safe-area-inset-bottom, 0px));
 }

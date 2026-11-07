@@ -122,7 +122,10 @@ let writeLogTimer = 0;
 let pinLock = null; // this device's PIN, hashed (lock.js); null: none
 const lockScreen = createLock({ getLock: () => pinLock });
 const statsStrip = createStatsStrip({ onOpen: () => showWritingStats() });
-const formatBar = createFormatBar({ getView: () => editor?.view ?? null, actions: { image: () => pickImage(), copy: () => copyFromBar() } });
+const formatBar = createFormatBar({
+  getView: () => editor?.view ?? null,
+  actions: { image: () => pickImage(), copy: () => copyFromBar(), note: (id) => noteTool(id), mode: () => writing.editorMode },
+});
 const versionKept = new Map(); // note id → when a version of it was last kept in this window
 let lastStats = null; // the open note's textStats(), for the strip's pace updates in between
 let trashView = null; // the trash: deleted notes, documents and marks, until restored or deleted for good (trash.js)
@@ -957,9 +960,31 @@ function setWriting(patch) {
 /** The formatting bar shows while a note is written: on a phone, or everywhere if so chosen. */
 function showFormatBar() {
   const wanted = writing.formatBar === 'always' || (writing.formatBar === 'touch' && phone);
-  const show = wanted && editing;
+  // reading a note, the bar stays with what does not write in it (copy, tags, versions, export…)
+  const show = wanted && Boolean(currentId);
   formatBar.node.hidden = !show;
+  formatBar.setEditing(editing);
   $('#app').classList.toggle('formatting', show);
+}
+
+/** The note's own tools on the bar (they are also in the ⋯ menu). */
+function noteTool(id) {
+  if (!notes.get(currentId)) return;
+  const run = {
+    copyAll,
+    tag: tagSelection,
+    tags: showTags,
+    versions: showVersions,
+    stats: showWritingStats,
+    mode: () => setWriting({ editorMode: writing.editorMode === 'source' ? 'visual' : 'source' }),
+    md: () => exportNote(currentId),
+    txt: () => exportAs('txt'),
+    html: () => exportAs('html'),
+    pdf: () => exportAs('pdf'),
+    clear: clearPage,
+  }[id];
+  run?.();
+  formatBar.refresh();
 }
 
 /**
@@ -1763,11 +1788,39 @@ async function copyFromBar() {
   if (!view) return;
   const text = view.rich ? view.rich.getSelectedText() : view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to);
   if (!text) {
-    toast(t('editor.nothingSelected'), { timeout: 2000 });
+    // a note open for reading: what the page shows as selected, if the editor did not follow it
+    const shown = pageSelectionInNote();
+    if (!shown) {
+      toast(t('editor.nothingSelected'), { timeout: 2000 });
+      return;
+    }
+    try {
+      await api.copy(shown);
+      toast(t('editor.copied'), { timeout: 1500 });
+    } catch {
+      toast(t('clipboard.blocked', 'Ctrl+C'));
+    }
     return;
   }
   if (await copySelection(view)) toast(t('editor.copied'), { timeout: 1500 });
 }
+
+/** The words selected on the page, when they are in the open note; '' otherwise. */
+function pageSelectionInNote() {
+  const sel = getSelection();
+  if (!sel || sel.isCollapsed || !$('#editor')?.contains(sel.anchorNode)) return '';
+  return sel.toString();
+}
+
+// Words selected in a note get a Copy button at the foot of the screen, while reading it or writing
+// without the formatting bar (which has its own ⧉).
+const noteCopy = h('button', { type: 'button', class: 'note-copy', hidden: true, onclick: () => copyFromBar() }, icon('copy'), h('span'));
+noteCopy.addEventListener('pointerdown', (event) => event.preventDefault());
+document.addEventListener('selectionchange', () => {
+  const show = Boolean(pageSelectionInNote()) && (!editing || formatBar.node.hidden);
+  if (show) noteCopy.lastChild.textContent = t('reader.copy');
+  noteCopy.hidden = !show;
+});
 
 async function cutSelection(view) {
   if (await copySelection(view)) {
@@ -1894,6 +1947,7 @@ function applyLanguage({ persist = true } = {}) {
   applyLook({ persist: false });
   if (!editor) return;
   editor.localize();
+  formatBar.localize();
   renderPace();
   // everything drawn in the old language is drawn again
   renderIndex();
@@ -2498,6 +2552,7 @@ function bindChrome() {
   // the statistics strip under the title bar, the formatting bar over the status bar (and the keyboard)
   $('.titlebar').after(statsStrip.node);
   $('.statusbar').before(formatBar.node);
+  document.body.append(noteCopy);
   // what was written is saved when the app goes away, not only every few seconds
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') flushWriting();
