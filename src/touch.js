@@ -13,6 +13,12 @@ document.addEventListener(
   true,
 );
 
+/** True when the screen was last touched with a finger or a pen (or, before any touch, on a touch screen). */
+export function fingerFirst() {
+  if (lastPointer) return lastPointer !== 'mouse';
+  return matchMedia('(pointer: coarse)').matches;
+}
+
 /** True when a "contextmenu" (or a like event) comes from a finger or a pen, not from a mouse. */
 export function fromTouch(event) {
   if (event.pointerType === 'touch' || event.pointerType === 'pen' || event.sourceCapabilities?.firesTouchEvents) return true;

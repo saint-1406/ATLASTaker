@@ -9108,3 +9108,121 @@ html:has(.app.formatting) .note-selbar {
 .rd-markpanel {
   bottom: calc(16px + max(var(--kb, 0px), var(--sys-bottom, 0px), env(safe-area-inset-bottom, 0px)));
 }
+
+/* a selection in a note, made with a finger (app.js, selFocus): the words come forward on a card, the rest
+   blurs behind, and the actions stand in a list under the card. The blur takes no touches: a handle can be
+   moved or the text tapped through it (the card goes then and comes back when the selection rests). */
+.sel-focus {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  pointer-events: none;
+  animation: sel-focus-in 0.16s ease-out;
+}
+
+.sel-focus[hidden] {
+  display: none;
+}
+
+@keyframes sel-focus-in {
+  from { opacity: 0; }
+}
+
+.sel-focus-shade {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg) 45%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(0.9);
+  backdrop-filter: blur(14px) saturate(0.9);
+}
+
+.sel-focus-stack {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  max-width: 560px;
+}
+
+.sel-focus-card {
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow: auto;
+  padding: 10px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+  background: var(--bg-raised, var(--bg));
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+  overscroll-behavior: contain;
+  user-select: none;
+  -webkit-user-select: none;
+  overflow-wrap: anywhere;
+  animation: sel-focus-lift 0.18s ease-out;
+}
+
+@keyframes sel-focus-lift {
+  from { transform: scale(0.97); }
+}
+
+.sel-focus-card > :first-child { margin-top: 0; }
+.sel-focus-card > :last-child { margin-bottom: 0; }
+.sel-focus-card img { max-width: 100%; height: auto; }
+
+/* the actions: a list, as phones show a message's menu */
+.sel-focus-stack .note-selbar {
+  position: static;
+  display: grid;
+  gap: 0;
+  width: auto;
+  min-width: 210px;
+  max-width: 100%;
+  padding: 4px;
+  border-radius: 14px;
+  transform: none;
+  pointer-events: auto;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+}
+
+.sel-focus-stack .note-selbar .note-sel-btn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 11px 14px;
+  border-radius: 10px;
+  font-size: 15px;
+  text-align: start;
+}
+
+.sel-focus-stack .note-sel-btn + .note-sel-btn:not([hidden]) {
+  box-shadow: 0 -1px 0 var(--hairline);
+}
+
+.sel-focus-stack .note-sel-btn span {
+  max-width: none;
+  font-size: 15px;
+  text-align: start;
+  white-space: nowrap;
+}
+
+.sel-focus-stack .note-sel-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sel-focus,
+  .sel-focus-card {
+    animation: none;
+  }
+}
+
+/* the card and its list stand out from the blur in a dark look too */
+.sel-focus-card,
+.sel-focus-stack .note-selbar {
+  border-color: color-mix(in srgb, var(--ink) 14%, transparent);
+  background: color-mix(in srgb, var(--bg-raised, var(--bg)) 92%, var(--ink) 8%);
+}

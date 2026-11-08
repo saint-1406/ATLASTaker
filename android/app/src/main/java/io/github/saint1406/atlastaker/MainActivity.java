@@ -22,10 +22,9 @@ import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.util.Base64;
-import android.graphics.Rect;
 import android.view.ActionMode;
 import android.view.Menu;
-import android.view.MenuItem;
+import android.view.MenuInflater;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
@@ -37,6 +36,7 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.PopupMenu;
 import android.widget.Toast;
 
 import androidx.activity.ComponentActivity;
@@ -131,7 +131,7 @@ public class MainActivity extends ComponentActivity {
     private boolean reading;
     // In a book the page has its own bar for a selection (copy, mark, quote, translate) at the foot of the
     // screen. The phone's own menu by the selection (Copy, Share, Google's suggestions) would cover it
-    // there, so while the page says so (quietSelection) that menu comes up empty, and Android shows none.
+    // there, so while the page says so (quietSelection) WebView gets a menu that shows nothing (SilentActionMode).
     // A field being typed in keeps it: Paste lives there.
     private volatile boolean quietSelection;
     private boolean barsShown = true;
@@ -216,7 +216,9 @@ public class MainActivity extends ComponentActivity {
         web = new WebView(this) {
             @Override
             public ActionMode startActionMode(ActionMode.Callback callback, int type) {
-                return super.startActionMode(quieted(callback), type);
+                if (!quietSelection) return super.startActionMode(callback, type);
+                selectionToPage();
+                return new SilentActionMode();
             }
         };
         web.setBackgroundColor(Color.parseColor("#09090b"));
@@ -771,44 +773,35 @@ public class MainActivity extends ComponentActivity {
         web.post(() -> web.evaluateJavascript("document.dispatchEvent(new Event('selectionchange'))", null));
     }
 
-    /** The selection's menu as WebView builds it, emptied while quietSelection is on (see there). */
-    private ActionMode.Callback quieted(ActionMode.Callback inner) {
-        return new ActionMode.Callback2() {
-            @Override
-            public boolean onCreateActionMode(ActionMode mode, Menu menu) {
-                boolean made = inner.onCreateActionMode(mode, menu);
-                if (quietSelection) {
-                    menu.clear();
-                    selectionToPage();
-                }
-                return made;
-            }
+    /**
+     * The selection's menu while quietSelection is on (see there): one that shows nothing and never ends by
+     * itself. An emptied real menu was no good: some phones (Xiaomi) close an empty menu at once, and
+     * WebView drops the selection whenever its menu is closed by anyone but itself. WebView lets go of this
+     * one on its own (finish), and the page puts up its own bar.
+     */
+    private final class SilentActionMode extends ActionMode {
+        private Menu menu;
+        private CharSequence title;
+        private CharSequence subtitle;
+        private View custom;
 
-            @Override
-            public boolean onPrepareActionMode(ActionMode mode, Menu menu) {
-                boolean changed = inner.onPrepareActionMode(mode, menu);
-                if (!quietSelection) return changed;
-                menu.clear();
-                selectionToPage();
-                return true;
-            }
+        @Override public void setTitle(CharSequence text) { title = text; }
+        @Override public void setTitle(int resId) { title = MainActivity.this.getString(resId); }
+        @Override public void setSubtitle(CharSequence text) { subtitle = text; }
+        @Override public void setSubtitle(int resId) { subtitle = MainActivity.this.getString(resId); }
+        @Override public void setCustomView(View view) { custom = view; }
+        @Override public void invalidate() { selectionToPage(); } // the selection moved
+        @Override public void finish() { }
+        @Override public CharSequence getTitle() { return title; }
+        @Override public CharSequence getSubtitle() { return subtitle; }
+        @Override public View getCustomView() { return custom; }
+        @Override public MenuInflater getMenuInflater() { return new MenuInflater(MainActivity.this); }
 
-            @Override
-            public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
-                return inner.onActionItemClicked(mode, item);
-            }
-
-            @Override
-            public void onDestroyActionMode(ActionMode mode) {
-                inner.onDestroyActionMode(mode);
-            }
-
-            @Override
-            public void onGetContentRect(ActionMode mode, View view, Rect outRect) {
-                if (inner instanceof ActionMode.Callback2) ((ActionMode.Callback2) inner).onGetContentRect(mode, view, outRect);
-                else super.onGetContentRect(mode, view, outRect);
-            }
-        };
+        @Override
+        public Menu getMenu() {
+            if (menu == null) menu = new PopupMenu(MainActivity.this, web).getMenu();
+            return menu;
+        }
     }
 
     /** window.AtlasAndroid in the page (src/bridge.js). Called on a background thread. */

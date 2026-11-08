@@ -5,6 +5,7 @@ import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { android, api, rescue } from './bridge.js';
 import { icon } from './icons.js';
+import { fingerFirst } from './touch.js';
 import { createLibrary } from './library.js';
 import { insertComment, insertCodeBlock, insertDictation, pasteText, codeLanguageAt, showDictationPreview, urlAt } from './editor.js';
 import { createEditor } from './noteEditor.js';
@@ -1819,12 +1820,19 @@ function pageSelectionInNote() {
   return sel.toString().trim() ? sel.toString() : '';
 }
 
-// Words selected in a note get the app's own bar at the foot: copy, cut, paste, select all, translate.
-// The phone's own menu by a selection stays away (quietSelection), so this bar is the one there is.
+// Words selected in a note get the app's own actions: copy, cut, paste, select all, translate. The phone's
+// own menu by a selection stays away (quietSelection), so these are the ones there are.
+// With a finger, once the selection rests, the words come forward on a card, the rest of the screen blurs
+// and the actions stand in a list under the card (selFocus). With a mouse they are a bar at the foot.
 const noteSel = h('div', { class: 'note-selbar', role: 'toolbar', hidden: true });
 const noteSelButton = (id, glyph, key, run) => {
-  const button = h('button', { type: 'button', class: 'note-sel-btn', 'data-sel': id, 'data-key': key, onclick: run }, icon(glyph), h('span'));
+  const button = h('button', { type: 'button', class: 'note-sel-btn', 'data-sel': id, 'data-key': key }, icon(glyph), h('span'));
   button.addEventListener('pointerdown', (event) => event.preventDefault()); // the selection stays
+  button.addEventListener('click', () => {
+    // the card goes once an action is chosen; it comes back for another selection, not for this one
+    if (!selFocus.hidden && id !== 'all') hideSelFocus(true);
+    run();
+  });
   return button;
 };
 const noteSelButtons = [
@@ -1835,18 +1843,108 @@ const noteSelButtons = [
   noteSelButton('translate', 'translate', 'menu.translate', () => translateSelection()),
 ];
 noteSel.append(...noteSelButtons);
+
+const selFocusCard = h('div', { class: 'sel-focus-card' });
+const selFocusStack = h('div', { class: 'sel-focus-stack' }, selFocusCard);
+const selFocus = h('div', { class: 'sel-focus', hidden: true }, h('div', { class: 'sel-focus-shade' }), selFocusStack);
+let selFingers = 0; // fingers on the screen: the card waits until they are off
+let selRestTimer = 0;
+let selDismissed = ''; // the selection whose card was put away (an action, a touch elsewhere)
+
+/** Which selection this is, so a card put away for it does not come straight back. */
+function selKey() {
+  const sel = getSelection();
+  return sel?.rangeCount ? `${sel.anchorOffset}:${sel.focusOffset}:${sel.toString()}` : '';
+}
+
+function hideSelFocus(dismiss = false) {
+  if (dismiss) selDismissed = selKey();
+  selFocus.hidden = true;
+  document.documentElement.classList.remove('sel-focused');
+}
+
 function drawNoteSel() {
   const show = Boolean(pageSelectionInNote());
-  noteSel.hidden = !show;
   document.documentElement.classList.toggle('note-selecting', show);
-  if (!show) return;
+  clearTimeout(selRestTimer);
+  if (!show) {
+    noteSel.hidden = true;
+    hideSelFocus();
+    selDismissed = '';
+    return;
+  }
   for (const button of noteSelButtons) {
     const id = button.dataset.sel;
     button.lastChild.textContent = t(button.dataset.key);
     button.setAttribute('aria-label', t(button.dataset.key));
     button.hidden = (!editing && (id === 'cut' || id === 'paste')) || (id === 'translate' && !phone);
   }
+  if (!fingerFirst()) {
+    hideSelFocus();
+    if (noteSel.parentNode !== document.body) document.body.append(noteSel);
+    noteSel.hidden = false;
+    return;
+  }
+  // a finger: the card, once the selection has stopped moving (a handle being dragged moves it)
+  if (!selFocus.hidden && selKey() !== selFocus.dataset.key) hideSelFocus();
+  selRestTimer = setTimeout(showSelFocus, 380);
 }
+
+function showSelFocus() {
+  if (selFingers || !fingerFirst()) return;
+  const text = pageSelectionInNote();
+  const key = selKey();
+  if (!text || key === selDismissed) return;
+  const host = $('#editor');
+  const range = getSelection().getRangeAt(0).cloneRange();
+  if (!host.contains(range.startContainer)) range.setStart(host, 0);
+  if (!host.contains(range.endContainer)) range.setEnd(host, host.childNodes.length);
+  const words = range.cloneContents();
+  for (const node of words.querySelectorAll('[id], [contenteditable], [tabindex]')) {
+    node.removeAttribute('id');
+    node.removeAttribute('contenteditable');
+    node.removeAttribute('tabindex');
+  }
+  // the words as the note shows them: its typeface, size and colour
+  const root = $('#editor .atlas-rich-content') ?? $('#editor .cm-content') ?? host;
+  const look = getComputedStyle(root);
+  Object.assign(selFocusCard.style, { fontFamily: look.fontFamily, fontSize: look.fontSize, lineHeight: look.lineHeight, color: look.color });
+  selFocusCard.replaceChildren(words);
+  if (noteSel.parentNode !== selFocusStack) selFocusStack.append(noteSel);
+  noteSel.hidden = false;
+  selFocus.dataset.key = key;
+  selFocus.hidden = false;
+  document.documentElement.classList.add('sel-focused');
+  placeSelFocus(range.getBoundingClientRect());
+}
+
+/** The card where the words were (as near as fits), its actions under it, all above the keyboard. */
+function placeSelFocus(rect) {
+  const css = getComputedStyle(document.documentElement);
+  const px = (name) => parseFloat(css.getPropertyValue(name)) || 0;
+  const top = 36;
+  const bottom = (visualViewport?.height ?? innerHeight) - Math.max(px('--kb'), px('--sys-bottom')) - 12;
+  selFocusCard.style.maxHeight = '';
+  selFocusCard.scrollTop = 0;
+  const menu = noteSel.offsetHeight + 10;
+  selFocusCard.style.maxHeight = `${Math.max(72, Math.min(bottom - top - menu, innerHeight * 0.5))}px`;
+  const height = selFocusStack.offsetHeight;
+  const want = (rect?.top ?? top) - 14;
+  selFocusStack.style.top = `${Math.round(Math.max(top, Math.min(want, bottom - height)))}px`;
+}
+
+// fingers on the screen: the card goes while one is down (a handle is being moved, the page scrolled)
+// and comes back when they are off and the selection has rested
+const countFingers = (event) => {
+  selFingers = event.touches.length;
+  if (event.type === 'touchstart' && !selFocusStack.contains(event.target)) hideSelFocus();
+  if (!selFingers && pageSelectionInNote()) drawNoteSel();
+};
+for (const type of ['touchstart', 'touchend', 'touchcancel']) document.addEventListener(type, countFingers, { capture: true, passive: true });
+visualViewport?.addEventListener('resize', () => {
+  if (!selFocus.hidden) hideSelFocus();
+  if (pageSelectionInNote()) drawNoteSel();
+});
 document.addEventListener('selectionchange', drawNoteSel);
 
 /** All of the note selected: by the editor while writing, on the page while reading (the editor is shut then). */
@@ -2602,7 +2700,7 @@ function bindChrome() {
   // the statistics strip under the title bar, the formatting bar over the status bar (and the keyboard)
   $('.titlebar').after(statsStrip.node);
   $('.statusbar').before(formatBar.node);
-  document.body.append(noteSel);
+  document.body.append(noteSel, selFocus);
   // what was written is saved when the app goes away, not only every few seconds
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') flushWriting();
