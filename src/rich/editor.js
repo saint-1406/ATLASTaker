@@ -13,6 +13,7 @@ import { activeFormats, backspaceDetails, enterLine, insertDetails, nextItem, no
 import { nodeViews } from './nodeViews.js';
 import { findMatches, focusKey, focusPlugin, searchKey, searchPlugin } from './plugins.js';
 import { t } from '../i18n.js';
+import { fromTouch } from '../touch.js';
 
 const fitSelection = (doc, from, to = from) => {
   from = Math.max(0, Math.min(doc.content.size, from)); to = Math.max(0, Math.min(doc.content.size, to));
@@ -144,7 +145,7 @@ export function createRichEditor(options) {
         return false;
       },
       contextmenu(pm, event) {
-        if (event.shiftKey || event.pointerType === 'touch' || event.sourceCapabilities?.firesTouchEvents) return false;
+        if (event.shiftKey || fromTouch(event)) return false; // a finger: the app's bars, not the right-click menu
         event.preventDefault(); options.onContextMenu?.(event, options.getFacade()); return true;
       },
     },
