@@ -773,6 +773,13 @@ public class MainActivity extends ComponentActivity {
         web.post(() -> web.evaluateJavascript("document.dispatchEvent(new Event('selectionchange'))", null));
     }
 
+    /** A selection handle is being dragged (or the page scrolled), or that has ended: see SilentActionMode. */
+    private void selectionMoving(boolean moving) {
+        if (web == null) return;
+        String script = "document.dispatchEvent(new CustomEvent('atlas-selection-moving',{detail:" + moving + "}))";
+        web.post(() -> web.evaluateJavascript(script, null));
+    }
+
     /**
      * The selection's menu while quietSelection is on (see there): one that shows nothing and never ends by
      * itself. An emptied real menu was no good: some phones (Xiaomi) close an empty menu at once, and
@@ -792,6 +799,14 @@ public class MainActivity extends ComponentActivity {
         @Override public void setCustomView(View view) { custom = view; }
         @Override public void invalidate() { selectionToPage(); } // the selection moved
         @Override public void finish() { }
+
+        // WebView hides its menu for a long while (and again every few seconds) while a selection handle is
+        // dragged or the page scrolls, and for a moment when that ends: the page waits for the end before
+        // it puts up its card.
+        @Override
+        public void hide(long duration) {
+            selectionMoving(duration >= 1000);
+        }
         @Override public CharSequence getTitle() { return title; }
         @Override public CharSequence getSubtitle() { return subtitle; }
         @Override public View getCustomView() { return custom; }

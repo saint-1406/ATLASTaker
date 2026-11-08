@@ -1849,6 +1849,12 @@ const selFocusStack = h('div', { class: 'sel-focus-stack' }, selFocusCard);
 const selFocus = h('div', { class: 'sel-focus', hidden: true }, h('div', { class: 'sel-focus-shade' }), selFocusStack);
 let selFingers = 0; // fingers on the screen: the card waits until they are off
 let selRestTimer = 0;
+let selMoving = false; // a selection handle is being dragged or the page scrolled (Android says so)
+let selMovingTimer = 0;
+let selCancelled = false; // the phone took over a touch (a long press): a finger may still be on the glass
+// how long the selection must stay still before its card comes: a slow drag pauses, and should not get it
+const SEL_REST = 700;
+const SEL_REST_UNSURE = 1300;
 let selDismissed = ''; // the selection whose card was put away (an action, a touch elsewhere)
 
 /** Which selection this is, so a card put away for it does not come straight back. */
@@ -1887,14 +1893,16 @@ function drawNoteSel() {
   }
   // a finger: the card, once the selection has stopped moving (a handle being dragged moves it)
   if (!selFocus.hidden && selKey() !== selFocus.dataset.key) hideSelFocus();
-  selRestTimer = setTimeout(showSelFocus, 380);
+  if (selMoving) return; // it comes when the handle is let go
+  selRestTimer = setTimeout(showSelFocus, selCancelled ? SEL_REST_UNSURE : SEL_REST);
 }
 
 function showSelFocus() {
-  if (selFingers || !fingerFirst()) return;
+  if (selFingers || selMoving || !fingerFirst()) return;
   const text = pageSelectionInNote();
   const key = selKey();
   if (!text || key === selDismissed) return;
+  if (!selFocus.hidden && selFocus.dataset.key === key) return; // already up: it keeps where it was scrolled to
   const host = $('#editor');
   const range = getSelection().getRangeAt(0).cloneRange();
   if (!host.contains(range.startContainer)) range.setStart(host, 0);
@@ -1937,12 +1945,35 @@ function placeSelFocus(rect) {
 // and comes back when they are off and the selection has rested
 const countFingers = (event) => {
   selFingers = event.touches.length;
-  if (event.type === 'touchstart' && !selFocusStack.contains(event.target)) hideSelFocus();
+  if (selFocusStack.contains(event.target)) return; // scrolling the card or pressing its actions
+  selCancelled = event.type === 'touchcancel';
+  if (event.type === 'touchstart') hideSelFocus();
   if (!selFingers && pageSelectionInNote()) drawNoteSel();
 };
 for (const type of ['touchstart', 'touchend', 'touchcancel']) document.addEventListener(type, countFingers, { capture: true, passive: true });
+// Android (MainActivity, SilentActionMode.hide): a handle is being dragged, or was let go. While it is
+// dragged the phone says so again every few seconds; a word missed (a drag never said to end) runs out.
+document.addEventListener('atlas-selection-moving', (event) => {
+  clearTimeout(selMovingTimer);
+  selMoving = Boolean(event.detail);
+  if (selMoving) {
+    clearTimeout(selRestTimer);
+    hideSelFocus();
+    selMovingTimer = setTimeout(() => {
+      selMoving = false;
+      if (pageSelectionInNote()) drawNoteSel();
+    }, 3500);
+    return;
+  }
+  selCancelled = false; // let go: no finger holds the selection any more
+  if (!pageSelectionInNote()) return;
+  drawNoteSel();
+  clearTimeout(selRestTimer);
+  selRestTimer = setTimeout(showSelFocus, 250); // surely let go: no need to wait long
+});
 visualViewport?.addEventListener('resize', () => {
-  if (!selFocus.hidden) hideSelFocus();
+  if (selFocus.hidden) return;
+  hideSelFocus();
   if (pageSelectionInNote()) drawNoteSel();
 });
 document.addEventListener('selectionchange', drawNoteSel);
