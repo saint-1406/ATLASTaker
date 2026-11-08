@@ -349,6 +349,8 @@ public class MainActivity extends ComponentActivity {
         if (!css.equals(sysInsets)) {
             sysInsets = css;
             web.evaluateJavascript("document.documentElement.style.setProperty('--sys-insets','" + css + "')", null);
+            // the bottom one on its own: the book's bars at the foot (fixed to the screen) rise above it
+            web.evaluateJavascript("document.documentElement.style.setProperty('--sys-bottom','" + Math.round(bars.bottom / px) + "px')", null);
         }
         // The keyboard is told apart: edge to edge, the window no longer shrinks for it, so what is typed
         // into (a comment on a mark) rises by --kb above it; the book's pages stay as they are.
@@ -760,13 +762,25 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
+    /**
+     * A selection was made or moved (WebView asks for its menu): the page looks at it again and puts up
+     * its own bar, whatever events this phone's WebView did or did not send it.
+     */
+    private void selectionToPage() {
+        if (web == null) return;
+        web.post(() -> web.evaluateJavascript("document.dispatchEvent(new Event('selectionchange'))", null));
+    }
+
     /** The selection's menu as WebView builds it, emptied while quietSelection is on (see there). */
     private ActionMode.Callback quieted(ActionMode.Callback inner) {
         return new ActionMode.Callback2() {
             @Override
             public boolean onCreateActionMode(ActionMode mode, Menu menu) {
                 boolean made = inner.onCreateActionMode(mode, menu);
-                if (quietSelection) menu.clear();
+                if (quietSelection) {
+                    menu.clear();
+                    selectionToPage();
+                }
                 return made;
             }
 
@@ -775,6 +789,7 @@ public class MainActivity extends ComponentActivity {
                 boolean changed = inner.onPrepareActionMode(mode, menu);
                 if (!quietSelection) return changed;
                 menu.clear();
+                selectionToPage();
                 return true;
             }
 

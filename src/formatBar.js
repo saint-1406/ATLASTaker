@@ -207,16 +207,16 @@ export function createFormatBar({ getView, actions = {} }) {
 const MARK_OF = { bold: 'strong', italic: 'em', underline: 'underline', strike: 'strike', code: 'code' };
 const BLOCK_OF = { paragraph: 'paragraph', bullet: 'bullet_list', numbered: 'ordered_list', task: 'task_list', quote: 'blockquote', codeblock: 'code_block' };
 const TOGGLES = new Set([...Object.keys(MARK_OF), ...Object.keys(BLOCK_OF), 'h1', 'h2', 'h3']);
-const NOTE_TOOLS = new Set(['copyAll', 'tag', 'tags', 'versions', 'stats', 'mode', 'md', 'txt', 'html', 'pdf', 'clear']);
+const NOTE_TOOLS = new Set(['paste', 'selectAll', 'copyAll', 'tag', 'tags', 'versions', 'stats', 'mode', 'md', 'txt', 'html', 'pdf', 'clear']);
 // what the bar keeps while a note is open for reading
-const READING = new Set(['copy', 'copyAll', 'tags', 'versions', 'stats', 'mode', 'md', 'txt', 'html', 'pdf']);
-const LABEL_KEYS = { paragraph: 'rich.paragraph', copyAll: 'noteMenu.copyAll', tag: 'noteMenu.tag', tags: 'tags.title', versions: 'versions.title', stats: 'stats.title', md: 'noteMenu.md', txt: 'noteMenu.txt', html: 'noteMenu.html', pdf: 'noteMenu.pdf', clear: 'noteMenu.clear' };
+const READING = new Set(['copy', 'selectAll', 'copyAll', 'tags', 'versions', 'stats', 'mode', 'md', 'txt', 'html', 'pdf']);
+const LABEL_KEYS = { paste: 'menu.paste', selectAll: 'menu.selectAll', paragraph: 'rich.paragraph', copyAll: 'noteMenu.copyAll', tag: 'noteMenu.tag', tags: 'tags.title', versions: 'versions.title', stats: 'stats.title', md: 'noteMenu.md', txt: 'noteMenu.txt', html: 'noteMenu.html', pdf: 'noteMenu.pdf', clear: 'noteMenu.clear' };
 const TEXT_GLYPH = { md: 'MD', txt: 'TXT', html: 'HTML', pdf: 'PDF' };
 const GROUPS = [
   { id: 'text', tools: ['paragraph', 'h1', 'h2', 'h3', 'bold', 'italic', 'underline', 'strike', 'code'] },
   { id: 'blocks', tools: ['bullet', 'numbered', 'task', 'quote', 'codeblock', 'accordion', 'rule', 'indent', 'outdent'] },
   { id: 'insert', tools: ['image', 'link'] },
-  { id: 'note', tools: ['copy', 'copyAll', 'tag', 'tags', 'versions', 'stats', 'mode'] },
+  { id: 'note', tools: ['copy', 'paste', 'selectAll', 'copyAll', 'tag', 'tags', 'versions', 'stats', 'mode'] },
   { id: 'export', tools: ['md', 'txt', 'html', 'pdf'] },
   { id: 'more', tools: ['keyboard', 'clear'] },
 ];

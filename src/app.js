@@ -323,8 +323,8 @@ async function boot() {
   new MutationObserver(updateTabs).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
   readingClock = setInterval(countReading, 30_000);
   showAvatar();
-  await showHome();
-  if (android) receiveIncoming();
+  // sync and updates come before the main page is drawn (which waits for the library): the account
+  // tab has them as soon as the app is up
   sync = createSyncClient({
     api,
     h,
@@ -350,6 +350,8 @@ async function boot() {
     },
   });
   updater?.start();
+  await showHome();
+  if (android) receiveIncoming();
 }
 
 /** A sync round brought notes, cards or settings from another device: show them. */
@@ -971,6 +973,8 @@ function showFormatBar() {
 function noteTool(id) {
   if (!notes.get(currentId)) return;
   const run = {
+    paste: () => editor && pasteFromClipboard(editor.view),
+    selectAll: selectAllNote,
     copyAll,
     tag: tagSelection,
     tags: showTags,
@@ -1808,19 +1812,65 @@ async function copyFromBar() {
 /** The words selected on the page, when they are in the open note; '' otherwise. */
 function pageSelectionInNote() {
   const sel = getSelection();
-  if (!sel || sel.isCollapsed || !$('#editor')?.contains(sel.anchorNode)) return '';
-  return sel.toString();
+  const host = $('#editor');
+  if (!sel?.rangeCount || !host || host.closest('[hidden]')) return '';
+  // the selection may begin or end outside the note (a select-all of the page): it counts when it covers some of it
+  if (!host.contains(sel.anchorNode) && !sel.getRangeAt(0).intersectsNode(host)) return '';
+  return sel.toString().trim() ? sel.toString() : '';
 }
 
-// Words selected in a note get a Copy button at the foot of the screen, while reading it or writing
-// without the formatting bar (which has its own ⧉).
-const noteCopy = h('button', { type: 'button', class: 'note-copy', hidden: true, onclick: () => copyFromBar() }, icon('copy'), h('span'));
-noteCopy.addEventListener('pointerdown', (event) => event.preventDefault());
-document.addEventListener('selectionchange', () => {
-  const show = Boolean(pageSelectionInNote()) && (!editing || formatBar.node.hidden);
-  if (show) noteCopy.lastChild.textContent = t('reader.copy');
-  noteCopy.hidden = !show;
-});
+// Words selected in a note get the app's own bar at the foot: copy, cut, paste, select all, translate.
+// The phone's own menu by a selection stays away (quietSelection), so this bar is the one there is.
+const noteSel = h('div', { class: 'note-selbar', role: 'toolbar', hidden: true });
+const noteSelButton = (id, glyph, key, run) => {
+  const button = h('button', { type: 'button', class: 'note-sel-btn', 'data-sel': id, 'data-key': key, onclick: run }, icon(glyph), h('span'));
+  button.addEventListener('pointerdown', (event) => event.preventDefault()); // the selection stays
+  return button;
+};
+const noteSelButtons = [
+  noteSelButton('copy', 'copy', 'menu.copy', () => copyFromBar()),
+  noteSelButton('cut', 'cut', 'menu.cut', () => editor && cutSelection(editor.view)),
+  noteSelButton('paste', 'paste', 'menu.paste', () => editor && pasteFromClipboard(editor.view)),
+  noteSelButton('all', 'selectAll', 'menu.selectAll', () => selectAllNote()),
+  noteSelButton('translate', 'translate', 'menu.translate', () => translateSelection()),
+];
+noteSel.append(...noteSelButtons);
+function drawNoteSel() {
+  const show = Boolean(pageSelectionInNote());
+  noteSel.hidden = !show;
+  document.documentElement.classList.toggle('note-selecting', show);
+  if (!show) return;
+  for (const button of noteSelButtons) {
+    const id = button.dataset.sel;
+    button.lastChild.textContent = t(button.dataset.key);
+    button.setAttribute('aria-label', t(button.dataset.key));
+    button.hidden = (!editing && (id === 'cut' || id === 'paste')) || (id === 'translate' && !phone);
+  }
+}
+document.addEventListener('selectionchange', drawNoteSel);
+
+/** All of the note selected: by the editor while writing, on the page while reading (the editor is shut then). */
+function selectAllNote() {
+  const view = editor?.view;
+  if (!view) return;
+  if (editing) {
+    view.focus();
+    view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
+    return;
+  }
+  const root = $('#editor .atlas-rich-content') ?? $('#editor .cm-content');
+  if (root) getSelection().selectAllChildren(root);
+}
+
+// The phone's own menu by a selection (Copy, Share, Google's suggestions) would sit over the app's bars;
+// it stays away everywhere but in plain fields (search, forms), where Paste is wanted.
+function quietSelection() {
+  const field = document.activeElement?.closest?.('input, textarea, select');
+  api.quietSelection?.(!field);
+}
+document.addEventListener('focusin', quietSelection);
+document.addEventListener('focusout', () => setTimeout(quietSelection, 0));
+quietSelection();
 
 async function cutSelection(view) {
   if (await copySelection(view)) {
@@ -2552,7 +2602,7 @@ function bindChrome() {
   // the statistics strip under the title bar, the formatting bar over the status bar (and the keyboard)
   $('.titlebar').after(statsStrip.node);
   $('.statusbar').before(formatBar.node);
-  document.body.append(noteCopy);
+  document.body.append(noteSel);
   // what was written is saved when the app goes away, not only every few seconds
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') flushWriting();

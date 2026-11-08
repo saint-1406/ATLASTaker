@@ -123,3 +123,33 @@ test('rich Enter: lists, headings and an empty paragraph keep their own Enter; S
   inList.doc.descendants((node) => { if (node.type.name === 'hard_break') hasBreak = true; });
   assert.equal(hasBreak, true);
 });
+
+test('Backspace and an accordion: empty goes, one with words gives them back, an empty body steps to the title', () => {
+  const at = (md, find) => {
+    const doc = parseMarkdown(md).doc;
+    let pos;
+    doc.descendants((node, p) => { if (pos === undefined && node.type.name === find) pos = p + 1; });
+    let state = EditorState.create({ doc, selection: TextSelection.create(doc, pos) });
+    const ok = commands.backspaceDetails(state, (tr) => { state = state.apply(tr); });
+    return { ok, state };
+  };
+  const empty = at('<details open>\n<summary></summary>\n\n</details>', 'summary');
+  assert.equal(empty.ok, true);
+  let names = []; empty.state.doc.descendants((node) => { names.push(node.type.name); });
+  assert.equal(names.includes('details'), false);
+  const full = at('<details open>\n<summary>Title</summary>\n\nBody text\n\n</details>', 'summary');
+  assert.equal(full.ok, true);
+  assert.equal(full.state.doc.child(0).textContent, 'Title');
+  assert.equal(full.state.doc.child(1).textContent, 'Body text');
+  names = []; full.state.doc.descendants((node) => { names.push(node.type.name); });
+  assert.equal(names.includes('details'), false);
+  const body = at('<details open>\n<summary>Title</summary>\n\n</details>', 'details_content');
+  // the cursor at the start of the body's empty paragraph
+  let state = body.state;
+  const doc = parseMarkdown('<details open>\n<summary>Title</summary>\n\n</details>').doc;
+  let pos; doc.descendants((node, p) => { if (pos === undefined && node.type.name === 'details_content') pos = p + 2; });
+  state = EditorState.create({ doc, selection: TextSelection.create(doc, pos) });
+  assert.equal(commands.backspaceDetails(state, (tr) => { state = state.apply(tr); }), true);
+  assert.equal(state.selection.$from.parent.type.name, 'summary');
+  assert.equal(commands.backspaceDetails(EditorState.create({ doc: parseMarkdown('plain').doc }), null), false);
+});

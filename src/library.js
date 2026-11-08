@@ -297,22 +297,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   /** A phone's own bars (clock, battery) hide while a book is read and come back with the chrome. */
   function systemBars() {
     onSystemBars?.(!reader.hidden, reader.classList.contains('chrome-on'));
-    quietSelection();
   }
-  /**
-   * In a book the phone's own menu by a selection (Copy, Share, Google's suggestions) stays away: it
-   * would cover the book's own bar at the foot. A field being typed in keeps it, for Paste.
-   */
-  let selectionQuiet = null;
-  function quietSelection() {
-    const field = document.activeElement?.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
-    const quiet = !reader.hidden && !field;
-    if (quiet === selectionQuiet) return;
-    selectionQuiet = quiet;
-    api.quietSelection?.(quiet);
-  }
-  document.addEventListener('focusin', quietSelection);
-  document.addEventListener('focusout', () => setTimeout(quietSelection, 0));
   /** Something was touched: the chrome stays another few seconds (not while a menu or a panel is open). */
   function holdChrome() {
     clearTimeout(chromeTimer);
@@ -1270,8 +1255,11 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     if (show) tocPanel.querySelector('button')?.focus({ preventScroll: true });
   }
 
-  // a selection inside the document offers a highlight, a comment or a quote
-  document.addEventListener('selectionchange', () => {
+  // a selection inside the document offers a highlight, a comment or a quote. Looked at on every change
+  // of the selection, and again when the finger lifts (a phone's long press and its handles)
+  document.addEventListener('selectionchange', checkSelection);
+  for (const type of ['touchend', 'pointerup', 'contextmenu']) scroll.addEventListener(type, () => setTimeout(checkSelection, 60), { passive: true });
+  function checkSelection() {
     if (!reading?.controller) return hideSelBar();
     const sel = document.getSelection();
     if (sel && !sel.isCollapsed && sel.rangeCount && scroll.contains(sel.anchorNode) && sel.toString().trim()) {
@@ -1281,7 +1269,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       keepNearSelection(sel);
       closeMark();
     } else if (!selBar.contains(document.activeElement)) hideSelBar();
-  });
+  }
 
   function hideSelBar() {
     selBar.hidden = true;

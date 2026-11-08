@@ -9,7 +9,7 @@ import { sinkListItem, liftListItem } from 'prosemirror-schema-list';
 import { columnResizing, tableEditing, goToNextCell } from 'prosemirror-tables';
 import { richSchema as schema, safeLink } from './schema.js';
 import { parseMarkdown, serializeMarkdown } from './markdown.js';
-import { activeFormats, enterLine, insertDetails, nextItem, normalParagraph, paragraphAfterBlock, setParagraphType, shiftEnter, toggleFormat } from './commands.js';
+import { activeFormats, backspaceDetails, enterLine, insertDetails, nextItem, normalParagraph, paragraphAfterBlock, setParagraphType, shiftEnter, toggleFormat } from './commands.js';
 import { nodeViews } from './nodeViews.js';
 import { findMatches, focusKey, focusPlugin, searchKey, searchPlugin } from './plugins.js';
 import { t } from '../i18n.js';
@@ -100,6 +100,7 @@ export function createRichEditor(options) {
     // Enter: a new line in the paragraph; twice, or Shift+Enter: a new paragraph (commands.js, enterLine)
     Enter: () => !view.composing && command(enterLine, 'input.type'),
     'Shift-Enter': () => command(shiftEnter, 'input.type'),
+    Backspace: (state, dispatch, pm) => command(backspaceDetails, 'delete.backward') || baseKeymap.Backspace(state, dispatch, pm),
     'Mod-b': () => command(toggleFormat('strong')),
     'Mod-i': () => command(toggleFormat('em')),
     'Mod-u': () => command(toggleFormat('underline')),
@@ -137,6 +138,8 @@ export function createRichEditor(options) {
         if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') { event.preventDefault(); command(event.inputType === 'historyUndo' ? undo : redo, event.inputType === 'historyUndo' ? 'undo' : 'redo'); return true; }
         // a phone's keyboard sends Enter this way rather than as a key
         if (event.inputType === 'insertParagraph') { event.preventDefault(); command(enterLine, 'input.type'); return true; }
+        // a phone's keyboard: Backspace at the start of an accordion's title (or its empty body)
+        if (event.inputType === 'deleteContentBackward' && backspaceDetails(pm.state)) { event.preventDefault(); command(backspaceDetails, 'delete.backward'); return true; }
         if (event.inputType === 'insertLineBreak') { event.preventDefault(); command(shiftEnter, 'input.type'); return true; }
         return false;
       },

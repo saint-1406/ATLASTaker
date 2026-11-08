@@ -150,6 +150,39 @@ export function setParagraphType(name, attrs = null) {
   };
 }
 
+/**
+ * Backspace and an accordion. At the start of its title: an empty accordion goes, one with words in it
+ * gives them back as plain paragraphs (title first). At the start of its body's first block, empty and
+ * alone: the cursor goes to the end of the title. Elsewhere: nothing (Backspace as usual).
+ */
+export function backspaceDetails(state, dispatch) {
+  const { $from, empty } = state.selection;
+  if (!empty || $from.parentOffset || $from.depth < 2) return false;
+  const { schema } = state;
+  if ($from.parent.type === schema.nodes.summary) {
+    const details = $from.node(-1);
+    const start = $from.before(-1);
+    const blocks = [];
+    if (details.firstChild.content.size) blocks.push(schema.nodes.paragraph.create(null, details.firstChild.content));
+    details.lastChild.forEach((block) => { if (block.content.size || block.type !== schema.nodes.paragraph) blocks.push(block); });
+    if (!blocks.length) blocks.push(schema.nodes.paragraph.create());
+    if (dispatch) {
+      const tr = state.tr.replaceWith(start, start + details.nodeSize, blocks);
+      tr.setSelection(TextSelection.near(tr.doc.resolve(start + 1)));
+      dispatch(tr.scrollIntoView());
+    }
+    return true;
+  }
+  if ($from.depth >= 3 && $from.node(-1).type === schema.nodes.details_content && $from.index(-1) === 0) {
+    const body = $from.node(-1);
+    if (body.childCount !== 1 || $from.parent.content.size) return false;
+    const summaryEnd = $from.before(-1) - 1;
+    if (dispatch) dispatch(state.tr.setSelection(TextSelection.create(state.doc, summaryEnd)).scrollIntoView());
+    return true;
+  }
+  return false;
+}
+
 export function insertDetails(title) {
   return (state, dispatch) => {
     const { schema, selection } = state;

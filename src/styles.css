@@ -9016,3 +9016,95 @@ html:has(.app.formatting) .note-copy {
 html:has(.app.formatting) .note-copy {
   bottom: calc(var(--status-h, 28px) + var(--format-h, 46px) + 74px + env(safe-area-inset-bottom, 0px));
 }
+
+/* a selection in a note: the app's own bar (app.js, noteSel), above the bar of tools when it is there */
+.note-selbar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--status-h, 28px) + 16px + env(safe-area-inset-bottom, 0px));
+  z-index: 46;
+  display: flex;
+  gap: 2px;
+  max-width: calc(100vw - 16px);
+  padding: 5px;
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+  background: var(--bg-raised, var(--bg));
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+}
+
+html:has(.app.formatting) .note-selbar {
+  bottom: calc(var(--status-h, 28px) + var(--format-h, 46px) + 12px + env(safe-area-inset-bottom, 0px));
+}
+
+.note-selbar[hidden],
+.note-sel-btn[hidden] {
+  display: none;
+}
+
+.note-sel-btn {
+  display: grid;
+  flex: 1 1 0;
+  justify-items: center;
+  gap: 3px;
+  min-width: 56px;
+  padding: 6px 4px 5px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--ink);
+  font: 500 10.5px/1.15 var(--font-ui, sans-serif);
+  cursor: pointer;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+.note-sel-btn:active {
+  background: var(--hairline);
+}
+
+.note-sel-btn span {
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* while it is up, Translate is on it and the microphone steps aside */
+.note-selecting #btn-translate,
+.note-selecting .dictate {
+  visibility: hidden;
+}
+
+/* the selection bar of a note takes the screen's width; a long word goes to a second line, not off */
+.note-selbar {
+  width: min(calc(100vw - 16px), 440px);
+}
+
+.note-sel-btn {
+  min-width: 0;
+  align-content: start;
+}
+
+.note-sel-btn span {
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
+  overflow-wrap: normal;
+  font-size: 10px;
+}
+
+.note-selbar .note-sel-btn {
+  padding: 6px 1px 5px;
+}
+
+/* Android, a book open: the selection bar and a mark's card stand clear of the navigation bar too
+   (--sys-bottom: MainActivity), not only of the keyboard */
+.rd-selbar {
+  bottom: calc(22px + max(var(--kb, 0px), var(--sys-bottom, 0px), env(safe-area-inset-bottom, 0px)));
+}
+
+.rd-markpanel {
+  bottom: calc(16px + max(var(--kb, 0px), var(--sys-bottom, 0px), env(safe-area-inset-bottom, 0px)));
+}
