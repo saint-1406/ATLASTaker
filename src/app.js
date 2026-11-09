@@ -138,7 +138,7 @@ const homeEl = h('section', { class: 'home', hidden: true }); // the main page (
 const readingLog = { days: {}, goal: 20 }; // minutes read per day, and the day's goal (home.js)
 let readingClock = 0;
 // the tabs at the foot of the main page and the library; Apocrypha needs Google (Windows and Android apps)
-const tabBar = createTabBar((tab) => pickTab(tab), { without: api.sync?.token ? [] : ['apocrypha'] });
+const tabBar = createTabBar((tab) => pickTab(tab));
 let apocrypha = null; // the shared library (src/apocrypha/screen.js)
 let readingTimer = 0;
 let noteFolders = []; // the notes' folders in order (noteFolders.js); each note names its own
@@ -327,11 +327,14 @@ async function boot() {
       onOpenTrash: (tab) => trashView?.open(tab),
       onTrash: () => trashView?.refresh(),
       onShare: api.sync?.token ? (doc) => apocrypha?.share(doc) : null,
+      // the small Apocrypha button in the library's head
+      onApocrypha: () => openApocrypha('library'),
       // the main page stays under the library: back there (its progress drawn again), or back to the note
       onClose: () => (notesScreen.isOpen() ? notesScreen.refresh() : homeEl.hidden ? editor.view.focus() : showHome()),
     });
   }
-  if (library && api.sync?.token) {
+  // Apocrypha: its collection needs nothing but the internet; what readers share needs the sign-in (sync)
+  if (library) {
     apocrypha = createApocryphaScreen({
       api,
       getReader: () => library.reader(),
@@ -340,7 +343,7 @@ async function boot() {
         hideApocrypha();
         library.readDoc(id);
       },
-      onBack: () => showHome(),
+      onBack: () => closeApocrypha(),
       onShown: () => updateTabs(),
     });
   }
@@ -2412,6 +2415,8 @@ function menuSections() {
       profileSection(),
       // the whole trash (notes, books and marks), opened on whichever part has something in it
       sideGroup(null, sideItem({ icon: '🗑', text: t('trash.title'), chevron: true, run: () => close(() => trashView?.open()) })),
+      // Apocrypha, the shared library: books in the public domain, and what readers share
+      apocrypha ? sideGroup(null, sideItem({ icon: '📜', text: t('apocrypha.title'), hint: t('apocrypha.menuHint'), chevron: true, run: () => close(() => openApocrypha('home')) })) : null,
       sync ? sync.section() : h('p', { class: 'side-empty' }, t('side.noSync')),
       updater ? updater.section() : null,
       h('p', { class: 'side-version' }, t('side.version', typeof __VERSION__ === 'string' ? __VERSION__ : '')),
@@ -2515,6 +2520,26 @@ function hideApocrypha() {
   apocrypha?.hide();
 }
 
+// where Apocrypha was opened from: its back button goes there again
+let apocryphaFrom = 'home';
+
+/** Apocrypha, a step in from the profile menu or the library. */
+function openApocrypha(from = 'home') {
+  if (!apocrypha) return;
+  apocryphaFrom = from;
+  navigate('forward', () => {
+    showApocrypha();
+  });
+}
+
+function closeApocrypha() {
+  navigate('back', async () => {
+    hideApocrypha();
+    if (apocryphaFrom === 'library') await openLibrary();
+    else await showHome();
+  });
+}
+
 function hideHome() {
   if (homeEl.hidden) return;
   homeEl.hidden = true;
@@ -2535,7 +2560,6 @@ function updateTabs() {
 /** Which tab the screen is on now: the order of the tabs is the way a change between them moves. */
 function currentTab() {
   if (document.documentElement.classList.contains('library-open')) return 'library';
-  if (apocrypha?.isOpen()) return 'apocrypha';
   if (notesScreen.isOpen()) return 'notes';
   return homeEl.hidden ? null : 'home';
 }
@@ -2555,11 +2579,7 @@ function pickTab(tab) {
       await openLibrary();
       return;
     }
-    if (tab === 'apocrypha') {
-      // the screen comes at once; the catalogue fills it when it answers
-      showApocrypha();
-      return;
-    }
+    hideApocrypha();
     // the library closes onto whatever is under it
     if (library?.isOpen()) library.close();
     if (tab === 'notes') showNotes();

@@ -7,6 +7,7 @@
 import { h, toast, confirmDialog, openDialog, showMenu } from '../overlays.js';
 import { currentLocale, formatDay, formatNumber, t } from '../i18n.js';
 import { ApocryphaError, createApocrypha } from './client.js';
+import { createCollection } from './collection.js';
 import { checkFile, formatSize, kindOf, KINDS, languageOf, MAX_SHARE, sha256Hex, ShareCheckError } from './checks.js';
 
 const MINE_KEY = 'atlas.apocrypha.mine'; // ids this device shared: their cards offer "Stop sharing"
@@ -97,7 +98,9 @@ async function smallCover(src) {
  * readDoc(id); onBack(); onShown(open): the tab bar follows.
  */
 export function createApocryphaScreen({ api, getReader, addToLibrary, readDoc, onBack, onShown = () => {} }) {
+  // the readers' shared files need the app's sign-in (sync); the collection on GitHub does not
   const available = Boolean(api.sync?.token);
+  const collection = createCollection();
 
   async function getToken(force = false) {
     let answer;
@@ -154,10 +157,15 @@ export function createApocryphaScreen({ api, getReader, addToLibrary, readDoc, o
   const sortNew = h('button', { type: 'button', class: 'seg-btn', onclick: () => setSort('new') });
   const sortPopular = h('button', { type: 'button', class: 'seg-btn', onclick: () => setSort('popular') });
   const tools = h('div', { class: 'apo-tools' }, langSelect, h('div', { class: 'seg apo-sort' }, sortNew, sortPopular));
+  // the collection first (books in the public domain, from GitHub), then what readers shared
+  const collectionHead = h('h3', { class: 'apo-section', hidden: true });
+  const collectionGrid = h('ol', { class: 'apo-grid' });
+  const sharedHead = h('h3', { class: 'apo-section', hidden: true });
   const grid = h('ol', { class: 'apo-grid' });
   const note = h('div', { class: 'apo-note', hidden: true });
   const moreButton = h('button', { type: 'button', class: 'btn apo-more', hidden: true, onclick: () => load() });
-  const body = h('div', { class: 'notes-body apo-body' }, tagline, search, chips, tools, grid, note, moreButton);
+  const body = h('div', { class: 'notes-body apo-body' }, tagline, search, chips, tools, collectionHead, collectionGrid, sharedHead, grid, note, moreButton);
+  let collectionCount = 0;
   const node = h('section', { class: 'notes-screen apo-screen', hidden: true }, h('header', { class: 'notes-head apo-head' }, backButton, h('h2', { class: 'notes-heading' }, heading, counter), moreMenu), body);
   node.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !e.defaultPrevented) {
@@ -183,6 +191,8 @@ export function createApocryphaScreen({ api, getReader, addToLibrary, readDoc, o
     moreMenu.title = t('apocrypha.mine');
     moreMenu.setAttribute('aria-label', t('apocrypha.mine'));
     tagline.textContent = t('apocrypha.tagline');
+    collectionHead.textContent = t('apocrypha.collection');
+    sharedHead.textContent = t('apocrypha.fromReaders');
     search.placeholder = t('apocrypha.search');
     search.setAttribute('aria-label', t('apocrypha.search'));
     sortNew.textContent = t('apocrypha.sortNew');
@@ -217,12 +227,15 @@ export function createApocryphaScreen({ api, getReader, addToLibrary, readDoc, o
   }
 
   async function fillLangs() {
-    const langs = await client.langs().catch(() => null);
-    if (!langs) return;
+    const [shared, own] = await Promise.all([available ? client.langs().catch(() => []) : [], collection.load().catch(() => [])]);
+    const counts = new Map();
+    for (const { lang, count } of shared) counts.set(lang, (counts.get(lang) ?? 0) + count);
+    for (const item of own) counts.set(item.lang, (counts.get(item.lang) ?? 0) + 1);
+    if (!counts.size) return;
     const keep = filters.lang;
     langSelect.replaceChildren(
       h('option', { value: '' }, t('apocrypha.allLangs')),
-      ...langs.map(({ lang, count }) => h('option', { value: lang }, `${langName(lang)} · ${formatNumber(count)}`)),
+      ...[...counts].sort((a, b) => b[1] - a[1]).map(([lang, count]) => h('option', { value: lang }, `${langName(lang)} · ${formatNumber(count)}`)),
     );
     langSelect.value = keep;
   }
@@ -233,11 +246,43 @@ export function createApocryphaScreen({ api, getReader, addToLibrary, readDoc, o
     items = [];
     grid.replaceChildren();
     drawChips();
-    return load();
+    return Promise.all([loadCollection(), load()]);
   }
+
+  /** The collection's books matching the search (all at once: it is a list kept small). */
+  let collectionToken = 0;
+  async function loadCollection() {
+    const mineToken = ++collectionToken;
+    try {
+      const answer = await collection.search(filters);
+      if (mineToken !== collectionToken) return;
+      collectionCount = answer.total;
+      collectionGrid.replaceChildren(...answer.items.map(card));
+    } catch {
+      if (mineToken !== collectionToken) return;
+      collectionCount = 0;
+      collectionGrid.replaceChildren();
+    }
+    collectionHead.hidden = !collectionCount;
+    settle();
+  }
+
+  /** The headings and the count as the two sources stand now. */
+  function settle() {
+    sharedHead.hidden = !collectionCount || !items.length;
+    const total = collectionCount + (lastTotal || 0);
+    counter.textContent = total ? formatNumber(total) : '';
+    if (collectionCount && !items.length && !loading) showNote('');
+  }
+  let lastTotal = 0;
 
   async function load() {
     if (page >= pages) return;
+    if (!available) {
+      page = pages;
+      showNote(collectionCount ? '' : t('apocrypha.unavailable'));
+      return;
+    }
     const mineToken = ++token;
     const want = page + 1;
     showNote(page ? '' : t('apocrypha.loading'));
@@ -250,14 +295,19 @@ export function createApocryphaScreen({ api, getReader, addToLibrary, readDoc, o
       pages = answer.pages;
       items.push(...answer.items);
       grid.append(...answer.items.map(card));
-      counter.textContent = answer.total ? formatNumber(answer.total) : '';
+      lastTotal = answer.total;
       const searching = filters.q || filters.kind || filters.lang;
-      showNote(items.length ? '' : t(searching ? 'apocrypha.nothingFound' : 'apocrypha.empty'));
+      showNote(items.length || collectionCount ? '' : t(searching ? 'apocrypha.nothingFound' : 'apocrypha.empty'));
+      settle();
       moreButton.hidden = page >= pages;
       loadedOnce = true;
     } catch (err) {
       if (mineToken !== token) return;
-      showNote(err.code === 'offline' ? t('apocrypha.offline') : messageOf(err), true);
+      lastTotal = 0;
+      // the readers' part not answering (not set up yet, offline): the collection still stands
+      if (collectionCount) showNote('');
+      else showNote(err.code === 'offline' ? t('apocrypha.offline') : messageOf(err), true);
+      settle();
     } finally {
       if (mineToken === token) loading = null;
     }
@@ -271,7 +321,7 @@ export function createApocryphaScreen({ api, getReader, addToLibrary, readDoc, o
   function coverNode(item, className) {
     const blank = () => h('span', { class: `${className} apo-cover-blank` }, item.format.toUpperCase());
     if (!item.cover) return blank();
-    const img = h('img', { class: className, src: client.coverUrl(item.id), alt: '', loading: 'lazy', decoding: 'async' });
+    const img = h('img', { class: className, src: item.coverUrl || client.coverUrl(item.id), alt: '', loading: 'lazy', decoding: 'async' });
     img.addEventListener('error', () => img.replaceWith(blank()), { once: true });
     return img;
   }
@@ -300,7 +350,8 @@ export function createApocryphaScreen({ api, getReader, addToLibrary, readDoc, o
       (box, close) => {
         const download = h('button', { type: 'button', class: 'btn primary', 'data-autofocus': true }, t('apocrypha.download'));
         download.addEventListener('click', () => fetchInto(item, download));
-        const actions = [
+        const own = item.source === 'collection';
+        const actions = own ? [] : [
           h('button', { type: 'button', class: 'btn', onclick: () => report(item) }, t('apocrypha.report')),
           mine.has(item.id) || admin
             ? h(
@@ -341,11 +392,13 @@ export function createApocryphaScreen({ api, getReader, addToLibrary, readDoc, o
               h('h2', { class: 'modal-title' }, item.title),
               item.author ? h('p', { class: 'apo-detail-author' }, item.author) : null,
               h('p', { class: 'apo-detail-meta' }, metaLine(item)),
-              h('p', { class: 'apo-detail-meta' }, `${t('apocrypha.shared', formatDay(item.created))} · ${t('apocrypha.downloads', formatNumber(item.downloads))}`),
+              item.source === 'collection'
+                ? h('p', { class: 'apo-detail-meta' }, [item.origin, item.rights].filter(Boolean).join(' · '))
+                : h('p', { class: 'apo-detail-meta' }, `${t('apocrypha.shared', formatDay(item.created))} · ${t('apocrypha.downloads', formatNumber(item.downloads))}`),
             ),
           ),
-          item.description ? h('p', { class: 'modal-text apo-detail-description' }, item.description) : null,
-          h('div', { class: 'modal-actions apo-detail-actions' }, ...actions, download),
+          item.description ? h('p', { class: 'modal-text apo-detail-description' }, item.description) : '',
+          h('div', { class: 'modal-actions apo-detail-actions' }, ...actions.filter(Boolean), download),
         );
       },
       { className: 'apo-detail' },
@@ -355,11 +408,12 @@ export function createApocryphaScreen({ api, getReader, addToLibrary, readDoc, o
   async function fetchInto(item, button) {
     button.disabled = true;
     try {
-      const bytes = await client.download(item, (got, total) => {
+      const from = item.source === 'collection' ? collection : client;
+      const bytes = await from.download(item, (got, total) => {
         button.textContent = t('apocrypha.downloading', total ? `${Math.min(99, Math.floor((got / total) * 100))}%` : formatSize(got));
       });
       const docs = await addToLibrary(new File([bytes], fileNameOf(item, bytes)));
-      item.downloads++;
+      if (item.downloads !== undefined) item.downloads++;
       if (docs?.[0]) toast(t('apocrypha.downloaded', item.title), { timeout: 7000, action: { text: t('apocrypha.read'), run: () => readDoc(docs[0].id) } });
     } catch (err) {
       toast(messageOf(err), { timeout: 7000 });
@@ -619,11 +673,8 @@ export function createApocryphaScreen({ api, getReader, addToLibrary, readDoc, o
     node.hidden = false;
     document.body.classList.add('at-apocrypha');
     onShown(true);
-    if (!available) {
-      showNote(t('apocrypha.unavailable'));
-      return;
-    }
     if (!loadedOnce && !loading) {
+      loadedOnce = true;
       fillLangs();
       await reload();
     }

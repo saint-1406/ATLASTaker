@@ -234,15 +234,18 @@ test('the page may start the pdf.js worker from a blob: URL, and nothing else ch
   assert.match(csp, /worker-src blob:/);
   // scripts only from the app itself; WebAssembly may compile (the translator's models), JavaScript may not be eval'd
   assert.match(csp, /script-src 'self' 'wasm-unsafe-eval'(;|$)/);
-  // the network: the app itself, Google Drive and the Apocrypha catalogue (src/apocrypha), nothing else
-  assert.match(csp, /connect-src 'self' https:\/\/www\.googleapis\.com https:\/\/atlastaker\.en-safarov\.workers\.dev(;|$)/);
+  // the network: the app itself, Google Drive, the Apocrypha catalogue and its collection on GitHub
+  // (src/apocrypha), nothing else
+  assert.match(csp, /connect-src 'self' https:\/\/www\.googleapis\.com https:\/\/atlastaker\.en-safarov\.workers\.dev https:\/\/raw\.githubusercontent\.com(;|$)/);
 });
 
 test('the page and the server allow the same places (index.html and the CSP header)', async () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const { APOCRYPHA_URL } = await import('../src/apocrypha/client.js');
-  assert.ok(html.includes(`connect-src 'self' https://www.googleapis.com ${APOCRYPHA_URL};`), 'the catalogue is reachable from the page');
-  assert.ok(html.includes(`img-src 'self' data: blob: ${APOCRYPHA_URL};`), 'and its covers show');
+  const { COLLECTION_URL } = await import('../src/apocrypha/collection.js');
+  const raw = new URL(COLLECTION_URL).origin;
+  assert.ok(html.includes(`connect-src 'self' https://www.googleapis.com ${APOCRYPHA_URL} ${raw};`), 'the catalogue and the collection are reachable from the page');
+  assert.ok(html.includes(`img-src 'self' data: blob: ${APOCRYPHA_URL} ${raw};`), 'and their covers show');
 });
 
 test('the translator’s files: only the allowed ones, only with the token, served once downloaded', async (t) => {

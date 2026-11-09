@@ -53,7 +53,7 @@ function loadReader() {
  * onOpenNote(id) shows a note; onLink(url) opens a web link; onClose() runs when the shelf goes away.
  * translator: translateCard.js, for the selection bar's "Translate".
  */
-export function createLibrary({ api, phone = false, getReading, onReading, onCustomize, onReaderColors, onSystemBars, onQuote, onOpenNote, onLink, onClose, onOpenTrash = null, onTrash = null, onShare = null, translator = null }) {
+export function createLibrary({ api, phone = false, getReading, onReading, onCustomize, onReaderColors, onSystemBars, onQuote, onOpenNote, onLink, onClose, onOpenTrash = null, onTrash = null, onShare = null, onApocrypha = null, translator = null }) {
   const lib = api.library;
   let docs = []; // the documents on the shelf
   let trashedDocs = []; // those in the trash: whole (file, place, marks), out of every list until restored
@@ -126,7 +126,9 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     if (!shelf.hidden) render();
   }
 
-  const head = h('header', { class: 'lib-head' }, shelfBack, h('h2', { class: 'lib-heading' }, heading, counter), shelfPair.node, filter, searchButton, addButton);
+  // Apocrypha, the shared library: a small button by the search (app.js, openApocrypha)
+  const apocryphaButton = onApocrypha ? h('button', { type: 'button', class: 'tb-btn icon lib-apocrypha-btn', onclick: () => onApocrypha() }, icon('apocrypha')) : null;
+  const head = h('header', { class: 'lib-head' }, shelfBack, h('h2', { class: 'lib-heading' }, heading, counter), shelfPair.node, filter, apocryphaButton, searchButton, addButton);
   const dropHint = h('div', { class: 'lib-drop', 'aria-hidden': 'true' });
   const shelf = h(
     'section',
@@ -374,6 +376,10 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     labelSearch();
     addLabel.textContent = t('library.add');
     addButton.title = t('library.addTitle');
+    if (apocryphaButton) {
+      apocryphaButton.title = t('apocrypha.title');
+      apocryphaButton.setAttribute('aria-label', t('apocrypha.title'));
+    }
     for (const [button, key] of [
       [shelfBack, 'library.back'],
       [readerBack, 'reader.back'],

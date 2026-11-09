@@ -58,8 +58,8 @@ const CSP = [
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self'",
   // Apocrypha (src/apocrypha): its catalogue, its covers, and the person's Google Drive to share files
-  "img-src 'self' data: blob: https://atlastaker.en-safarov.workers.dev",
-  "connect-src 'self' https://www.googleapis.com https://atlastaker.en-safarov.workers.dev",
+  "img-src 'self' data: blob: https://atlastaker.en-safarov.workers.dev https://raw.githubusercontent.com",
+  "connect-src 'self' https://www.googleapis.com https://atlastaker.en-safarov.workers.dev https://raw.githubusercontent.com",
   "worker-src blob:", // pdf.js parses PDFs in a worker started from its own code
   "object-src 'none'",
   "base-uri 'none'",

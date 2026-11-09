@@ -727,7 +727,10 @@ const ru = {
   // Апокриф: общая библиотека пользователей (src/apocrypha)
   apocrypha: {
     title: 'Апокриф',
-    tagline: 'Книги и документы, которыми поделились читатели ATLAS',
+    tagline: 'Книги общественного достояния и то, чем поделились читатели ATLAS',
+    collection: 'Коллекция · общественное достояние',
+    menuHint: 'Бесплатные книги и книги читателей',
+    fromReaders: 'От читателей',
     back: 'Назад',
     search: 'Название или автор',
     all: 'Все',
@@ -1779,7 +1782,10 @@ const en = {
   // Apocrypha: the library ATLAS users share (src/apocrypha)
   apocrypha: {
     title: 'Apocrypha',
-    tagline: 'Books and documents shared by ATLAS readers',
+    tagline: 'Public domain books, and what ATLAS readers shared',
+    collection: 'Collection · public domain',
+    menuHint: 'Free books, and books from readers',
+    fromReaders: 'From readers',
     back: 'Back',
     search: 'Title or author',
     all: 'All',

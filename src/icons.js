@@ -41,6 +41,8 @@ const PATHS = {
   visual: '<path d="M2.25 13.75h11.5"/><path d="M4.5 11.25L7.75 2.5h.5l3.25 8.75M5.6 8.25h4.8"/>',
   clear: '<path d="M6 13.75h7.75M2.6 9.4l5.9-6.15a1.4 1.4 0 0 1 2 0l2.4 2.4a1.4 1.4 0 0 1 0 2L7.1 13.75H4.9L2.6 11.4a1.4 1.4 0 0 1 0-2zM5.75 6.25l4.25 4.25"/>',
   // a series of books: a folder with books standing in it (like an archive's folder inside a folder)
+  // Apocrypha, the shared library: a scroll
+  apocrypha: '<path d="M4.2 2.2h7.6a1.6 1.6 0 0 1 0 3.2H4.2zm0 0a1.6 1.6 0 0 0 0 3.2M4.2 5.4v7.2a1.4 1.4 0 0 0 1.4 1.4h7a1.4 1.4 0 0 1-1.4-1.4V5.4"/><path d="M6.6 8.4h3.4M6.6 10.8h2.6"/>',
   series: '<path d="M1.75 4a1 1 0 0 1 1-1h3.4l1.5 1.5h5.6a1 1 0 0 1 1 1v6.75a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z"/><path d="M5.25 7.5v3.75M7.5 7.5v3.75M9.6 7.75l1.15 3.4"/>',
 };
 

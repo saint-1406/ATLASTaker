@@ -10611,3 +10611,22 @@ html[data-easter="cats"] body:not(.has-tabbar) .cat-peek {
   opacity: 0.5;
   cursor: default;
 }
+
+/* Apocrypha: the collection (public domain books from GitHub) and the readers' part under it */
+.apo-section {
+  margin: 18px 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.apo-section[hidden] {
+  display: none;
+}
+
+/* the library's small Apocrypha button steps aside while the search field is open */
+.lib-head.searching .lib-apocrypha-btn {
+  display: none;
+}

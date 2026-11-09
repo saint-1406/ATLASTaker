@@ -216,7 +216,8 @@ const TAB_ICONS = {
   notes: '<path d="M4 1.8h5.5L12.5 5v9.2H4Z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/><path d="M9.3 1.9V5h3M6 8h4.5M6 10.5h3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>',
   profile: '<circle cx="8" cy="5.4" r="2.7" fill="none" stroke="currentColor" stroke-width="1.25"/><path d="M2.8 14c.6-2.9 2.7-4.3 5.2-4.3s4.6 1.4 5.2 4.3" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/>',
 };
-export const TABS = ['home', 'library', 'apocrypha', 'notes', 'profile'];
+// Apocrypha is no tab of its own: it opens from the profile menu and the library (app.js, openApocrypha)
+export const TABS = ['home', 'library', 'notes', 'profile'];
 
 /** onPick(tab); returns { node, select(tab) }. without: tabs this copy of the app has not got. */
 export function createTabBar(onPick, { without = [] } = {}) {
@@ -238,8 +239,8 @@ export function createTabBar(onPick, { without = [] } = {}) {
         b.setAttribute('aria-current', b.dataset.tab === tab ? 'page' : 'false');
       }
       // the soft pill behind the chosen tab slides to it (styles.css, .tabbar::before)
-      const at = TABS.indexOf(tab);
-      node.style.setProperty('--tab-n', String(TABS.length));
+      const at = buttons.findIndex((b) => b.dataset.tab === tab);
+      node.style.setProperty('--tab-n', String(buttons.length));
       if (at >= 0) {
         node.style.setProperty('--tab-i', String(at));
         delete node.dataset.none;
