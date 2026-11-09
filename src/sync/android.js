@@ -30,6 +30,8 @@ const CARD_RULES = {
   texts: (v) => v === null || validTexts(v),
   edits: (v) => v === null || validEdits(v),
   shelf: (v) => v === null || text(60)(v),
+  series: (v) => v === null || text(120)(v),
+  seriesNo: (v) => v === null || (num(v) && v >= 0 && v <= 99999),
   finished: (v) => v === null || typeof v === 'boolean',
   trashed: (v) => v === null || (num(v) && v >= 0),
 };

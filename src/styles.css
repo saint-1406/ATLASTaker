@@ -9226,3 +9226,261 @@ html:has(.app.formatting) .note-selbar {
   border-color: color-mix(in srgb, var(--ink) 14%, transparent);
   background: color-mix(in srgb, var(--bg-raised, var(--bg)) 92%, var(--ink) 8%);
 }
+
+/* ---------- a series of books (library.js, series.js) ---------- */
+
+/* on the shelf: a folder (the archive kind, a folder inside the library) with books standing in it */
+.lib-folder {
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.lib-card.lib-series:hover .lib-cover,
+.lib-card.lib-series:focus-visible .lib-cover {
+  border-color: transparent;
+}
+
+.lib-folder-back {
+  position: absolute;
+  inset: 9% 0 0;
+  border-radius: 4px 10px 10px 10px;
+  background: color-mix(in srgb, var(--accent-text) 46%, var(--bg-raised));
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
+}
+
+/* the folder's tab */
+.lib-folder-back::before {
+  content: '';
+  position: absolute;
+  top: -9%;
+  left: 0;
+  width: 44%;
+  height: 12%;
+  border-radius: 8px 8px 0 0;
+  background: inherit;
+}
+
+.lib-folder-book {
+  position: absolute;
+  top: 15%;
+  width: 52%;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  border: 1px solid var(--sheet-edge);
+  border-radius: 3px;
+  background: var(--bg-raised);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  transition: transform 0.18s;
+}
+
+.lib-folder-book img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.lib-folder-blank {
+  display: block;
+  padding: 6px;
+  overflow: hidden;
+  font: 600 9.5px/1.2 var(--font-display);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.lib-folder-book.b0 { left: 24%; transform: rotate(0deg); z-index: 3; }
+.lib-folder-book.b1 { left: 10%; transform: rotate(-9deg); z-index: 2; }
+.lib-folder-book.b2 { left: 38%; transform: rotate(9deg); z-index: 1; }
+
+.lib-series:hover .lib-folder-book.b0 { transform: translateY(-6px); }
+.lib-series:hover .lib-folder-book.b1 { transform: rotate(-13deg) translateY(-3px); }
+.lib-series:hover .lib-folder-book.b2 { transform: rotate(13deg) translateY(-3px); }
+
+/* the folder's front, over the lower part of the books */
+.lib-folder-front {
+  position: absolute;
+  inset: 48% 0 0;
+  z-index: 4;
+  border-radius: 6px 6px 10px 10px;
+  background: color-mix(in srgb, var(--accent-text) 62%, var(--bg-raised));
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.lib-folder-mark {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #fff;
+  font: 600 11px/1 var(--font-ui, sans-serif);
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.lib-folder-mark svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* inside a series: the part on the cover and over the title */
+.lib-part {
+  position: absolute;
+  top: 32px;
+  left: 6px;
+  min-width: 26px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--accent-text);
+  color: var(--bg);
+  font: 700 12px/1.2 var(--font-ui, sans-serif);
+  text-align: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.lib-card-part {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+
+/* outside a series: which series, under the title */
+.lib-card-series {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--accent-text);
+}
+
+.lib-card-series svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+
+.lib-card-series span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* over an opened series: the folder, its name and count, its menu */
+.lib-series-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 18px;
+}
+
+.lib-series-head[hidden] {
+  display: none;
+}
+
+.lib-series-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent-text) 18%, var(--bg-raised));
+  color: var(--accent-text);
+}
+
+.lib-series-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.lib-series-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+
+.lib-series-text b {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: 600 18px/1.25 var(--font-display);
+  color: var(--ink);
+}
+
+.lib-series-text span {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+/* the dialog: a series for a book */
+.lib-series-book {
+  margin-top: -4px;
+  color: var(--ink-soft);
+}
+
+.lib-series-field {
+  display: grid;
+  gap: 5px;
+  margin-top: 12px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.lib-series-no {
+  max-width: 120px;
+}
+
+.lib-series-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.lib-series-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--ink);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.lib-series-pick span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.lib-series-pick svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--accent-text);
+}
+
+.lib-series-hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
+.btn.danger-text {
+  margin-right: auto;
+  color: var(--danger, #e5484d);
+}

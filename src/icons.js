@@ -40,6 +40,8 @@ const PATHS = {
   source: '<path d="M5.25 4.5L1.75 8l3.5 3.5M10.75 4.5l3.5 3.5-3.5 3.5M9.25 2.75l-2.5 10.5"/>',
   visual: '<path d="M2.25 13.75h11.5"/><path d="M4.5 11.25L7.75 2.5h.5l3.25 8.75M5.6 8.25h4.8"/>',
   clear: '<path d="M6 13.75h7.75M2.6 9.4l5.9-6.15a1.4 1.4 0 0 1 2 0l2.4 2.4a1.4 1.4 0 0 1 0 2L7.1 13.75H4.9L2.6 11.4a1.4 1.4 0 0 1 0-2zM5.75 6.25l4.25 4.25"/>',
+  // a series of books: a folder with books standing in it (like an archive's folder inside a folder)
+  series: '<path d="M1.75 4a1 1 0 0 1 1-1h3.4l1.5 1.5h5.6a1 1 0 0 1 1 1v6.75a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z"/><path d="M5.25 7.5v3.75M7.5 7.5v3.75M9.6 7.75l1.15 3.4"/>',
 };
 
 /** Whether there is a drawn icon by this name. */
