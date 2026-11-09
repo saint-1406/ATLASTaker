@@ -194,6 +194,8 @@ const ru = {
     noLibrary: 'В этой версии нет библиотеки.',
     readLook: 'Оформление чтения',
     readLookHint: 'Темы, шрифт, интервалы, поля',
+    motion: 'Анимации',
+    motionHint: 'Плавные переходы, отклик на нажатия, листание за пальцем',
     appTheme: 'Тема приложения',
     darkLight: 'Светлая / тёмная',
     version: (v) => `ATLAS Notetaker ${v}`,
@@ -722,6 +724,10 @@ const ru = {
     emptyFolder: 'В этой папке пока пусто.',
     nothingFound: 'Ничего не нашлось.',
   },
+  cats: {
+    on: 'Мяу! Кошачья тема. Чтобы вернуть обычную, снова отправьте «I love cats» в поиске или выберите любую тему.',
+    off: 'Котики ушли спать. Тема прежняя.',
+  },
   library: {
     title: 'Библиотека',
     download: 'Скачать файл',
@@ -1169,6 +1175,8 @@ const en = {
     noLibrary: 'This version has no library.',
     readLook: 'Reading appearance',
     readLookHint: 'Themes, font, spacing, margins',
+    motion: 'Animations',
+    motionHint: 'Smooth transitions, taps that answer, pages that follow the finger',
     appTheme: 'App theme',
     darkLight: 'Light / dark',
     version: (v) => `ATLAS Notetaker ${v}`,
@@ -1684,6 +1692,10 @@ const en = {
     noNotes: 'No notes yet. Start the first one!',
     emptyFolder: 'This folder is empty so far.',
     nothingFound: 'Nothing found.',
+  },
+  cats: {
+    on: 'Meow! The cat look. To go back, send “I love cats” from the search again, or pick any theme.',
+    off: 'The cats went to sleep. The look is as before.',
   },
   library: {
     title: 'Library',

@@ -14,6 +14,7 @@ import { live, MARK_COLORS, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, MAX_TEXT_LENGTH, 
 import { openPageEditor } from './pageEditor.js';
 import { createFind } from './readerFind.js';
 import { changedKeys, createSteps, stepButtons, stepKey } from './undo.js';
+import { flip, navigate, restagger, stagger } from './motion.js';
 
 /** A link from a note back to a place in a document: atlas:<document>#<mark>. */
 export const DOC_LINK_RE = /^atlas:(d-[a-z0-9]{6,40})(?:#(m-[a-z0-9]{4,40}))?$/;
@@ -79,7 +80,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   const filter = h('input', { class: 'field lib-filter', type: 'search', spellcheck: 'false' });
   const heading = h('span', { class: 'lib-heading-text' });
   const counter = h('span', { class: 'lib-count' });
-  const shelfBack = h('button', { type: 'button', class: 'tb-btn icon lib-back', onclick: () => (activeSeries !== null ? closeSeries() : activeShelf !== null ? showAllBooks() : close()) }, '←');
+  const shelfBack = h('button', { type: 'button', class: 'tb-btn icon lib-back', onclick: () => (activeSeries !== null ? closeSeries() : activeShelf !== null ? navigate('back', showAllBooks) : close()) }, '←');
   const addLabel = h('span', { class: 'lib-add-text' });
   const addButton = h('button', { type: 'button', class: 'tb-btn accent lib-add', onclick: pickFiles }, h('span', { 'aria-hidden': 'true' }, '＋'), addLabel);
   // the search is an icon until it is wanted: then the field takes the heading's place, and × puts it away
@@ -527,6 +528,9 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     return li;
   }
 
+  /** What a card on the shelf is, for moving it to its new place (motion.js, flip). */
+  const cardKey = (el) => el.dataset.id || (el.dataset.series ? `series:` : '');
+
   /** Books as the shelf shows them: each series folded into one folder card. */
   const shelfCards = (list) => foldSeries(list).map((item) => (item.doc ? card(item.doc) : seriesCard(item)));
 
@@ -574,6 +578,9 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       emptyNote.textContent = t(phone ? 'library.emptyPhone' : 'library.empty');
       emptyNote.hidden = false;
     }
+    // the first time the shelf shows after opening, the covers come in one after another
+    stagger(pockets, 'open', { step: 50, max: 6 });
+    stagger(grid, 'open', { step: 45 });
   }
 
   // ---------- sections ----------
@@ -665,7 +672,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
             activeShelf = name;
             activeSeries = null;
             filter.value = '';
-            render();
+            flip(grid, cardKey, render);
           },
         },
         label,
@@ -696,8 +703,10 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
         type: 'button',
         class: 'lib-pocket',
         onclick: () => {
-          activeShelf = group.name;
-          render();
+          navigate('forward', () => {
+            activeShelf = group.name;
+            render();
+          });
         },
       },
       h('span', { class: 'lib-pocket-stack', 'aria-hidden': 'true' }, ...covers.reverse(), h('span', { class: 'lib-pocket-glass' })),
@@ -840,16 +849,20 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   // ---------- series ----------
 
   function openSeries(name) {
-    activeSeries = name;
-    filter.value = '';
-    setSearching(false);
-    render();
-    shelf.querySelector('.lib-body')?.scrollTo?.({ top: 0 });
+    navigate('forward', () => {
+      activeSeries = name;
+      filter.value = '';
+      setSearching(false);
+      render();
+      shelf.querySelector('.lib-body')?.scrollTo?.({ top: 0 });
+    });
   }
 
   function closeSeries() {
-    activeSeries = null;
-    render();
+    navigate('back', () => {
+      activeSeries = null;
+      render();
+    });
   }
 
   /** Over a series' books: the folder, its name, how many, and its menu. */
@@ -1062,6 +1075,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   }
 
   async function open({ shelf: section } = {}) {
+    restagger(grid);
     localize();
     cover(true);
     await refresh();

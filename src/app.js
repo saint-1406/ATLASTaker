@@ -6,6 +6,8 @@ import { EditorView } from '@codemirror/view';
 import { android, api, rescue } from './bridge.js';
 import { icon } from './icons.js';
 import { fingerFirst } from './touch.js';
+import { flip, motionEnabled, navigate, setMotion, shared, stagger } from './motion.js';
+import { catsOn, catWords, isCatWords, restoreCats, setCats } from './cats.js';
 import { createLibrary } from './library.js';
 import { insertComment, insertCodeBlock, insertDictation, pasteText, codeLanguageAt, showDictationPreview, urlAt } from './editor.js';
 import { createEditor } from './noteEditor.js';
@@ -43,7 +45,7 @@ import welcomeAndroidText from './welcome-android.md';
 import welcomeTextEn from './welcome-en.md';
 import welcomeBrowserTextEn from './welcome-browser-en.md';
 import welcomeAndroidTextEn from './welcome-android-en.md';
-import { addReading, avatarNode, createTabBar, dayKey, drawHome, GOALS, shrinkPicture, streakOf } from './home.js';
+import { addReading, avatarNode, createTabBar, dayKey, drawHome, GOALS, shrinkPicture, streakOf, TABS } from './home.js';
 import { createNotesScreen } from './notesScreen.js';
 import { createTrash } from './trash.js';
 import { createUpdater } from './update.js';
@@ -153,9 +155,19 @@ const notesScreen = createNotesScreen({
   deleteNote: (id, options) => deleteNote(id, options),
   restoreNote: (id) => restoreNote(id),
   onOpen: (id) => {
-    hideNotes();
-    if (id !== currentId) openNote(id);
-    else editor.view.focus();
+    // the card grows into the editor: it and the editor's sheet share a name for the transition
+    const card = notesScreen.node.querySelector(`.notes-card[data-id="${CSS.escape(id)}"]`);
+    const sheet = $('#sheet');
+    const forget = shared(card ? [card] : [], () => 'm-hero');
+    navigate('up', async () => {
+      forget();
+      hideNotes();
+      if (id !== currentId) await openNote(id);
+      else editor.view.focus();
+      if (card && sheet) sheet.style.viewTransitionName = 'm-hero';
+    }).finally(() => {
+      if (sheet) sheet.style.viewTransitionName = '';
+    });
   },
   onCreate: (folder) => {
     hideNotes();
@@ -163,7 +175,17 @@ const notesScreen = createNotesScreen({
   },
   onBack: () => showHome(),
   onTrash: () => trashView?.open('notes'),
+  // the easter egg (cats.js): the words sent from the search turn the cat look on, or off again
+  onSearchEnter: (text) => {
+    if (!isCatWords(text)) return false;
+    catWords().then((on) => {
+      applyBars();
+      toast(t(on ? 'cats.on' : 'cats.off'), { timeout: 4500 });
+    });
+    return true;
+  },
 });
+restoreCats();
 
 let markReady;
 const ready = new Promise((resolve) => {
@@ -469,8 +491,8 @@ function openLibrary({ pick = false } = {}) {
   if (!library) return;
   if (dictation?.listening) dictation.stop();
   flushSave();
-  if (pick) library.pickFiles();
-  else library.open();
+  if (pick) return library.pickFiles();
+  return library.open();
 }
 
 // In the browser build clearing the browser's data would take the notes with it, hence the nudge.
@@ -2195,6 +2217,8 @@ function applyBars() {
 }
 
 function setLook(patch) {
+  // a theme chosen by hand ends the cat look (cats.js)
+  if (catsOn()) setCats(false);
   Object.assign(prefs, normalizeLook({ ...prefs, ...patch }));
   applyLook();
 }
@@ -2351,6 +2375,8 @@ function menuSections() {
         null,
         sideItem({ icon: '◐', text: t('side.darkLight'), kbd: 'Ctrl+Shift+L', run: toggleTheme }),
         sideItem({ icon: 'Aa', text: t('side.readLook'), hint: t('side.readLookHint'), chevron: true, run: () => close(() => showAppearance()) }),
+        // the app's motion (motion.js): on unless turned off here, or the system asks for less
+        sideToggle({ icon: '≈', text: t('side.motion'), hint: t('side.motionHint'), on: motionEnabled(), toggle: () => { setMotion(!motionEnabled()); sideMenu?.refresh(); } }),
       ),
       settingsSection({
         getData: storageInfo,
@@ -2423,6 +2449,8 @@ async function showHome() {
   });
   homeEl.hidden = false;
   document.body.classList.add('at-home');
+  // the first time the main page shows, its parts come in one after another
+  stagger(homeEl.querySelector('.home-body'), 'home', { step: 60, max: 6 });
   updateTabs();
   homeEl.querySelector('.home-book, .home-tile')?.focus({ preventScroll: true });
 }
@@ -2469,20 +2497,33 @@ function updateTabs() {
   tabBar.select(libraryOpen ? 'library' : notesOpen ? 'notes' : 'home');
 }
 
+/** Which tab the screen is on now: the order of the tabs is the way a change between them moves. */
+function currentTab() {
+  if (document.documentElement.classList.contains('library-open')) return 'library';
+  if (notesScreen.isOpen()) return 'notes';
+  return homeEl.hidden ? null : 'home';
+}
+
 function pickTab(tab) {
   if (tab === 'profile') {
     sideMenu?.open('account');
     return;
   }
-  if (tab === 'library') {
-    openLibrary();
-    return;
-  }
-  // the library closes onto whatever is under it
-  if (library?.isOpen()) library.close();
-  if (tab === 'notes') showNotes();
-  else if (tab === 'home') showHome();
-  else editor.view.focus();
+  const from = TABS.indexOf(currentTab());
+  const to = TABS.indexOf(tab);
+  if (from === to) return;
+  const dir = from < 0 ? 'fade' : to > from ? 'forward' : 'back';
+  navigate(dir, async () => {
+    if (tab === 'library') {
+      await openLibrary();
+      return;
+    }
+    // the library closes onto whatever is under it
+    if (library?.isOpen()) library.close();
+    if (tab === 'notes') showNotes();
+    else if (tab === 'home') await showHome();
+    else editor.view.focus();
+  });
 }
 
 /** Every half minute with a book open on screen: half a minute more read today. */

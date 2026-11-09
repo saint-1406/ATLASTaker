@@ -7,6 +7,7 @@ import { h, toast, confirmDialog, showMenu, openDialog } from './overlays.js';
 import { count, currentLocale, t } from './i18n.js';
 import { ALL, NONE, addFolder, folderCounts, folderList, inFolder, pickNotes, preview, renameFolder } from './noteFolders.js';
 import { changedKeys, createSteps, stepButtons, stepKey } from './undo.js';
+import { flip, restagger, stagger } from './motion.js';
 
 const FOLDERS = '$folders'; // the folder list's place in a snapshot, next to the notes' ids
 
@@ -15,7 +16,7 @@ const FOLDERS = '$folders'; // the folder list's place in a snapshot, next to th
  * the app's state; moveNote(id, folder), deleteNote(id, { quiet }) and restoreNote(id) (→ true when
  * done) do the storage; onOpen(id); onCreate(folder); onBack().
  */
-export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, deleteNote, restoreNote, onOpen, onCreate, onBack, onTrash = null }) {
+export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, deleteNote, restoreNote, onOpen, onCreate, onBack, onTrash = null, onSearchEnter = null }) {
   let folder = ALL;
   let query = '';
 
@@ -109,6 +110,15 @@ export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, d
     drawList();
   });
   search.addEventListener('keydown', (e) => {
+    // Enter ("Go" on a phone's keyboard): the app may have a word for what was typed (app.js)
+    if (e.key === 'Enter' && onSearchEnter?.(search.value)) {
+      e.preventDefault();
+      search.value = '';
+      query = '';
+      drawList();
+      search.blur();
+      return;
+    }
     if (e.key === 'Escape' && search.value) {
       e.stopPropagation();
       search.value = '';
@@ -177,7 +187,8 @@ export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, d
     const all = getNotes();
     const shown = pickNotes(all, { folder, folders: names, query });
     counter.textContent = count(all.length, 'note');
-    list.replaceChildren(...shown.map((note) => card(note, names)));
+    // cards that stay glide to their new places, new ones fade in (a search, another folder)
+    flip(list, (li) => li.firstChild?.dataset?.id, () => list.replaceChildren(...shown.map((note) => card(note, names))));
     empty.hidden = shown.length > 0;
     if (!shown.length) {
       empty.replaceChildren(
@@ -205,7 +216,7 @@ export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, d
     const own = names.find((n) => inFolder(note, n));
     const button = h(
       'button',
-      { type: 'button', class: 'notes-card', onclick: () => onOpen(note.id) },
+      { type: 'button', class: 'notes-card', 'data-id': note.id, onclick: () => onOpen(note.id) },
       h('span', { class: 'notes-card-title' }, title || t('untitled')),
       snippet ? h('span', { class: 'notes-card-snippet' }, snippet) : null,
       h(
@@ -388,6 +399,8 @@ export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, d
     show({ focus = true } = {}) {
       render();
       node.hidden = false;
+      restagger(list);
+      stagger(list, 'open', { step: 40 });
       if (focus)
         (node.querySelector('.notes-card') ?? search).focus({
           preventScroll: true,

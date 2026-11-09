@@ -9484,3 +9484,714 @@ html:has(.app.formatting) .note-selbar {
   margin-right: auto;
   color: var(--danger, #e5484d);
 }
+
+/* ==========================================================================
+   Motion (motion.js). Tokens first: every curve and duration the app moves with.
+   ========================================================================== */
+
+:root {
+  --ease-emph: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-std: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-page: cubic-bezier(0.35, 0.04, 0.18, 1);
+  --ease-spring: cubic-bezier(0.2, 1.35, 0.35, 1);
+  --dur-micro: 150ms;
+  --dur-small: 240ms;
+  --dur-route: 380ms;
+  --dur-panel: 480ms;
+  --dur-book: 650ms;
+}
+
+/* ---------- screens: the old one and the new one overlap (motion.js, navigate) ---------- */
+
+/* the tab bar stays where it is while the screens change under it */
+.tabbar {
+  view-transition-name: tabbar;
+}
+
+::view-transition-group(tabbar) {
+  animation: none;
+}
+
+:root[data-nav] ::view-transition-old(root) {
+  animation: var(--dur-route) var(--ease-std) both m-leave-left;
+}
+
+:root[data-nav] ::view-transition-new(root) {
+  animation: var(--dur-route) var(--ease-emph) both m-enter-right;
+}
+
+:root[data-nav="back"] ::view-transition-old(root) {
+  animation-name: m-leave-right;
+}
+
+:root[data-nav="back"] ::view-transition-new(root) {
+  animation-name: m-enter-left;
+}
+
+:root[data-nav="up"] ::view-transition-old(root) {
+  animation-name: m-sink;
+}
+
+:root[data-nav="up"] ::view-transition-new(root) {
+  animation-name: m-rise-up;
+}
+
+:root[data-nav="fade"] ::view-transition-old(root) {
+  animation-name: m-fade-out;
+}
+
+:root[data-nav="fade"] ::view-transition-new(root) {
+  animation-name: m-fade-in;
+}
+
+/* a card growing into what it opens (a note into the editor) */
+:root[data-nav] ::view-transition-group(m-hero) {
+  animation-duration: var(--dur-route);
+  animation-timing-function: var(--ease-emph);
+}
+
+:root[data-nav] ::view-transition-old(m-hero),
+:root[data-nav] ::view-transition-new(m-hero) {
+  height: 100%;
+  object-fit: cover;
+  animation-duration: var(--dur-route);
+}
+
+/* books and notes finding their new places after a filter */
+:root[data-nav="reorder"] ::view-transition-group(*) {
+  animation-duration: var(--dur-small);
+  animation-timing-function: var(--ease-std);
+}
+
+:root[data-nav="reorder"] ::view-transition-old(root) {
+  animation: var(--dur-small) ease both m-fade-out;
+}
+
+:root[data-nav="reorder"] ::view-transition-new(root) {
+  animation: var(--dur-small) ease both m-fade-in;
+}
+
+@keyframes m-enter-right {
+  from { opacity: 0; transform: translate3d(24px, 0, 0) scale(0.985); }
+}
+
+@keyframes m-enter-left {
+  from { opacity: 0; transform: translate3d(-24px, 0, 0) scale(0.985); }
+}
+
+@keyframes m-leave-left {
+  to { opacity: 0; transform: translate3d(-18px, 0, 0) scale(0.985); }
+}
+
+@keyframes m-leave-right {
+  to { opacity: 0; transform: translate3d(18px, 0, 0) scale(0.985); }
+}
+
+@keyframes m-rise-up {
+  from { opacity: 0; transform: translate3d(0, 22px, 0) scale(0.98); }
+}
+
+@keyframes m-sink {
+  to { opacity: 0; transform: scale(0.98); }
+}
+
+@keyframes m-fade-in {
+  from { opacity: 0; }
+}
+
+@keyframes m-fade-out {
+  to { opacity: 0; }
+}
+
+/* ---------- a press answers at once (motion.js adds .m-press while a finger is down) ---------- */
+
+:root[data-motion="on"] :is(button, [role="button"], .lib-card, .notes-card, .home-book, .home-tile, .lib-pocket, .lib-chip, .side-item, .ctx-item) {
+  transition-property: transform, background-color, color, border-color, box-shadow, opacity;
+  transition-duration: var(--dur-micro);
+  transition-timing-function: var(--ease-std);
+}
+
+:root[data-motion="on"] :is(button, [role="button"], .lib-chip, .side-item, .ctx-item).m-press:not(:disabled) {
+  transform: scale(0.95);
+}
+
+/* big surfaces press in less, so they do not seem to jump */
+:root[data-motion="on"] :is(.lib-card, .notes-card, .home-book, .home-tile, .lib-pocket, .side-item).m-press {
+  transform: scale(0.975);
+}
+
+/* the round "+" buttons answer with a little more spring */
+:root[data-motion="on"] :is(.notes-fab, .lib-add) {
+  transition: transform 0.35s var(--ease-spring), box-shadow var(--dur-small);
+}
+
+:root[data-motion="on"] :is(.notes-fab, .lib-add).m-press {
+  transform: scale(0.88) rotate(-8deg);
+}
+
+.m-pulse {
+  animation: m-pulse 0.5s var(--ease-spring);
+}
+
+@keyframes m-pulse {
+  40% { transform: scale(1.12); }
+}
+
+/* ---------- lists come in one after another, once (motion.js, stagger) ---------- */
+
+.m-in {
+  animation: m-item-in 0.5s var(--ease-emph) both;
+  animation-delay: calc(var(--m-i, 0) * var(--m-step, 45ms));
+}
+
+@keyframes m-item-in {
+  from { opacity: 0; transform: translate3d(0, 16px, 0) scale(0.97); }
+}
+
+/* ---------- the tab bar: the active tab rises, a soft pill slides between them ---------- */
+
+.tabbar {
+  --tab-n: 4;
+  --tab-i: 0;
+}
+
+.tabbar::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 6px;
+  width: calc((100% - 12px) / var(--tab-n));
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--accent-text) 14%, transparent);
+  transform: translateX(calc(var(--tab-i) * 100%));
+  transition: transform 0.45s var(--ease-spring), opacity var(--dur-small);
+  pointer-events: none;
+}
+
+.tabbar[data-none]::before {
+  opacity: 0;
+}
+
+.tabbar-btn {
+  position: relative;
+}
+
+.tabbar-btn svg {
+  transition: transform 0.45s var(--ease-spring);
+}
+
+.tabbar-btn[aria-current="page"] svg {
+  transform: translateY(-2px) scale(1.08);
+}
+
+/* ---------- the side menu: in with a spring, a finger can pull it away ---------- */
+
+:root[data-motion="on"] .side {
+  transition: transform var(--dur-panel) var(--ease-emph);
+}
+
+:root[data-motion="on"] .side-scrim.leaving .side {
+  transition: transform 0.26s var(--ease-std);
+}
+
+:root[data-motion="on"] .side-scrim {
+  transition: background-color 0.32s var(--ease-std);
+}
+
+/* while the finger holds it, it follows the finger and nothing else */
+.side.m-dragging {
+  transition: none !important;
+}
+
+/* its sections: the chosen one's background slides over (sidemenu.js sets --side-i) */
+.side-tabs {
+  position: relative;
+}
+
+.side-tabs::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc((100% - 8px - 12px) / 4);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18), inset 0 0 0 1px var(--hairline);
+  transform: translateX(calc(var(--side-i, 0) * (100% + 4px)));
+  transition: transform 0.42s var(--ease-spring);
+  pointer-events: none;
+}
+
+.side-tab {
+  position: relative;
+}
+
+.side-tab[aria-selected="true"] {
+  background: none !important;
+  box-shadow: none !important;
+}
+
+.side-body.m-switch > * {
+  animation: m-item-in 0.36s var(--ease-emph) both;
+}
+
+.side-body.m-switch > :nth-child(2) { animation-delay: 40ms; }
+.side-body.m-switch > :nth-child(3) { animation-delay: 80ms; }
+.side-body.m-switch > :nth-child(n + 4) { animation-delay: 120ms; }
+
+/* ---------- dialogs and menus grow from where they come ---------- */
+
+:root[data-motion="on"] .modal {
+  animation: m-dialog-in 0.42s var(--ease-emph);
+}
+
+@keyframes m-dialog-in {
+  from { opacity: 0; transform: translate3d(0, 18px, 0) scale(0.96); }
+}
+
+:root[data-motion="on"] .scrim {
+  animation: fade 0.24s var(--ease-std);
+}
+
+:root[data-motion="on"] .ctx {
+  animation: m-menu-in 0.26s var(--ease-emph);
+}
+
+@keyframes m-menu-in {
+  from { opacity: 0; transform: scale(0.94) translate3d(0, -6px, 0); }
+}
+
+/* ---------- cards lift under a pointer ---------- */
+
+@media (hover: hover) {
+  :root[data-motion="on"] .notes-card:hover {
+    transform: translateY(-2px);
+  }
+}
+
+/* a folder of a series, pressed: the front book lifts out of it */
+:root[data-motion="on"] .lib-series.m-press .lib-folder-book.b0 {
+  transform: translateY(-9px);
+}
+
+/* ---------- the reader comes up out of the book it opens ---------- */
+
+:root[data-motion="on"] .reader:not([hidden]) {
+  animation: m-reader-in 0.46s var(--ease-emph);
+}
+
+@keyframes m-reader-in {
+  from { opacity: 0; transform: translate3d(0, 14px, 0) scale(0.97); }
+}
+
+/* ---------- the library's search field slides open ---------- */
+
+:root[data-motion="on"] .lib-head.searching .lib-filter {
+  animation: m-search-in 0.32s var(--ease-emph);
+}
+
+@keyframes m-search-in {
+  from { opacity: 0; transform: translate3d(12px, 0, 0); }
+}
+
+/* ---------- no motion: the system asks for less, or Settings → Animations is off ---------- */
+
+:root[data-motion="off"] :is(.m-in, .m-pulse, .side-body.m-switch > *) {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .m-in,
+  .m-pulse,
+  .side-body.m-switch > *,
+  .tabbar::before,
+  .side-tabs::before,
+  .tabbar-btn svg {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ---------- the reader: a page turned by hand (pager.js, the leaf) ----------
+   A copy of the page swings about its left edge over the book; the page under it is already in place.
+   --lift: how far it stands off the book (0 flat … 1 upright); --edge: where its free edge falls. */
+
+.rd-leaf {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  perspective: 2200px;
+  perspective-origin: 0 50%;
+  pointer-events: none;
+  --lift: 0;
+  --edge: 100%;
+}
+
+.rd-leaf-page {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 50%;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.rd-leaf-front {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  backface-visibility: hidden;
+  /* the page's own edge as it lifts: a thin line of shadow down its free side */
+  box-shadow: inset -1px 0 0 rgba(0, 0, 0, calc(0.25 * var(--lift)));
+}
+
+/* the copy lies exactly as the book does under it */
+.rd-leaf-front > .reader-book {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
+/* light leaves the page as it rises: darker toward its free edge, a soft gleam near the fold */
+.rd-leaf-shade {
+  position: absolute;
+  inset: 0;
+  opacity: var(--lift);
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 0%, rgba(0, 0, 0, 0) 35%, rgba(0, 0, 0, 0.16) 78%, rgba(0, 0, 0, 0.34) 100%);
+}
+
+/* the shadow the rising page casts on the page under it, just past its free edge */
+.rd-leaf-cast {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--edge);
+  width: clamp(36px, 14%, 90px);
+  opacity: var(--lift);
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.38), rgba(0, 0, 0, 0.12) 45%, transparent);
+}
+
+/* and the page under it dims a little while it is covered */
+.rd-leaf::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--edge);
+  background: rgba(0, 0, 0, calc(0.1 * var(--lift)));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rd-leaf {
+    display: none;
+  }
+}
+
+/* ==========================================================================
+   The cat look (cats.js): an easter egg, in no menu. Night violet, peach and cream; striped fur on
+   the cards, ears on the round buttons, drips under the main page's head, a cat over the tab bar.
+   ========================================================================== */
+
+html[data-easter="cats"]:not(#_) {
+  color-scheme: dark;
+  --bg: #19162b;
+  --bg-raised: #231f3b;
+  --bg-hover: rgba(255, 233, 195, 0.06);
+  --ink: #fdfeff;
+  --ink-soft: #d7d4ea;
+  --ink-dim: #9a98b6;
+  --ink-faint: #4d4c6b;
+  --hairline: rgba(255, 233, 195, 0.1);
+  --sheet-edge: rgba(255, 233, 195, 0.16);
+  --active-line: rgba(255, 233, 195, 0.04);
+  --danger: #ff8f7e;
+  --shadow: 0 22px 60px rgba(6, 4, 18, 0.65), 0 0 0 1px rgba(255, 233, 195, 0.08);
+  --code-bg: #141126;
+  --code-edge: rgba(255, 233, 195, 0.1);
+  --accent: #feb686;
+  --accent-text: #feb686;
+  --accent-ink: #19162b;
+  --sel: rgba(254, 182, 134, 0.28);
+  --kicker: #ffe9c3;
+  --font-ui: "Montserrat", "Inter Variable", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Montserrat", "Inter Variable", "Segoe UI", system-ui, sans-serif;
+  /* tabby fur: soft wavy stripes, peach on violet (drawn for this app) */
+  --cat-fur: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='84' height='56' viewBox='0 0 84 56'%3E%3Cg fill='none' stroke='%23FEB686' stroke-linecap='round' stroke-opacity='.075'%3E%3Cpath d='M-6 10c10-7 20-7 30 0s20 7 30 0 20-7 30 0' stroke-width='6'/%3E%3Cpath d='M-6 30c10-6 20-6 30 0s20 6 30 0 20-6 30 0' stroke-width='4'/%3E%3Cpath d='M-6 48c10-5 20-5 30 0s20 5 30 0 20-5 30 0' stroke-width='5'/%3E%3C/g%3E%3C/svg%3E");
+  /* drips hanging under the main page's head, like ink off a cat's back */
+  --cat-drips: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='390' height='46' viewBox='0 0 390 46' preserveAspectRatio='none'%3E%3Cpath fill='%23231F3B' d='M0 0h390v14c-12 0-14 10-16 20s-10 12-12 0-6-20-20-20-16 6-22 6-10-6-24-6-14 24-22 24-8-24-20-24H162c-10 0-12 14-14 24s-10 10-12 0-8-24-22-24-16 8-26 8-12-8-26-8-14 18-20 26-12 4-12-4-6-22-18-22-12 4-12 4z'/%3E%3C/svg%3E");
+}
+
+html[data-easter="cats"]:not(#_) body {
+  background: var(--bg);
+}
+
+/* ---------- striped fur on the surfaces ---------- */
+
+html[data-easter="cats"]:not(#_) :is(.home-card, .notes-card, .modal, .side, .ctx, .tabbar, .lib-cover-blank, .note-selbar, .sel-focus-card) {
+  background-image: var(--cat-fur);
+  background-size: 84px 56px;
+}
+
+html[data-easter="cats"]:not(#_) :is(.home-card, .notes-card) {
+  border-color: rgba(255, 233, 195, 0.14);
+  border-radius: 26px;
+}
+
+/* the main page's head: drips under it */
+html[data-easter="cats"]:not(#_) .home-hero {
+  padding-bottom: 34px;
+  background: var(--bg-raised) var(--cat-fur);
+  background-size: 84px 56px;
+  border-radius: 0 0 8px 8px;
+}
+
+html[data-easter="cats"]:not(#_) .home-hero::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -40px;
+  height: 46px;
+  background: var(--cat-drips) no-repeat 0 0 / 100% 100%;
+  pointer-events: none;
+}
+
+html[data-easter="cats"]:not(#_) .home-body {
+  padding-top: 40px;
+}
+
+/* ATLAS wears ears */
+html[data-easter="cats"]:not(#_) .home-brand {
+  display: inline-block;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #ffe9c3;
+}
+
+html[data-easter="cats"]:not(#_) .home-brand::before {
+  content: "";
+  position: absolute;
+  top: -0.2em;
+  left: 0.05em;
+  width: 1.05em;
+  height: 0.32em;
+  background: var(--accent);
+  clip-path: polygon(0 100%, 14% 0, 38% 100%, 62% 100%, 86% 0, 100% 100%);
+}
+
+/* ---------- ears on the round buttons ---------- */
+
+html[data-easter="cats"]:not(#_) :is(.notes-fab, .home-play, .lib-add, .home-avatar) {
+  position: relative;
+  overflow: visible;
+}
+
+html[data-easter="cats"]:not(#_) :is(.notes-fab, .home-play, .lib-add)::after,
+html[data-easter="cats"]:not(#_) .home-avatar::after {
+  content: "";
+  position: absolute;
+  top: -9px;
+  left: 8%;
+  right: 8%;
+  height: 14px;
+  background: var(--accent);
+  clip-path: polygon(0 100%, 16% 0, 40% 100%, 60% 100%, 84% 0, 100% 100%);
+  pointer-events: none;
+  transition: transform 0.3s var(--ease-spring, ease);
+}
+
+html[data-easter="cats"]:not(#_) .home-avatar::after {
+  background: #ffe9c3;
+  top: -7px;
+  height: 11px;
+}
+
+/* a pressed button flicks its ears */
+html[data-easter="cats"]:not(#_) :is(.notes-fab, .home-play, .lib-add).m-press::after {
+  transform: translateY(2px) scaleY(0.7);
+}
+
+html[data-easter="cats"]:not(#_) .btn.primary {
+  border-radius: 999px;
+}
+
+/* ---------- progress: a peach tabby tail ---------- */
+
+html[data-easter="cats"]:not(#_) :is(.home-progress i, .lib-progress i, .rd-line i) {
+  background: repeating-linear-gradient(115deg, #feb686 0 8px, #ffcf9f 8px 13px);
+}
+
+/* the tab bar: rounder, and the chosen tab's pill has ears */
+html[data-easter="cats"]:not(#_) .tabbar {
+  border-radius: 30px;
+}
+
+html[data-easter="cats"]:not(#_) .tabbar::before {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  clip-path: polygon(0 18%, 8% 18%, 18% 0, 30% 18%, 70% 18%, 82% 0, 92% 18%, 100% 18%, 100% 100%, 0 100%);
+  top: 1px;
+  border-radius: 0 0 18px 18px;
+}
+
+/* toasts start with a paw */
+html[data-easter="cats"]:not(#_) .toast > span::before {
+  content: "🐾 ";
+}
+
+/* a paw for a pointer on a computer */
+@media (hover: hover) and (pointer: fine) {
+  html[data-easter="cats"]:not(#_) :is(button, [role="button"], a, .lib-card, .notes-card) {
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' viewBox='0 0 32 32'%3E%3Cg fill='%23FEB686' stroke='%2319162B' stroke-width='1.4'%3E%3Cpath d='M16 14.5c-4.6 0-8.4 3.9-8.4 7.6 0 2.6 2 4.2 4.4 4.2 1.7 0 2.6-.8 4-.8s2.3.8 4 .8c2.4 0 4.4-1.6 4.4-4.2 0-3.7-3.8-7.6-8.4-7.6z'/%3E%3Cellipse cx='7.2' cy='12.4' rx='2.6' ry='3.3'/%3E%3Cellipse cx='12.6' cy='7.6' rx='2.7' ry='3.5'/%3E%3Cellipse cx='19.4' cy='7.6' rx='2.7' ry='3.5'/%3E%3Cellipse cx='24.8' cy='12.4' rx='2.6' ry='3.3'/%3E%3C/g%3E%3C/svg%3E") 13 6, pointer;
+  }
+}
+
+/* ---------- the cat over the tab bar ---------- */
+
+.cat-peek {
+  display: none;
+}
+
+html[data-easter="cats"] .cat-peek {
+  position: fixed;
+  right: max(28px, calc(50% - 250px));
+  bottom: calc(59px + env(safe-area-inset-bottom, 0px));
+  z-index: 41;
+  display: block;
+  width: 62px;
+  height: 33px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  transform-origin: 50% 100%;
+  animation: cat-peek-in 0.7s var(--ease-spring, ease) both;
+}
+
+/* only where the tab bar is */
+html[data-easter="cats"] body:not(.has-tabbar) .cat-peek {
+  display: none;
+}
+
+.cat-peek svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.cat-peek .cat-body {
+  fill: #0d0b17;
+  stroke: #feb686;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.cat-peek .cat-ear {
+  fill: #feb686;
+  opacity: 0.85;
+}
+
+.cat-peek .cat-eyes {
+  fill: #fdfeff;
+  transform-origin: 50% 44px;
+  animation: cat-blink 4.6s infinite;
+}
+
+.cat-peek .cat-pupils {
+  fill: #0d0b17;
+  animation: cat-look 7s ease-in-out infinite;
+}
+
+.cat-peek .cat-whisk {
+  fill: none;
+  stroke: #fdfeff;
+  stroke-opacity: 0.5;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.cat-peek.ducking {
+  animation: cat-duck 0.9s var(--ease-emph, ease) both;
+}
+
+@keyframes cat-peek-in {
+  from { transform: translateY(100%); opacity: 0; }
+}
+
+@keyframes cat-duck {
+  35% { transform: translateY(85%); }
+  60% { transform: translateY(85%); }
+}
+
+@keyframes cat-blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.08); }
+}
+
+@keyframes cat-look {
+  0%, 20%, 100% { transform: translateX(0); }
+  30%, 48% { transform: translateX(-4px); }
+  58%, 78% { transform: translateX(3px) translateY(-1px); }
+}
+
+/* ---------- the run: paw prints across the screen (cats.js, runPaws) ---------- */
+
+.cat-run {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.cat-paw {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  color: var(--accent);
+  transform: rotate(var(--turn, 0deg)) scale(0.4);
+  opacity: 0;
+  animation: cat-step 1.25s var(--ease-emph, ease) both;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35));
+}
+
+.cat-paw svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
+@keyframes cat-step {
+  0% { opacity: 0; transform: rotate(var(--turn)) scale(0.4); }
+  12% { opacity: 1; transform: rotate(var(--turn)) scale(1.12); }
+  22% { transform: rotate(var(--turn)) scale(1); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: rotate(var(--turn)) scale(0.96); }
+}
+
+/* the new look spreads out from the last paw print */
+:root[data-cat-reveal] ::view-transition-old(root) {
+  animation: none;
+}
+
+:root[data-cat-reveal] ::view-transition-new(root) {
+  animation: cat-reveal 0.75s var(--ease-emph, ease) both;
+}
+
+@keyframes cat-reveal {
+  from { clip-path: circle(0 at var(--cat-x, 50%) var(--cat-y, 50%)); }
+  to { clip-path: circle(150vmax at var(--cat-x, 50%) var(--cat-y, 50%)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cat-peek,
+  .cat-peek .cat-eyes,
+  .cat-peek .cat-pupils {
+    animation: none !important;
+  }
+}

@@ -65,3 +65,12 @@ test('a note moved on one side keeps the move; on both, this device wins', () =>
   assert.equal(mergeFolder('Home', 'Work', ''), 'Home');
   assert.equal(mergeFolder(undefined, undefined, undefined), '');
 });
+
+test('preview: the visual editor marks show as the words they stand for', () => {
+  // an empty first line, a kept space, escapes and an accordion: none of their marks on the card
+  assert.deepEqual(preview('<p></p>\n\n<p></p>\n\nКлаб  \nФахитос'), { title: 'Клаб', snippet: 'Фахитос' });
+  assert.deepEqual(preview('&#32;\n\nЧто в заметках'), { title: 'Что в заметках', snippet: '' });
+  assert.deepEqual(preview('Welcome\n\nnotepad&#58; quick, quiet and uncluttered\.'), { title: 'Welcome', snippet: 'notepad: quick, quiet and uncluttered.' });
+  assert.deepEqual(preview('<details>\n<summary>Тема &amp; план</summary>\n\nВнутри\n\n</details>'), { title: 'Тема & план', snippet: 'Внутри' });
+  assert.deepEqual(preview('<strong>Жирно</strong> и <u>подчёркнуто</u>'), { title: 'Жирно и подчёркнуто', snippet: '' });
+});
