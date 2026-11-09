@@ -1,5 +1,6 @@
-// Apocrypha's collection: books in the public domain kept in a public GitHub repository (one file
-// per book, as it came, and catalog.json listing them). Nothing in between: the app reads the list
+// Apocrypha's collection: books in the public domain kept on GitHub (one file per book, as it came,
+// and catalog.json listing them) — for now in this repository's apocrypha-books/ folder, while it is
+// being tried out; later perhaps in a repository of its own (only COLLECTION_URL changes). Nothing in between: the app reads the list
 // and the files straight from GitHub's raw files, which answer any page. The list is kept on the
 // device too, so it shows offline; a download is checked against the SHA-256 in the list.
 // scripts/books-catalog.mjs makes the repository's contents from a folder of books.
@@ -7,9 +8,9 @@
 import { sha256Hex } from './checks.js';
 import { ApocryphaError } from './client.js';
 
-/** The repository the collection lives in, and its branch. */
-export const COLLECTION_REPO = 'saint-1406/atlas-books';
-export const COLLECTION_URL = `https://raw.githubusercontent.com/${COLLECTION_REPO}/main/`;
+/** Where the collection lives: the repository, its branch and the folder. */
+export const COLLECTION_REPO = 'saint-1406/ATLASTaker';
+export const COLLECTION_URL = `https://raw.githubusercontent.com/${COLLECTION_REPO}/main/apocrypha-books/`;
 const CACHE_KEY = 'atlas.apocrypha.collection';
 const PER_PAGE = 40;
 

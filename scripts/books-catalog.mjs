@@ -1,5 +1,5 @@
 // Makes the contents of Apocrypha's collection (src/apocrypha/collection.js) from a folder of EPUB books:
-//   node scripts/books-catalog.mjs <folder with books> <the collection repository's folder>
+//   node scripts/books-catalog.mjs <folder with books> apocrypha-books
 // Each book is checked (a whole EPUB, at most 50 MB, marked as public domain), copied as it came to
 // books/, its cover to covers/, and listed in catalog.json with its title, author, language, size
 // and SHA-256. A file that fails a check is named and left out. The files are not changed: a Project
@@ -136,7 +136,7 @@ and downloads the files from here; each download is checked against the SHA-256 
 - \`catalog.json\` — title, author, language, size, SHA-256, source and rights of each book
 
 ${fromGutenberg ? `${fromGutenberg} of the ${books.length} books come from [Project Gutenberg](https://www.gutenberg.org). They are distributed free of charge, unchanged, with the Project Gutenberg License inside each file. They are in the public domain in the USA; check the copyright laws of your country before using them.\n` : ''}
-This repository is made by \`scripts/books-catalog.mjs\` in the ATLAS repository.
+This folder is made by \`scripts/books-catalog.mjs\` (\`node scripts/books-catalog.mjs <folder with books> apocrypha-books\`).
 `,
 );
 console.log(`\n${books.length} books listed, ${skipped.length} left out.`);
