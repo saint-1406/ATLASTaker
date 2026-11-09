@@ -4,6 +4,7 @@
 
 import { h } from './overlays.js';
 import { t } from './i18n.js';
+import { motionOn } from './motion.js';
 
 export const SIDE_TABS = ['notes', 'library', 'settings', 'account'];
 
@@ -82,6 +83,13 @@ export function createSideMenu({ sections, onClose }) {
     body.dataset.tab = tab;
     body.replaceChildren(...(sections[tab]?.(close) ?? []).filter(Boolean));
     body.scrollTop = keep ? top : 0;
+    // the chosen section's background slides over to it; another section's contents come in
+    tabBar.style.setProperty('--side-i', String(Math.max(0, SIDE_TABS.indexOf(tab))));
+    body.classList.remove('m-switch');
+    if (!keep && motionOn()) {
+      void body.offsetWidth;
+      body.classList.add('m-switch');
+    }
     if (focused) body.querySelector(`[data-focus-key="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
   }
 
@@ -136,17 +144,59 @@ export function createSideMenu({ sections, onClose }) {
       tabBar,
       body,
     );
-    scrim = h('div', { class: 'side-scrim' }, panel);
+    // the dark behind the panel is a layer of its own: it fades by opacity, which costs the phone nothing
+    const shade = h('div', { class: 'side-shade', 'aria-hidden': 'true' });
+    scrim = h('div', { class: 'side-scrim' }, shade, panel);
     scrim.addEventListener('pointerdown', (e) => {
-      if (e.target === scrim) close();
+      if (e.target === scrim || e.target === shade) close();
     });
-    // a swipe to the right closes it, as it came
-    let startX = null;
-    panel.addEventListener('touchstart', (e) => (startX = e.touches.length === 1 ? e.touches[0].clientX : null), { passive: true });
-    panel.addEventListener('touchend', (e) => {
-      if (startX != null && e.changedTouches[0].clientX - startX > 80 && !e.target.closest('input[type="range"]')) close();
-      startX = null;
-    });
+    // a finger pulls it away to the right, as it came: it follows the finger, and once let go it either
+    // goes (far enough, or flicked) or springs back
+    let drag = null;
+    panel.addEventListener(
+      'touchstart',
+      (e) => {
+        drag = e.touches.length === 1 && !e.target.closest('input[type="range"], .side-tabs') ? { x: e.touches[0].clientX, y: e.touches[0].clientY, at: performance.now(), dx: 0, on: false } : null;
+      },
+      { passive: true },
+    );
+    panel.addEventListener(
+      'touchmove',
+      (e) => {
+        if (!drag) return;
+        const dx = e.touches[0].clientX - drag.x;
+        const dy = e.touches[0].clientY - drag.y;
+        if (!drag.on) {
+          if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
+            drag = null; // a scroll of the menu
+            return;
+          }
+          if (dx < 10) return;
+          drag.on = true;
+          drag.width = panel.offsetWidth || 1; // measured once: a read each frame would stall the drag
+          panel.classList.add('m-dragging');
+        }
+        drag.dx = Math.max(0, dx);
+        panel.style.transform = `translate3d(${drag.dx}px, 0, 0)`;
+        shade.style.opacity = String(Math.max(0, 1 - drag.dx / drag.width));
+      },
+      { passive: true },
+    );
+    const letGo = () => {
+      if (!drag?.on) {
+        drag = null;
+        return;
+      }
+      const speed = drag.dx / Math.max(1, performance.now() - drag.at);
+      const away = drag.dx > drag.width * 0.33 || (speed > 0.6 && drag.dx > 40);
+      panel.classList.remove('m-dragging');
+      panel.style.transform = '';
+      shade.style.opacity = '';
+      drag = null;
+      if (away) close();
+    };
+    panel.addEventListener('touchend', letGo);
+    panel.addEventListener('touchcancel', letGo);
     document.getElementById('overlays').append(scrim);
     document.addEventListener('keydown', onKey, true);
     draw();

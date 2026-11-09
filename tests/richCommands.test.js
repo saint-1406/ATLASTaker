@@ -91,3 +91,65 @@ test('rich Enter and after-block action work after an atom such as a horizontal 
     assert.equal(next.selection.$from.parent.type.name, 'paragraph');
   }
 });
+
+test('rich Enter in a paragraph: a new line in it; twice: a new paragraph; saved as Markdown and back', async () => {
+  const { serializeMarkdown } = await import('../src/rich/markdown.js');
+  let state = run('first', 'first', commands.enterLine);
+  assert.equal(state.doc.childCount, 1);
+  assert.equal(state.doc.firstChild.lastChild.type.name, 'hard_break');
+  state = state.apply(state.tr.insertText('second'));
+  const saved = serializeMarkdown(state.doc).text;
+  assert.match(saved, /^first {2}\nsecond/);
+  assert.equal(parseMarkdown(saved).doc.firstChild.childCount, 3);
+  // Enter twice: the empty line becomes the gap before a new paragraph
+  let twice = run('first', 'first', commands.enterLine);
+  assert.equal(commands.enterLine(twice, (tr) => { twice = twice.apply(tr); }), true);
+  assert.equal(twice.doc.childCount, 2);
+  assert.equal(twice.doc.firstChild.textContent, 'first');
+  assert.equal(twice.doc.firstChild.childCount, 1);
+  assert.equal(twice.selection.$from.parent, twice.doc.lastChild);
+});
+
+test('rich Enter: lists, headings and an empty paragraph keep their own Enter; Shift+Enter is the other one', () => {
+  assert.equal(run('- word', 'word', commands.enterLine).doc.firstChild.childCount, 2);
+  const heading = run('# word', 'word', commands.enterLine);
+  assert.equal(heading.doc.lastChild.type.name, 'paragraph');
+  assert.equal(heading.doc.childCount, 2);
+  const shift = run('word', 'word', commands.shiftEnter);
+  assert.equal(shift.doc.childCount, 2);
+  const inList = run('- word', 'word', commands.shiftEnter);
+  assert.equal(inList.doc.firstChild.childCount, 1);
+  let hasBreak = false;
+  inList.doc.descendants((node) => { if (node.type.name === 'hard_break') hasBreak = true; });
+  assert.equal(hasBreak, true);
+});
+
+test('Backspace and an accordion: empty goes, one with words gives them back, an empty body steps to the title', () => {
+  const at = (md, find) => {
+    const doc = parseMarkdown(md).doc;
+    let pos;
+    doc.descendants((node, p) => { if (pos === undefined && node.type.name === find) pos = p + 1; });
+    let state = EditorState.create({ doc, selection: TextSelection.create(doc, pos) });
+    const ok = commands.backspaceDetails(state, (tr) => { state = state.apply(tr); });
+    return { ok, state };
+  };
+  const empty = at('<details open>\n<summary></summary>\n\n</details>', 'summary');
+  assert.equal(empty.ok, true);
+  let names = []; empty.state.doc.descendants((node) => { names.push(node.type.name); });
+  assert.equal(names.includes('details'), false);
+  const full = at('<details open>\n<summary>Title</summary>\n\nBody text\n\n</details>', 'summary');
+  assert.equal(full.ok, true);
+  assert.equal(full.state.doc.child(0).textContent, 'Title');
+  assert.equal(full.state.doc.child(1).textContent, 'Body text');
+  names = []; full.state.doc.descendants((node) => { names.push(node.type.name); });
+  assert.equal(names.includes('details'), false);
+  const body = at('<details open>\n<summary>Title</summary>\n\n</details>', 'details_content');
+  // the cursor at the start of the body's empty paragraph
+  let state = body.state;
+  const doc = parseMarkdown('<details open>\n<summary>Title</summary>\n\n</details>').doc;
+  let pos; doc.descendants((node, p) => { if (pos === undefined && node.type.name === 'details_content') pos = p + 2; });
+  state = EditorState.create({ doc, selection: TextSelection.create(doc, pos) });
+  assert.equal(commands.backspaceDetails(state, (tr) => { state = state.apply(tr); }), true);
+  assert.equal(state.selection.$from.parent.type.name, 'summary');
+  assert.equal(commands.backspaceDetails(EditorState.create({ doc: parseMarkdown('plain').doc }), null), false);
+});

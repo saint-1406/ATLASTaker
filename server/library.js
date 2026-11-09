@@ -31,6 +31,9 @@ const RULES = {
   edits: (v) => validEdits(v) && JSON.stringify(v).length <= 4_000_000,
   // the section of the library the document sits in ('' — none) and whether it was read to the end
   shelf: text(60),
+  // the series the book belongs to ('' — none) and which part it is (null — none): src/series.js
+  series: text(120),
+  seriesNo: (v) => v === null || (Number.isFinite(v) && v >= 0 && v <= 99999),
   finished: (v) => typeof v === 'boolean',
   // in the trash since then (null or 0: on the shelf); the file stays, so the document comes back whole
   trashed: (v) => v === null || (Number.isFinite(v) && v >= 0),

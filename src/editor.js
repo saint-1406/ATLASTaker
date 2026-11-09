@@ -38,6 +38,7 @@ const markup = new Compartment();
 const MARKS_HIDDEN = livePreview(true);
 const MARKS_SHOWN = livePreview(false);
 import { IMAGE_RE } from './markdown.js';
+import { fromTouch } from './touch.js';
 import { count, currentLang, t as say, ui } from './i18n.js';
 
 // Focus mode's dimming (focusDim.js): nothing, or the paragraph or sentence lit; one extension per
@@ -605,7 +606,7 @@ export function createEditor({
       contextmenu(event, view) {
         if (event.shiftKey) return false; // Shift+right click keeps the browser menu (spelling suggestions)
         // a long press on a touch screen selects a word and shows the phone's own copy/paste bar
-        if (event.pointerType === 'touch' || event.sourceCapabilities?.firesTouchEvents) return false;
+        if (fromTouch(event)) return false;
         event.preventDefault();
         onContextMenu(event, view);
         return true;

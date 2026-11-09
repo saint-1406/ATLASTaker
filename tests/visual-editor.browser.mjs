@@ -47,9 +47,20 @@ try {
   assert.equal(await visual.locator('strong').innerText(), 'Два слова ');
   assert.equal(await page.getByRole('button', { name: 'Жирный', exact: true }).getAttribute('aria-pressed'), 'true');
   assert.doesNotMatch(await visual.innerText(), /\*\*|~~|###/);
-  await page.keyboard.press('Enter'); await page.keyboard.type('Обычный текст');
-  assert.equal(await visual.locator('p').last().locator('strong').count(), 0);
+  // Enter: a new line in the same paragraph; bold stays on until pressed again
+  const paragraphs = await visual.locator(':scope > p').count();
+  await page.keyboard.press('Enter'); await page.keyboard.type('дальше');
+  assert.equal(await visual.locator(':scope > p').count(), paragraphs);
+  assert.equal(await visual.locator('br').count() >= 1, true);
+  assert.match(await visual.locator('strong').last().innerText(), /дальше/);
+  await page.getByRole('button', { name: 'Жирный', exact: true }).click();
+  await page.keyboard.type(' обычный');
+  assert.doesNotMatch(await visual.locator('strong').last().innerText(), /обычный/);
   assert.equal(await page.getByRole('button', { name: 'Жирный', exact: true }).getAttribute('aria-pressed'), 'false');
+  // Enter twice: a new paragraph
+  await page.keyboard.press('Enter'); await page.keyboard.press('Enter'); await page.keyboard.type('Новый абзац');
+  assert.equal(await visual.locator(':scope > p').count(), paragraphs + 1);
+  assert.equal(await visual.locator(':scope > p').last().innerText(), 'Новый абзац');
 
   for (const [source, list] of [['- Первый', 'ul'], ['4. Первый', 'ol']]) {
     await page.evaluate((md) => { qa.set(md); qa.end(); }, source);
@@ -74,12 +85,11 @@ try {
   assert.equal(await visual.locator(':scope > p').last().innerText(), 'После чекбокса');
 
   await page.evaluate(() => { qa.set(''); qa.bar.setTools([]); }); await visual.click();
-  await page.getByRole('button', { name: 'Вставить блок', exact: true }).click();
-  await page.getByRole('menuitem', { name: /Аккордеон/ }).click();
+  await page.getByRole('button', { name: 'Аккордеон', exact: true }).click();
   await page.keyboard.type('Планы'); await page.keyboard.press('Enter'); await page.keyboard.type('Подробности');
   assert.equal(await visual.locator('summary').innerText(), 'Планы');
   assert.match(await visual.locator('[data-details-content]').innerText(), /Подробности/);
-  await page.keyboard.press('Enter');
+  await page.keyboard.press('Shift+Enter');
   await page.keyboard.type('Вторая строка');
   const paragraphGap = await visual.locator('[data-details-content] > p').evaluateAll(([first, second]) =>
     second.getBoundingClientRect().top - first.getBoundingClientRect().bottom);

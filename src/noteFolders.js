@@ -3,6 +3,7 @@
 // (noteFolders) holds the order and the folders still empty. Pure functions, no DOM.
 
 import { addShelf, cleanShelf, renameShelf, shelfList } from './shelves.js';
+import { decodeEntities } from './entities.js';
 
 export const ALL = ':all';
 export const NONE = ':none';
@@ -48,14 +49,22 @@ export function folderCounts(notes, folders) {
 export function preview(content, size = 140) {
   const lines = String(content ?? '')
     .split('\n')
+    // the visual editor's marks for an empty line and an accordion are no words of the note
+    .filter((line) => !/^\s*(<p><\/p>|<\/?details(?: open)?>)\s*$/.test(line))
     .map((line) =>
-      line
-        .replace(/^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+(\[[ xX]\]\s+)?|\d+[.)]\s+)/, '')
-        .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-        .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-        .replace(/[*_`~]+/g, '')
-        .replace(/<!--.*?-->/g, '')
-        .trim(),
+      decodeEntities(
+        line
+          .replace(/^\s*<summary>(.*)<\/summary>\s*$/, '$1')
+          // a character kept literal by a backslash (\. \* \#) stays as itself, not as a mark
+          .replace(/\\([!-/:-@[-`{-~])/g, (_, ch) => `&#${ch.codePointAt(0)};`)
+          .replace(/^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+(\[[ xX]\]\s+)?|\d+[.)]\s+)/, '')
+          .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+          .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+          .replace(/<br\s*\/?>/gi, ' ')
+          .replace(/<\/?(?:u|strong|em|s|del|b|i|code|mark|sub|sup)>/gi, '')
+          .replace(/[*_`~]+/g, '')
+          .replace(/<!--.*?-->/g, ''),
+      ).trim(),
     )
     .filter((line) => line && !/^(-{3,}|`{3,}|~{3,})$/.test(line));
   const title = lines[0] ?? '';

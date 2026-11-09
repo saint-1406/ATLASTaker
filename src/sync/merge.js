@@ -217,7 +217,7 @@ export function mergeSettings(local, remote) {
 
 /** Card fields that travel, in groups that change together. `opened` is the newest of both. */
 // `trashed`: when the document went to the trash (null or 0: it is on the shelf)
-export const CARD_GROUPS = [['name'], ['format'], ['added'], ['title'], ['author'], ['cover'], ['position', 'progress'], ['notesId'], ['scale'], ['shelf'], ['finished'], ['trashed']];
+export const CARD_GROUPS = [['name'], ['format'], ['added'], ['title'], ['author'], ['cover'], ['position', 'progress'], ['notesId'], ['scale'], ['shelf'], ['series', 'seriesNo'], ['finished'], ['trashed']];
 export const CARD_FIELDS = [...CARD_GROUPS.flat(), 'opened', 'marks', 'bookmarks', 'texts', 'edits'];
 
 const pick = (card, keys) => Object.fromEntries(keys.map((k) => [k, card?.[k] ?? null]));

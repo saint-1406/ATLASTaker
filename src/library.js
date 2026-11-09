@@ -6,12 +6,15 @@
 import { h, toast, confirmDialog, showMenu, isOverlayOpen, openDialog } from './overlays.js';
 import { count, STRINGS, t } from './i18n.js';
 import { addShelf, groupShelves, isShelf, renameShelf, shelfList } from './shelves.js';
+import { cleanSeries, foldSeries, inSeries, searchText, seriesNames, seriesNumber, seriesOrder } from './series.js';
 import { shownTheme } from './skins.js';
+import { icon } from './icons.js';
 import { drawQuickPanel, paintTheme, setDim } from './readLook.js';
 import { live, MARK_COLORS, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, MAX_TEXT_LENGTH, MAX_TEXTS, newBookmarkId, newEditId, newMarkId, newTextId, remapPdf, remapTexts, sortMarks, sortTexts, TEXT_COLORS, TEXT_SIZES } from './marks.js';
 import { openPageEditor } from './pageEditor.js';
 import { createFind } from './readerFind.js';
 import { changedKeys, createSteps, stepButtons, stepKey } from './undo.js';
+import { flip, navigate, restagger, stagger } from './motion.js';
 
 /** A link from a note back to a place in a document: atlas:<document>#<mark>. */
 export const DOC_LINK_RE = /^atlas:(d-[a-z0-9]{6,40})(?:#(m-[a-z0-9]{4,40}))?$/;
@@ -71,11 +74,13 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   const looseHead = h('h3', { class: 'lib-section-head', hidden: true });
   let shelves = []; // the saved order of sections (shelves.js)
   let activeShelf = null; // null: all; otherwise the section shown
+  let activeSeries = null; // a series opened like a folder (series.js): its books by part
   const emptyNote = h('p', { class: 'lib-empty', hidden: true });
+  const seriesHead = h('div', { class: 'lib-series-head', hidden: true });
   const filter = h('input', { class: 'field lib-filter', type: 'search', spellcheck: 'false' });
   const heading = h('span', { class: 'lib-heading-text' });
   const counter = h('span', { class: 'lib-count' });
-  const shelfBack = h('button', { type: 'button', class: 'tb-btn icon lib-back', onclick: () => (activeShelf !== null ? showAllBooks() : close()) }, '←');
+  const shelfBack = h('button', { type: 'button', class: 'tb-btn icon lib-back', onclick: () => (activeSeries !== null ? closeSeries() : activeShelf !== null ? navigate('back', showAllBooks) : close()) }, '←');
   const addLabel = h('span', { class: 'lib-add-text' });
   const addButton = h('button', { type: 'button', class: 'tb-btn accent lib-add', onclick: pickFiles }, h('span', { 'aria-hidden': 'true' }, '＋'), addLabel);
   // the search is an icon until it is wanted: then the field takes the heading's place, and × puts it away
@@ -89,7 +94,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   const shelfPair = stepButtons({ undo: () => shelfSteps.undo(), redo: () => shelfSteps.redo(), className: 'lib-steps', hideEmpty: true });
   const shelfSnapshot = () => ({
     [SHELVES]: [...shelves],
-    ...Object.fromEntries([...docs, ...trashedDocs].map((d) => [d.id, { shelf: d.shelf || '', finished: Boolean(d.finished), trashed: Boolean(d.trashed) }])),
+    ...Object.fromEntries([...docs, ...trashedDocs].map((d) => [d.id, { shelf: d.shelf || '', series: d.series || '', seriesNo: d.seriesNo ?? null, finished: Boolean(d.finished), trashed: Boolean(d.trashed) }])),
   });
   /** Does `run`, and if it changed anything, keeps that as one step. */
   async function onShelf(run) {
@@ -115,6 +120,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       if (!docs.some((d) => d.id === key) && !(await restoreDoc(key))) continue;
       const doc = docs.find((d) => d.id === key);
       if ((doc.shelf || '') !== want.shelf) await setShelf(doc, want.shelf, { quiet: true });
+      if ((doc.series || '') !== (want.series ?? '') || (doc.seriesNo ?? null) !== (want.seriesNo ?? null)) await setSeries(doc, want.series ?? '', want.seriesNo ?? null, { quiet: true });
       if (Boolean(doc.finished) !== want.finished) await toggleFinished(doc);
     }
     if (!shelf.hidden) render();
@@ -126,7 +132,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     'section',
     { class: 'library', hidden: true },
     head,
-    h('div', { class: 'lib-body' }, chips, pockets, looseHead, grid, emptyNote),
+    h('div', { class: 'lib-body' }, chips, seriesHead, pockets, looseHead, grid, emptyNote),
     dropHint,
   );
 
@@ -137,12 +143,12 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   const subtitle = h('span', { class: 'rd-sub' });
   // the page number (or how far, when scrolling a book) at the foot of the screen; taps go through it
   const percent = h('div', { class: 'rd-pct', 'aria-live': 'off' });
-  const readerBack = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => closeReader() }, '←');
+  const readerBack = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => closeReader() }, icon('back'));
   const viewButton = h('button', { type: 'button', class: 'tb-btn icon rd-size', onclick: () => toggleView() }, 'Aa');
-  const tocButton = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => toggleToc() }, '☰');
-  const moreButton = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => openMore() }, '⋯');
-  const findButton = h('button', { type: 'button', class: 'tb-btn icon rd-find-btn', onclick: () => finder.open() }, '⌕');
-  const marksButton = h('button', { type: 'button', class: 'tb-btn icon rd-marks-btn', onclick: () => toggleMarks() }, '✎', h('span', { class: 'rd-marks-count' }));
+  const tocButton = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => toggleToc() }, icon('contents'));
+  const moreButton = h('button', { type: 'button', class: 'tb-btn icon', onclick: () => openMore() }, icon('more'));
+  const findButton = h('button', { type: 'button', class: 'tb-btn icon rd-find-btn', onclick: () => finder.open() }, icon('find'));
+  const marksButton = h('button', { type: 'button', class: 'tb-btn icon rd-marks-btn', onclick: () => toggleMarks() }, icon('marks'), h('span', { class: 'rd-marks-count' }));
   // PDF only: the next press on a page puts a text there
   const textButton = h('button', { type: 'button', class: 'tb-btn icon rd-text-btn', 'aria-pressed': 'false', hidden: true, onclick: () => setPlacing(!reader.classList.contains('placing-text')) }, 'T');
   const prevButton = h('button', { type: 'button', class: 'rd-nav rd-nav-prev', onclick: () => reading?.controller?.prev() }, '‹');
@@ -151,22 +157,22 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   const status = h('div', { class: 'rd-status', role: 'status' });
   const line = h('div', { class: 'rd-line', 'aria-hidden': 'true' }, h('i'));
   const quoteText = h('span');
-  const quoteButton = h('button', { type: 'button', class: 'rd-quote', onclick: quote }, h('span', { 'aria-hidden': 'true' }, '❝'), quoteText);
+  const quoteButton = h('button', { type: 'button', class: 'rd-quote', onclick: quote }, icon('quote'), quoteText);
   // the bar over a selection: a colour makes a highlight, 💬 a highlight with a comment, ❝ a quote in the note
   const swatches = MARK_COLORS.map((color) => h('button', { type: 'button', class: 'rd-swatch', 'data-color': color, onclick: () => addMark(color) }));
   const commentText = h('span');
   const commentButton = h(
     'button',
     { type: 'button', class: 'rd-sel-btn', onclick: () => addMark(MARK_COLORS[0], { comment: true }) },
-    h('span', { 'aria-hidden': 'true' }, '💬'),
+    icon('comment'),
     commentText,
   );
   const translateText = h('span');
   // a bookmark at the selected passage, its words kept with it (addBookmark)
-  const bookmarkSelButton = h('button', { type: 'button', class: 'rd-sel-btn rd-sel-icon', onclick: () => addBookmark() }, h('span', { 'aria-hidden': 'true' }, '🔖'));
-  const translateButton = h('button', { type: 'button', class: 'rd-sel-btn', onclick: () => translateSelection() }, h('span', { 'aria-hidden': 'true' }, '🌐'), translateText);
+  const bookmarkSelButton = h('button', { type: 'button', class: 'rd-sel-btn rd-sel-icon', onclick: () => addBookmark() }, icon('bookmark'));
+  const translateButton = h('button', { type: 'button', class: 'rd-sel-btn', onclick: () => translateSelection() }, icon('translate'), translateText);
   const copyText = h('span');
-  const copyButton = h('button', { type: 'button', class: 'rd-sel-btn', onclick: () => copySelected() }, h('span', { 'aria-hidden': 'true' }, '⧉'), copyText);
+  const copyButton = h('button', { type: 'button', class: 'rd-sel-btn', onclick: () => copySelected() }, icon('copy'), copyText);
   const selBar = h(
     'div',
     { class: 'rd-selbar', hidden: true, role: 'toolbar' },
@@ -251,17 +257,17 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     const marks = liveMarks(doc).length + liveBookmarks(doc).length + liveTexts(doc).length;
     sheet.replaceChildren(
       h('div', { class: 'rd-acts-title' }, h('span', { class: 'rd-acts-name' }, nameOf(doc)), doc.author ? h('span', { class: 'rd-acts-sub' }, doc.author) : null),
-      row(`${t('reader.toc')} · ${t('library.progress', lastPct)}`, '☰', () => toggleToc(true)),
-      row(t('reader.fab.find'), '⌕', () => finder.open()),
+      row(`${t('reader.toc')} · ${t('library.progress', lastPct)}`, icon('contents'), () => toggleToc(true)),
+      row(t('reader.fab.find'), icon('find'), () => finder.open()),
       row(t('appearance.quick'), 'AA', () => toggleView(true)),
       h(
         'div',
         { class: 'rd-acts-rounds' },
-        round(t('reader.back'), '←', () => closeReader()),
-        round(t('reader.bookmarks.add'), '🔖', () => addBookmark()),
-        round(`${t('reader.marks.list')}${marks ? ` (${marks})` : ''}`, '✎', () => toggleMarks(true)),
+        round(t('reader.back'), icon('back'), () => closeReader()),
+        round(t('reader.bookmarks.add'), icon('bookmark'), () => addBookmark()),
+        round(`${t('reader.marks.list')}${marks ? ` (${marks})` : ''}`, icon('marks'), () => toggleMarks(true)),
         pdf ? round(t('reader.texts.button'), 'T', () => setPlacing(true)) : null,
-        round(t('reader.more'), '⋯', () => openMore(fab)),
+        round(t('reader.more'), icon('more'), () => openMore(fab)),
       ),
     );
     sheet.hidden = false;
@@ -405,8 +411,20 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
 
   const nameOf = (doc) => doc.title || doc.name;
 
+  /** The part of a book in its series, as a short label: "3", "2.5"; '' when it has none. */
+  const partOf = (doc) => (Number.isFinite(doc.seriesNo) ? String(doc.seriesNo) : '');
+  /** The part after the last one a series has: 1 for a series with none numbered. */
+  const nextPart = (name, except = null) => {
+    const parts = docs.filter((d) => d !== except && inSeries(d, name) && Number.isFinite(d.seriesNo)).map((d) => d.seriesNo);
+    return parts.length ? Math.floor(Math.max(...parts)) + 1 : 1;
+  };
+
   function card(doc) {
     const pct = Math.round((doc.progress || 0) * 100);
+    const inFolder = activeSeries !== null;
+    const part = partOf(doc);
+    // the series under the title (not inside the series itself: there the part is on the cover)
+    const seriesLine = doc.series && !inFolder ? h('span', { class: 'lib-card-series' }, icon('series'), h('span', {}, part ? t('library.series.line', doc.series, part) : doc.series)) : null;
     const state = doc.finished || pct >= 99 ? t('library.finished') : !doc.opened ? t('library.notOpened') : t('library.progress', pct);
     const more = h('button', { type: 'button', class: 'lib-more', title: t('library.actions'), 'aria-label': t('library.actions') }, '⋯');
     const cover = doc.cover
@@ -417,9 +435,18 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     const li = h(
       'li',
       { class: 'lib-card', tabindex: '0', role: 'button', 'data-id': doc.id },
-      h('span', { class: 'lib-cover' }, cover, h('span', { class: 'lib-format' }, doc.format.toUpperCase()), bar),
+      h(
+        'span',
+        { class: 'lib-cover' },
+        cover,
+        h('span', { class: 'lib-format' }, doc.format.toUpperCase()),
+        inFolder && part ? h('span', { class: 'lib-part', title: t('library.series.part', part) }, part) : null,
+        bar,
+      ),
+      inFolder && part ? h('span', { class: 'lib-card-part' }, t('library.series.part', part)) : null,
       h('span', { class: 'lib-card-title' }, nameOf(doc)),
       doc.author ? h('span', { class: 'lib-card-author' }, doc.author) : null,
+      seriesLine,
       h('span', { class: 'lib-card-state' }, state),
       more,
     );
@@ -428,6 +455,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
         { icon: '↗', text: t('library.read'), run: () => read(doc.id) },
         { icon: doc.finished ? '○' : '✓', text: t(doc.finished ? 'library.markUnread' : 'library.markRead'), run: () => onShelf(() => toggleFinished(doc)) },
         { icon: '▤', text: t('library.moveToShelf'), run: () => moveMenu(doc, x, y) },
+        { icon: '❐', text: t(doc.series ? 'library.series.edit' : 'library.series.add'), run: () => askSeries(doc) },
         // Apocrypha (src/apocrypha): the book goes to the shared library, after a warning and a tick
         onShare ? { icon: '⇪', text: t('apocrypha.share'), run: () => onShare(doc) } : null,
         '-',
@@ -454,29 +482,95 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     return li;
   }
 
+  /**
+   * A series on the shelf: one card like a folder (the WinRAR kind, a folder with books in it), its
+   * first covers fanned inside, how many books. Opened, it lists them by part.
+   */
+  function seriesCard(folder) {
+    const covers = folder.docs.slice(0, 3).map((doc, i) =>
+      h('span', { class: `lib-folder-book b${i}` }, doc.cover ? h('img', { src: doc.cover, alt: '' }) : h('span', { class: 'lib-folder-blank' }, nameOf(doc))),
+    );
+    const read = folder.docs.filter((d) => d.finished || (d.progress || 0) >= 0.99).length;
+    const more = h('button', { type: 'button', class: 'lib-more', title: t('library.actions'), 'aria-label': t('library.actions') }, '⋯');
+    const li = h(
+      'li',
+      { class: 'lib-card lib-series', tabindex: '0', role: 'button', 'data-series': folder.series, 'aria-label': t('library.series.open', folder.series) },
+      h(
+        'span',
+        { class: 'lib-cover lib-folder' },
+        h('span', { class: 'lib-folder-back', 'aria-hidden': 'true' }),
+        ...covers.reverse(),
+        h('span', { class: 'lib-folder-front', 'aria-hidden': 'true' }),
+        h('span', { class: 'lib-folder-mark' }, icon('series'), h('span', {}, t('library.series.kind'))),
+      ),
+      h('span', { class: 'lib-card-title' }, folder.series),
+      h('span', { class: 'lib-card-author' }, count(folder.docs.length, 'book')),
+      h('span', { class: 'lib-card-state' }, read ? t('library.series.read', read, folder.docs.length) : t('library.notOpened')),
+      more,
+    );
+    const open = () => openSeries(folder.series);
+    li.addEventListener('click', (e) => {
+      if (!e.target.closest('.lib-more')) open();
+    });
+    li.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        open();
+      }
+    });
+    li.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      seriesMenu(folder.series, e.clientX, e.clientY);
+    });
+    more.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const r = more.getBoundingClientRect();
+      seriesMenu(folder.series, r.left, r.bottom + 4);
+    });
+    return li;
+  }
+
+  /** What a card on the shelf is, for moving it to its new place (motion.js, flip). */
+  const cardKey = (el) => el.dataset.id || (el.dataset.series ? `series:` : '');
+
+  /** Books as the shelf shows them: each series folded into one folder card. */
+  const shelfCards = (list) => foldSeries(list).map((item) => (item.doc ? card(item.doc) : seriesCard(item)));
+
   function render() {
     const q = filter.value.trim().toLowerCase();
     const list = shelfList(shelves, docs);
     if (activeShelf !== null && !list.includes(activeShelf)) activeShelf = null;
+    if (activeSeries !== null && !docs.some((d) => inSeries(d, activeSeries))) activeSeries = null;
     drawChips(list);
     counter.textContent = docs.length ? String(docs.length) : '';
     pockets.replaceChildren();
     looseHead.hidden = true;
     emptyNote.hidden = true;
+    seriesHead.hidden = true;
+    chips.hidden = false;
+    shelf.classList.toggle('in-series', activeSeries !== null && !q);
     const newest = (a, b) => (b.opened || b.added) - (a.opened || a.added);
     if (q) {
-      // a search looks through every section
-      grid.replaceChildren(...[...docs].sort(newest).filter((d) => `${d.title} ${d.author} ${d.name} ${d.shelf ?? ''}`.toLowerCase().includes(q)).map(card));
+      // a search looks through every section and series; a series found by its name shows as its folder
+      const found = [...docs].sort(newest).filter((d) => searchText(d).includes(q));
+      const named = new Set(seriesNames(found).filter((name) => name.toLowerCase().includes(q)).map((name) => name.toLowerCase()));
+      const folded = foldSeries(found).flatMap((item) => (item.doc ? [card(item.doc)] : named.has(item.series.toLowerCase()) ? [seriesCard({ ...item, docs: seriesOrder(docs.filter((d) => inSeries(d, item.series))) })] : item.docs.map(card)));
+      grid.replaceChildren(...folded);
+    } else if (activeSeries !== null) {
+      const books = seriesOrder(docs.filter((d) => inSeries(d, activeSeries)));
+      drawSeriesHead(books);
+      chips.hidden = true;
+      grid.replaceChildren(...books.map(card));
     } else if (activeShelf === null) {
       const { groups, unsorted } = groupShelves(list, docs);
       const full = groups.filter((g) => g.docs.length);
       pockets.replaceChildren(...full.map(pocket));
-      grid.replaceChildren(...unsorted.map(card));
+      grid.replaceChildren(...shelfCards(unsorted));
       looseHead.textContent = t('library.unsorted');
       looseHead.hidden = !full.length || !unsorted.length;
     } else {
       const inShelf = docs.filter((d) => isShelf(d, activeShelf)).sort(newest);
-      grid.replaceChildren(...inShelf.map(card));
+      grid.replaceChildren(...shelfCards(inShelf));
       if (!inShelf.length && docs.length) {
         emptyNote.textContent = t('library.shelfEmpty', activeShelf);
         emptyNote.hidden = false;
@@ -486,12 +580,16 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       emptyNote.textContent = t(phone ? 'library.emptyPhone' : 'library.empty');
       emptyNote.hidden = false;
     }
+    // the first time the shelf shows after opening, the covers come in one after another
+    stagger(pockets, 'open', { step: 50, max: 6 });
+    stagger(grid, 'open', { step: 45 });
   }
 
   // ---------- sections ----------
 
   function showAllBooks() {
     activeShelf = null;
+    activeSeries = null;
     filter.value = '';
     setSearching(false);
     render();
@@ -574,8 +672,9 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
           'aria-selected': String(activeShelf === name),
           onclick: () => {
             activeShelf = name;
+            activeSeries = null;
             filter.value = '';
-            render();
+            flip(grid, cardKey, render);
           },
         },
         label,
@@ -606,8 +705,10 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
         type: 'button',
         class: 'lib-pocket',
         onclick: () => {
-          activeShelf = group.name;
-          render();
+          navigate('forward', () => {
+            activeShelf = group.name;
+            render();
+          });
         },
       },
       h('span', { class: 'lib-pocket-stack', 'aria-hidden': 'true' }, ...covers.reverse(), h('span', { class: 'lib-pocket-glass' })),
@@ -621,11 +722,11 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   }
 
   /** A name for a section, asked in a small dialog; null when cancelled. */
-  function askName({ title, value = '' }) {
+  function askName({ title, value = '', max = 60 }) {
     return new Promise((resolve) => {
       openDialog(
         (box, close) => {
-          const input = h('input', { class: 'field', type: 'text', maxlength: '60', 'data-autofocus': true, 'aria-label': title });
+          const input = h('input', { class: 'field', type: 'text', maxlength: String(max), 'data-autofocus': true, 'aria-label': title });
           input.value = value;
           const done = () => close(input.value);
           input.addEventListener('keydown', (e) => {
@@ -747,6 +848,207 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     ]);
   }
 
+  // ---------- series ----------
+
+  function openSeries(name) {
+    navigate('forward', () => {
+      activeSeries = name;
+      filter.value = '';
+      setSearching(false);
+      render();
+      shelf.querySelector('.lib-body')?.scrollTo?.({ top: 0 });
+    });
+  }
+
+  function closeSeries() {
+    navigate('back', () => {
+      activeSeries = null;
+      render();
+    });
+  }
+
+  /** Over a series' books: the folder, its name, how many, and its menu. */
+  function drawSeriesHead(books) {
+    const more = h('button', { type: 'button', class: 'tb-btn icon lib-series-more', title: t('library.actions'), 'aria-label': t('library.actions') }, icon('more'));
+    more.addEventListener('click', () => {
+      const r = more.getBoundingClientRect();
+      seriesMenu(activeSeries, r.left, r.bottom + 4);
+    });
+    const shelfName = books.find((d) => d.shelf)?.shelf;
+    seriesHead.replaceChildren(
+      h('span', { class: 'lib-series-icon', 'aria-hidden': 'true' }, icon('series')),
+      h(
+        'span',
+        { class: 'lib-series-text' },
+        h('b', {}, activeSeries),
+        h('span', {}, [count(books.length, 'book'), shelfName].filter(Boolean).join(' · ')),
+      ),
+      more,
+    );
+    seriesHead.hidden = false;
+  }
+
+  function seriesMenu(name, x, y) {
+    const books = () => docs.filter((d) => inSeries(d, name));
+    showMenu(x, y, [
+      { header: name },
+      { icon: '↗', text: t('library.series.openShort'), run: () => openSeries(name) },
+      {
+        icon: '✎',
+        text: t('library.series.rename'),
+        run: () =>
+          onShelf(async () => {
+            const to = cleanSeries(await askName({ title: t('library.series.rename'), value: name, max: 120 }));
+            if (!to || to === name) return;
+            for (const doc of books()) await setSeries(doc, to, doc.seriesNo ?? null, { quiet: true });
+            if (activeSeries !== null) activeSeries = to;
+            render();
+          }),
+      },
+      { icon: '▤', text: t('library.moveToShelf'), run: () => moveSeriesMenu(name, x, y) },
+      '-',
+      {
+        icon: '✕',
+        text: t('library.series.ungroup'),
+        className: 'danger',
+        run: () =>
+          onShelf(async () => {
+            const inside = books();
+            const ok = await confirmDialog({
+              kicker: t('library.title'),
+              title: t('library.series.ungroupTitle', name),
+              text: t('library.series.ungroupText', count(inside.length, 'book')),
+              ok: t('library.series.ungroupOk'),
+            });
+            if (!ok) return;
+            for (const doc of inside) await setSeries(doc, '', null, { quiet: true });
+            activeSeries = null;
+            render();
+          }),
+      },
+    ]);
+  }
+
+  /** The whole series to a section: every book of it goes there. */
+  function moveSeriesMenu(name, x, y) {
+    const books = docs.filter((d) => inSeries(d, name));
+    const list = shelfList(shelves, docs);
+    const all = (shelfName) => books.every((d) => (shelfName ? isShelf(d, shelfName) : !d.shelf));
+    const move = (shelfName) =>
+      onShelf(async () => {
+        for (const doc of books) await setShelf(doc, shelfName, { quiet: true });
+        render();
+        toast(shelfName ? t('library.moved', name, shelfName) : t('library.unshelved', name));
+      });
+    showMenu(x, y, [
+      { header: t('library.moveTo') },
+      ...list.map((shelfName) => ({ icon: all(shelfName) ? '✓' : '', text: shelfName, run: () => move(shelfName) })),
+      { icon: all('') ? '✓' : '', text: t('library.noShelf'), run: () => move('') },
+      '-',
+      {
+        icon: '＋',
+        text: t('library.newShelf'),
+        run: async () => {
+          const shelfName = await newShelf();
+          if (shelfName) await move(shelfName);
+        },
+      },
+    ]);
+  }
+
+  async function setSeries(doc, name, no, { quiet = false } = {}) {
+    doc.series = name;
+    doc.seriesNo = name ? no : null;
+    try {
+      await lib.update(doc.id, { series: doc.series, seriesNo: doc.seriesNo });
+    } catch (err) {
+      toast(err.message);
+    }
+    if (!quiet) render();
+  }
+
+  /**
+   * Which series a book is in and which part it is: a name (one already on the shelf can be picked)
+   * and a number. The book's own section goes along: a book joining a series moves to where the series is.
+   */
+  function askSeries(doc) {
+    const names = seriesNames(docs);
+    const listId = `lib-series-names-${doc.id}`;
+    openDialog(
+      (box, close) => {
+        const nameInput = h('input', { class: 'field', type: 'text', maxlength: '120', list: listId, 'data-autofocus': true, autocomplete: 'off', placeholder: t('library.series.namePlaceholder'), 'aria-label': t('library.series.name') });
+        nameInput.value = doc.series || '';
+        const noInput = h('input', { class: 'field lib-series-no', type: 'text', inputmode: 'decimal', maxlength: '8', placeholder: t('library.series.noPlaceholder'), 'aria-label': t('library.series.no') });
+        noInput.value = partOf(doc);
+        // a suggested part: the next after the last of the series picked
+        const suggest = () => {
+          if (noInput.value.trim()) return;
+          noInput.placeholder = cleanSeries(nameInput.value) ? String(nextPart(nameInput.value, doc)) : t('library.series.noPlaceholder');
+        };
+        nameInput.addEventListener('input', suggest);
+        const pick = (name) =>
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'lib-series-pick',
+              onclick: () => {
+                nameInput.value = name;
+                suggest();
+                noInput.focus();
+              },
+            },
+            icon('series'),
+            h('span', {}, name),
+          );
+        const done = () => {
+          const name = cleanSeries(nameInput.value);
+          const typed = noInput.value.trim() || (name ? noInput.placeholder : '');
+          close({ name, no: name ? seriesNumber(typed) : null });
+        };
+        for (const input of [nameInput, noInput]) {
+          input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              done();
+            }
+          });
+        }
+        box.append(
+          h('div', { class: 'modal-kicker' }, t('library.title')),
+          h('h2', { class: 'modal-title' }, t('library.series.title')),
+          h('p', { class: 'modal-text lib-series-book' }, nameOf(doc)),
+          h('label', { class: 'lib-series-field' }, h('span', {}, t('library.series.name')), nameInput),
+          h('datalist', { id: listId }, ...names.map((name) => h('option', { value: name }))),
+          names.length ? h('div', { class: 'lib-series-picks' }, ...names.slice(0, 8).map(pick)) : null,
+          h('label', { class: 'lib-series-field' }, h('span', {}, t('library.series.no')), noInput),
+          h('p', { class: 'lib-series-hint' }, t('library.series.hint')),
+          h(
+            'div',
+            { class: 'modal-actions' },
+            doc.series ? h('button', { type: 'button', class: 'btn danger-text', onclick: () => close({ name: '', no: null }) }, t('library.series.leave')) : null,
+            h('button', { type: 'button', class: 'btn', onclick: () => close(null) }, t('dialog.cancel')),
+            h('button', { type: 'button', class: 'btn primary', onclick: done }, t('library.save')),
+          ),
+        );
+        suggest();
+      },
+      {
+        onClose: (v) => {
+          if (!v || typeof v !== 'object') return;
+          onShelf(async () => {
+            // joining a series that lies in a section: the book goes there too, so the folder stays whole
+            const home = v.name ? docs.find((d) => d !== doc && inSeries(d, v.name))?.shelf : undefined;
+            if (home !== undefined && (doc.shelf || '') !== (home || '')) await setShelf(doc, home || '', { quiet: true });
+            await setSeries(doc, v.name, v.no, { quiet: true });
+            render();
+            toast(v.name ? t('library.series.joined', nameOf(doc), v.name) : t('library.series.left', nameOf(doc)));
+          });
+        },
+      },
+    );
+  }
+
   async function toggleFinished(doc) {
     doc.finished = !doc.finished;
     try {
@@ -775,11 +1077,13 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   }
 
   async function open({ shelf: section } = {}) {
+    restagger(grid);
     localize();
     cover(true);
     await refresh();
     await loadShelves();
     if (section !== undefined) activeShelf = section;
+    activeSeries = null;
     render();
     (grid.querySelector('.lib-card') ?? addButton).focus({ preventScroll: true });
   }
@@ -829,7 +1133,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
         const info = await code.inspect(file.name, new Uint8Array(await file.arrayBuffer()));
         let doc = await lib.add(file, { name: file.name, format: info.format });
         // a book added while a section is open goes into it
-        doc = await lib.update(doc.id, { title: info.title || '', author: info.author || '', cover: info.cover ?? null, ...(activeShelf && !shelf.hidden ? { shelf: activeShelf } : {}) });
+        doc = await lib.update(doc.id, { title: info.title || '', author: info.author || '', cover: info.cover ?? null, ...(activeShelf && !shelf.hidden ? { shelf: activeShelf } : {}), ...(activeSeries !== null && !shelf.hidden ? { series: activeSeries, seriesNo: nextPart(activeSeries) } : {}) });
         docs.push(doc);
         out.push(doc);
         added++;
@@ -1256,8 +1560,11 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     if (show) tocPanel.querySelector('button')?.focus({ preventScroll: true });
   }
 
-  // a selection inside the document offers a highlight, a comment or a quote
-  document.addEventListener('selectionchange', () => {
+  // a selection inside the document offers a highlight, a comment or a quote. Looked at on every change
+  // of the selection, and again when the finger lifts (a phone's long press and its handles)
+  document.addEventListener('selectionchange', checkSelection);
+  for (const type of ['touchend', 'pointerup', 'contextmenu']) scroll.addEventListener(type, () => setTimeout(checkSelection, 60), { passive: true });
+  function checkSelection() {
     if (!reading?.controller) return hideSelBar();
     const sel = document.getSelection();
     if (sel && !sel.isCollapsed && sel.rangeCount && scroll.contains(sel.anchorNode) && sel.toString().trim()) {
@@ -1267,7 +1574,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       keepNearSelection(sel);
       closeMark();
     } else if (!selBar.contains(document.activeElement)) hideSelBar();
-  });
+  }
 
   function hideSelBar() {
     selBar.hidden = true;
@@ -1282,18 +1589,28 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
    * The bar beside the selection, never over it: above its first line when there is room, else under
    * its last one (past the handle), else at the foot of the screen.
    */
-  function placeSelBar(range) {
-    const box = range.getBoundingClientRect();
-    const barH = selBar.offsetHeight || 56;
-    const top = parseFloat(getComputedStyle(scroll).paddingTop) || 0;
-    const room = scroll.getBoundingClientRect();
+  function placeSelBar() {
+    // at the foot of the screen, always: the phone puts its own Copy / Share menu by the selection, above
+    // it, and a bar there would hide under that menu
     selBar.classList.remove('rd-selbar-top');
     selBar.style.top = '';
     selBar.style.bottom = '';
-    if (box.top - barH - 14 > room.top + top + 8) selBar.style.top = `${Math.round(box.top - barH - 14)}px`;
-    else if (box.bottom + 46 + barH < innerHeight - 8) selBar.style.top = `${Math.round(box.bottom + 46)}px`;
-    if (selBar.style.top) selBar.style.bottom = 'auto';
   }
+
+  /** Words of the reader's own (a mark, a bookmark, a text on a page) to the clipboard. */
+  async function copyWords(text) {
+    if (!text?.trim()) return;
+    try {
+      await api.copy(text.trim());
+      toast(t('reader.copied'), { timeout: 1500 });
+    } catch {
+      toast(t('clipboard.blocked', 'Ctrl+C'));
+    }
+  }
+  const markWords = (mark) => (mark.note?.trim() ? `${mark.text}\n\n💬 ${mark.note.trim()}` : mark.text);
+  /** A small ⧉ at the end of a row in the list of marks and bookmarks. */
+  const copyRowButton = (text) =>
+    h('button', { type: 'button', class: 'rd-bm-remove rd-row-copy', title: t('reader.copy'), 'aria-label': t('reader.copy'), onclick: (e) => (e.stopPropagation(), copyWords(text)) }, icon('copy'));
 
   // Scrolling a book lays out only the pieces near the screen (content-visibility); the pieces around
   // the selection stay laid out while it lasts, so its start does not jump when the page moves under it.
@@ -1658,6 +1975,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
         'div',
         { class: 'rd-mark-actions' },
         toNote,
+        h('button', { type: 'button', class: 'tb-btn', onclick: () => copyWords(markWords(mark)) }, icon('copy'), t('reader.copy')),
         h('button', { type: 'button', class: 'tb-btn rd-mark-remove', onclick: () => removeMark(mark.id) }, t('reader.marks.remove')),
         h('button', { type: 'button', class: 'tb-btn accent', onclick: () => closeMark() }, t('reader.marks.done')),
       ),
@@ -1827,6 +2145,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       h(
         'div',
         { class: 'rd-mark-actions' },
+        h('button', { type: 'button', class: 'tb-btn', onclick: () => copyWords(item.text) }, icon('copy'), t('reader.copy')),
         h('button', { type: 'button', class: 'tb-btn rd-mark-remove', onclick: () => removeText(item.id) }, t('reader.texts.remove')),
         h('button', { type: 'button', class: 'tb-btn accent', onclick: () => closeText() }, t('reader.marks.done')),
       ),
@@ -2323,13 +2642,14 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
           h('span', { class: 'rd-bm-icon', 'aria-hidden': 'true' }, '🔖'),
           h('span', { class: 'rd-marks-body' }, h('span', { class: 'rd-marks-text' }, b.label), b.snippet ? h('span', { class: 'rd-marks-where' }, b.snippet) : null),
         ),
+        copyRowButton(b.snippet ? `${b.label}\n${b.snippet}` : b.label),
         h('button', { type: 'button', class: 'rd-bm-remove', title: t('reader.bookmarks.remove'), 'aria-label': t('reader.bookmarks.remove'), onclick: () => removeBookmark(b.id) }, '✕'),
       ),
     );
     const markItem = (mark) =>
       h(
         'li',
-        { class: 'rd-marks-item' },
+        { class: 'rd-marks-item rd-has-copy' },
         h(
           'button',
           { type: 'button', 'data-color': mark.color, onclick: () => showMark(mark.id) },
@@ -2342,6 +2662,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
             mark.where ? h('span', { class: 'rd-marks-where' }, mark.where) : null,
           ),
         ),
+        copyRowButton(markWords(mark)),
       );
     // by colour: a heading for each colour that has marks, in the order of the swatches
     const markItems = marksByColor
@@ -2366,13 +2687,14 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     const textItems = (doc ? sortTexts(liveTexts(doc).filter((x) => x.text.trim())) : []).map((item) =>
       h(
         'li',
-        { class: 'rd-marks-item rd-text-item' },
+        { class: 'rd-marks-item rd-text-item rd-has-copy' },
         h(
           'button',
           { type: 'button', 'data-color': item.color, onclick: () => showText(item.id) },
           h('span', { class: 'rd-text-icon', 'aria-hidden': 'true' }, 'T'),
           h('span', { class: 'rd-marks-body' }, h('span', { class: 'rd-marks-text' }, item.text), h('span', { class: 'rd-marks-where' }, t('reader.pageN', item.page))),
         ),
+        copyRowButton(item.text),
       ),
     );
     const rows = [

@@ -8,6 +8,7 @@ import { t } from './i18n.js';
 import { apply, heading, lineMark, link, rule, wrap } from './format.js';
 import { insertCodeBlock } from './editor.js';
 import { insertAccordionBlock } from './accordionView.js';
+import { hasIcon, icon } from './icons.js';
 
 /** Every button the bar can have. */
 export const TOOLS = [
@@ -44,23 +45,37 @@ export function normalizeTools(list) {
 }
 
 /**
- * The bar. getView(): the editor's view; actions.image(): a picture chosen and put in. Buttons never
- * take the focus, so the keyboard stays up.
+ * The bar at the foot: one row that scrolls sideways (a carousel) with everything a note has: the kind
+ * of paragraph, the marks, blocks, pictures and links, and what the ⋯ menu holds (copy, tags, versions,
+ * statistics, the editor's mode, export, clearing). A pressed button stays lit while it is on: a mark
+ * with nothing selected stays on for the words written next until it is pressed again. Holding a button
+ * shows what it does. Buttons never take the focus, so the keyboard stays up.
+ *
+ * actions: image(), copy(), note(id) for the note's own tools, mode() → 'visual' | 'source'.
  */
 export function createFormatBar({ getView, actions = {} }) {
-  const node = h('div', { class: 'format-bar', role: 'toolbar', hidden: true });
+  const node = h('div', { class: 'format-bar visual-format-bar', role: 'toolbar', hidden: true });
+  const strip = h('div', { class: 'format-strip' });
+  const tip = h('div', { class: 'format-tip', role: 'tooltip', hidden: true });
+  node.append(strip);
+  document.body.append(tip);
   let tools = [...DEFAULT_TOOLS];
-  let typeButton, insertButton;
+  let editing = true;
 
   function run(id) {
+    hideTip();
+    if (NOTE_TOOLS.has(id)) { actions.note?.(id); return; }
     const view = getView(); if (!view) return;
     if (id === 'image') { actions.image?.(); return; }
     if (id === 'copy') { actions.copy?.(); return; }
     if (id === 'keyboard') { view.contentDOM.blur(); return; }
     if (view.rich) {
       if (id === 'link') { askLink(view); return; }
-      view.rich.command(id); view.focus(); refresh();
-    } else BY_ID.get(id)?.run(view, actions);
+      view.rich.toggle(id); view.focus(); refresh();
+    } else {
+      (SOURCE_RUN[id] ?? BY_ID.get(id)?.run)?.(view, actions);
+      view.focus();
+    }
   }
   function askLink(view) {
     openDialog((box, close) => {
@@ -70,57 +85,102 @@ export function createFormatBar({ getView, actions = {} }) {
       field.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); save.click(); } });
     }, { onClose: () => view.focus() });
   }
-  function menu(anchor, items) {
+  /** The insert menu, for the ⋯ menu of a computer's window (app.js). */
+  function insertMenu(anchor) {
+    const rich = getView()?.rich;
+    const items = ['accordion', 'task', 'bullet', 'numbered', 'quote', 'image', 'link', 'rule', 'codeblock'].map((id) => ({ icon: hasIcon(id) ? icon(id) : BY_ID.get(id)?.glyph || '＋', text: t(`format.tools.${id}`), run: () => run(id) }));
+    if (rich) items.push('-', { icon: icon('next'), text: t('rich.nextItem'), disabled: !rich.formats().inList, run: () => run('next') }, { icon: icon('newline'), text: t('rich.innerLine'), run: () => run('newline') }, { icon: icon('after'), text: t('rich.afterBlock'), run: () => run('after') });
     const rect = anchor.getBoundingClientRect();
     showMenu(rect.right, rect.top, items, { onClose: () => getView()?.focus(), above: rect.top > innerHeight / 2, preserveFocus: matchMedia('(pointer: coarse)').matches });
   }
-  function blockMenu() {
-    menu(typeButton, ['paragraph', 'h1', 'h2', 'h3', 'bullet', 'numbered', 'task', 'quote', 'codeblock'].map((id) => ({ text: id === 'paragraph' ? t('rich.paragraph') : t(`format.tools.${id}`), run: () => run(id) })));
+
+  const label = (id) => (id === 'mode' ? t(actions.mode?.() === 'source' ? 'rich.visual' : 'rich.source') : t(LABEL_KEYS[id] ?? `format.tools.${id}`));
+
+  // ---- holding a button: a small card says what it does ----
+  let holdTimer = 0, tipTimer = 0, held = false, start = null;
+  function showTip(button) {
+    const id = button.dataset.tool;
+    tip.replaceChildren(h('strong', {}, label(id)), h('span', {}, t(`format.hints.${id}`)));
+    tip.hidden = false;
+    // measured at the left edge first: placed further right, a fixed box would shrink to the room left
+    tip.style.left = '0px';
+    tip.style.top = '0px';
+    const box = button.getBoundingClientRect();
+    const width = tip.offsetWidth;
+    tip.style.left = `${Math.round(Math.min(Math.max(8, box.left + box.width / 2 - width / 2), innerWidth - width - 8))}px`;
+    tip.style.top = `${Math.round(Math.max(8, box.top - tip.offsetHeight - 10))}px`;
   }
-  function insertMenu(anchor = insertButton) {
-    const rich = getView()?.rich;
-    const items = ['accordion', 'task', 'bullet', 'numbered', 'quote', 'image', 'link', 'rule', 'codeblock'].map((id) => ({ icon: BY_ID.get(id)?.glyph || '＋', text: t(`format.tools.${id}`), run: () => run(id) }));
-    if (rich) items.push('-', { icon: '↳', text: t('rich.nextItem'), disabled: !rich.formats().inList, run: () => run('next') }, { icon: '↵', text: t('rich.innerLine'), run: () => run('newline') }, { icon: '¶', text: t('rich.afterBlock'), run: () => run('after') });
-    items.push('-', { icon: '⌨', text: t('format.tools.keyboard'), run: () => run('keyboard') });
-    menu(anchor, items);
+  function hideTip() {
+    clearTimeout(holdTimer);
+    clearTimeout(tipTimer);
+    tip.hidden = true;
   }
+  strip.addEventListener('pointerdown', (event) => {
+    const button = event.target.closest('button[data-tool]');
+    if (!button) return;
+    event.preventDefault(); // the editor keeps the focus (and the keyboard stays up)
+    hideTip();
+    held = false;
+    start = { x: event.clientX, y: event.clientY };
+    pressedAt = strip.scrollLeft;
+    holdTimer = setTimeout(() => { held = true; showTip(button); }, 450);
+  });
+  strip.addEventListener('pointermove', (event) => {
+    if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) { clearTimeout(holdTimer); start = null; }
+  });
+  for (const type of ['pointerup', 'pointercancel']) strip.addEventListener(type, () => {
+    clearTimeout(holdTimer);
+    start = null;
+    if (held) tipTimer = setTimeout(hideTip, 2500);
+  });
+  // the row moved under the finger (not just settling into place by a few pixels): no card
+  let pressedAt = 0;
+  strip.addEventListener('scroll', () => { if (Math.abs(strip.scrollLeft - pressedAt) > 6) hideTip(); }, { passive: true });
+  strip.addEventListener('contextmenu', (event) => event.preventDefault());
+  strip.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-tool]');
+    if (!button) return;
+    if (held) { held = false; return; } // a hold shows the card; it does not press the button
+    run(button.dataset.tool);
+  });
 
   function refresh() {
     const view = getView(), rich = view?.rich;
-    if (!typeButton) return;
     const state = rich?.formats();
-    const block = state?.block || 'paragraph';
-    const names = { paragraph: t('rich.paragraph'), heading: t(`format.tools.h${Math.min(3, state?.level || 1)}`), bullet_list: t('format.tools.bullet'), ordered_list: t('format.tools.numbered'), task_list: t('format.tools.task'), blockquote: t('format.tools.quote'), code_block: t('format.tools.codeblock'), summary: t('rich.summary') };
-    const shortName = block === 'heading' ? `H${state?.level || 1}` : names[block] || t('rich.paragraph');
-    typeButton.textContent = rich ? `${shortName} ▾` : 'Markdown ▾';
-    typeButton.setAttribute('aria-label', t('rich.blockType') + ': ' + (rich ? names[block] || t('rich.paragraph') : 'Markdown'));
-    typeButton.title = t('rich.blockType');
-    const markNames = { bold: 'strong', italic: 'em', underline: 'underline', strike: 'strike', code: 'code' };
-    for (const button of node.querySelectorAll('[data-format]')) {
-      const on = state?.marks.has(markNames[button.dataset.format]) || false;
-      button.classList.toggle('active', on); button.setAttribute('aria-pressed', String(on));
-      button.disabled = !view;
+    const sticky = rich?.sticky?.() ?? new Set();
+    const block = state?.block;
+    for (const button of strip.querySelectorAll('button[data-tool]')) {
+      const id = button.dataset.tool;
+      let on = false;
+      if (state) {
+        if (MARK_OF[id]) on = state.marks.has(MARK_OF[id]) || sticky.has(MARK_OF[id]);
+        else if (/^h[1-6]$/.test(id)) on = block === 'heading' && state.level === Number(id[1]);
+        else if (BLOCK_OF[id]) on = block === BLOCK_OF[id];
+      }
+      button.classList.toggle('active', on);
+      button.classList.toggle('sticky', Boolean(MARK_OF[id] && sticky.has(MARK_OF[id])));
+      if (TOGGLES.has(id)) button.setAttribute('aria-pressed', String(on));
+      button.hidden = !editing && !READING.has(id);
+      if (id === 'mode') {
+        button.replaceChildren(icon(actions.mode?.() === 'source' ? 'visual' : 'source'));
+        button.setAttribute('aria-label', label(id));
+        button.title = label(id);
+      }
     }
+    for (const group of strip.querySelectorAll('.format-group')) group.hidden = ![...group.children].some((child) => !child.hidden);
   }
 
   function draw() {
     node.setAttribute('aria-label', t('format.title'));
-    node.classList.add('visual-format-bar');
-    typeButton = h('button', { type: 'button', class: 'format-type', 'aria-label': t('rich.blockType'), 'aria-haspopup': 'menu', onclick: blockMenu }, t('rich.paragraph') + ' ▾');
-    insertButton = h('button', { type: 'button', class: 'format-insert', 'aria-label': t('rich.insertBlock'), 'aria-haspopup': 'menu', onclick: () => insertMenu() }, '＋ ', t('rich.insert'));
-    const preferred = tools.filter((id) => ['bold', 'italic', 'underline', 'strike', 'code'].includes(id));
-    const marks = [...new Set(preferred)];
-    const row = h('div', { class: 'format-inline-tools' }, marks.map((id) => {
-        const tool = BY_ID.get(id);
-        const button = h('button', { type: 'button', class: `format-btn format-${id}`, 'data-format': id, title: t(`format.tools.${id}`), 'aria-label': t(`format.tools.${id}`), 'aria-pressed': 'false' }, tool.glyph);
-        button.addEventListener('pointerdown', (e) => e.preventDefault());
-        button.addEventListener('click', () => run(id));
-        return button;
-      }));
-    // copying is always there: the selected words to the clipboard, the selection left as it was
-    const copyButton = h('button', { type: 'button', class: 'format-btn format-copy', title: t('format.tools.copy'), 'aria-label': t('format.tools.copy'), onclick: () => run('copy') }, '⧉');
-    for (const button of [typeButton, copyButton, insertButton]) button.addEventListener('pointerdown', (event) => event.preventDefault());
-    node.replaceChildren(typeButton, row, copyButton, insertButton);
+    const marks = new Set(tools.filter((id) => MARK_OF[id]));
+    strip.replaceChildren(...GROUPS.map((group) => h(
+      'div',
+      { class: `format-group format-group-${group.id}`, role: 'group', 'aria-label': t(`format.groups.${group.id}`) },
+      group.tools.filter((id) => !MARK_OF[id] || marks.has(id)).map((id) => {
+        const glyph = hasIcon(id) ? icon(id) : TEXT_GLYPH[id] ?? BY_ID.get(id)?.glyph ?? id;
+        return h('button', { type: 'button', class: `format-btn format-${id}${id === 'clear' ? ' danger' : ''}`, 'data-tool': id, title: label(id), 'aria-label': label(id) }, glyph);
+      }),
+    )));
     refresh();
   }
   draw();
@@ -131,11 +191,42 @@ export function createFormatBar({ getView, actions = {} }) {
       tools = normalizeTools(list);
       draw();
     },
+    /** Reading a note: only what does not write in it (copy, tags, versions, export…). */
+    setEditing(on) {
+      const changed = editing !== on;
+      editing = on;
+      refresh();
+      if (changed) strip.scrollLeft = 0; // writing starts at the text's tools, reading at the note's
+    },
     localize: draw,
     refresh,
     openInsert: (anchor) => insertMenu(anchor),
   };
 }
+
+const MARK_OF = { bold: 'strong', italic: 'em', underline: 'underline', strike: 'strike', code: 'code' };
+const BLOCK_OF = { paragraph: 'paragraph', bullet: 'bullet_list', numbered: 'ordered_list', task: 'task_list', quote: 'blockquote', codeblock: 'code_block' };
+const TOGGLES = new Set([...Object.keys(MARK_OF), ...Object.keys(BLOCK_OF), 'h1', 'h2', 'h3']);
+const NOTE_TOOLS = new Set(['paste', 'selectAll', 'copyAll', 'tag', 'tags', 'versions', 'stats', 'mode', 'md', 'txt', 'html', 'pdf', 'clear']);
+// what the bar keeps while a note is open for reading
+const READING = new Set(['copy', 'selectAll', 'copyAll', 'tags', 'versions', 'stats', 'mode', 'md', 'txt', 'html', 'pdf']);
+const LABEL_KEYS = { paste: 'menu.paste', selectAll: 'menu.selectAll', paragraph: 'rich.paragraph', copyAll: 'noteMenu.copyAll', tag: 'noteMenu.tag', tags: 'tags.title', versions: 'versions.title', stats: 'stats.title', md: 'noteMenu.md', txt: 'noteMenu.txt', html: 'noteMenu.html', pdf: 'noteMenu.pdf', clear: 'noteMenu.clear' };
+const TEXT_GLYPH = { md: 'MD', txt: 'TXT', html: 'HTML', pdf: 'PDF' };
+const GROUPS = [
+  { id: 'text', tools: ['paragraph', 'h1', 'h2', 'h3', 'bold', 'italic', 'underline', 'strike', 'code'] },
+  { id: 'blocks', tools: ['bullet', 'numbered', 'task', 'quote', 'codeblock', 'accordion', 'rule', 'indent', 'outdent'] },
+  { id: 'insert', tools: ['image', 'link'] },
+  { id: 'note', tools: ['copy', 'paste', 'selectAll', 'copyAll', 'tag', 'tags', 'versions', 'stats', 'mode'] },
+  { id: 'export', tools: ['md', 'txt', 'html', 'pdf'] },
+  { id: 'more', tools: ['keyboard', 'clear'] },
+];
+// Markdown source: a plain paragraph is a line without its heading mark (the same heading pressed again)
+const SOURCE_RUN = {
+  paragraph: (view) => {
+    const own = /^\s*(#{1,6})\s/.exec(view.state.doc.lineAt(view.state.selection.main.head).text);
+    if (own) apply(view, (s) => heading(s, own[1].length));
+  },
+};
 
 /** Which buttons the bar has, and in what order: switches and arrows. onSave(list). */
 export function openToolsDialog({ current, onSave }) {

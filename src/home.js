@@ -237,6 +237,13 @@ export function createTabBar(onPick, { without = [] } = {}) {
         b.lastChild.textContent = t(`home.tabs.${b.dataset.tab}`);
         b.setAttribute('aria-current', b.dataset.tab === tab ? 'page' : 'false');
       }
+      // the soft pill behind the chosen tab slides to it (styles.css, .tabbar::before)
+      const at = TABS.indexOf(tab);
+      node.style.setProperty('--tab-n', String(TABS.length));
+      if (at >= 0) {
+        node.style.setProperty('--tab-i', String(at));
+        delete node.dataset.none;
+      } else node.dataset.none = '';
     },
   };
 }

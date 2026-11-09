@@ -48,6 +48,48 @@ export function enterParagraph(state, dispatch) {
   return normalParagraph(state, dispatch);
 }
 
+/**
+ * Where Enter gives a new line instead of a new paragraph: a plain paragraph with words in it, also in a
+ * quote or an accordion. Not a list (Enter is the next item there), a heading, code or a table's cell.
+ */
+function lineHere(state) {
+  const { $from, node } = state.selection;
+  if (node || $from.parent.type !== state.schema.nodes.paragraph || !$from.parent.content.size || !$from.parentOffset) return false;
+  const around = $from.depth > 1 ? $from.node(-1).type.name : 'doc';
+  return !['list_item', 'task_item', 'table_cell', 'table_header'].includes(around);
+}
+
+/**
+ * Enter while writing: the next line of the same paragraph. A second Enter on the line just begun makes
+ * it the gap before a new paragraph instead (Markdown keeps no empty line inside a paragraph). Elsewhere
+ * Enter is what it was (enterParagraph).
+ */
+export function enterLine(state, dispatch) {
+  if (!lineHere(state)) return enterParagraph(state, dispatch);
+  const { $from, empty } = state.selection;
+  const { hard_break } = state.schema.nodes;
+  if (empty && $from.nodeBefore?.type === hard_break) {
+    const tr = state.tr.delete($from.pos - 1, $from.pos);
+    if (!composeCommand(state, tr, enterParagraph)) return false;
+    if (dispatch) dispatch(tr.setStoredMarks([]).scrollIntoView());
+    return true;
+  }
+  if (dispatch) dispatch(state.tr.replaceSelectionWith(hard_break.create()).scrollIntoView());
+  return true;
+}
+
+/** Shift+Enter: the other one of the two. A new paragraph where Enter gives a line; a line where it does not. */
+export function shiftEnter(state, dispatch) {
+  if (lineHere(state)) return enterParagraph(state, dispatch);
+  const { $from } = state.selection;
+  if ($from.parent.type === state.schema.nodes.code_block) {
+    if (dispatch) dispatch(state.tr.insertText('\n').scrollIntoView());
+    return true;
+  }
+  if (dispatch) dispatch(state.tr.replaceSelectionWith(state.schema.nodes.hard_break.create()).scrollIntoView());
+  return true;
+}
+
 export function nextItem(state, dispatch) {
   const { $from } = state.selection;
   let depth = $from.depth;
@@ -106,6 +148,39 @@ export function setParagraphType(name, attrs = null) {
     }
     return setBlockType(state.schema.nodes[name], attrs)(state, dispatch);
   };
+}
+
+/**
+ * Backspace and an accordion. At the start of its title: an empty accordion goes, one with words in it
+ * gives them back as plain paragraphs (title first). At the start of its body's first block, empty and
+ * alone: the cursor goes to the end of the title. Elsewhere: nothing (Backspace as usual).
+ */
+export function backspaceDetails(state, dispatch) {
+  const { $from, empty } = state.selection;
+  if (!empty || $from.parentOffset || $from.depth < 2) return false;
+  const { schema } = state;
+  if ($from.parent.type === schema.nodes.summary) {
+    const details = $from.node(-1);
+    const start = $from.before(-1);
+    const blocks = [];
+    if (details.firstChild.content.size) blocks.push(schema.nodes.paragraph.create(null, details.firstChild.content));
+    details.lastChild.forEach((block) => { if (block.content.size || block.type !== schema.nodes.paragraph) blocks.push(block); });
+    if (!blocks.length) blocks.push(schema.nodes.paragraph.create());
+    if (dispatch) {
+      const tr = state.tr.replaceWith(start, start + details.nodeSize, blocks);
+      tr.setSelection(TextSelection.near(tr.doc.resolve(start + 1)));
+      dispatch(tr.scrollIntoView());
+    }
+    return true;
+  }
+  if ($from.depth >= 3 && $from.node(-1).type === schema.nodes.details_content && $from.index(-1) === 0) {
+    const body = $from.node(-1);
+    if (body.childCount !== 1 || $from.parent.content.size) return false;
+    const summaryEnd = $from.before(-1) - 1;
+    if (dispatch) dispatch(state.tr.setSelection(TextSelection.create(state.doc, summaryEnd)).scrollIntoView());
+    return true;
+  }
+  return false;
 }
 
 export function insertDetails(title) {

@@ -4,6 +4,10 @@
 import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { android, api, rescue } from './bridge.js';
+import { icon } from './icons.js';
+import { fingerFirst } from './touch.js';
+import { flip, motionEnabled, navigate, setMotion, shared, stagger } from './motion.js';
+import { catsOn, catWords, isCatWords, restoreCats, setCats } from './cats.js';
 import { createLibrary } from './library.js';
 import { insertComment, insertCodeBlock, insertDictation, pasteText, codeLanguageAt, showDictationPreview, urlAt } from './editor.js';
 import { createEditor } from './noteEditor.js';
@@ -41,7 +45,7 @@ import welcomeAndroidText from './welcome-android.md';
 import welcomeTextEn from './welcome-en.md';
 import welcomeBrowserTextEn from './welcome-browser-en.md';
 import welcomeAndroidTextEn from './welcome-android-en.md';
-import { addReading, avatarNode, createTabBar, dayKey, drawHome, GOALS, shrinkPicture, streakOf } from './home.js';
+import { addReading, avatarNode, createTabBar, dayKey, drawHome, GOALS, shrinkPicture, streakOf, TABS } from './home.js';
 import { createNotesScreen } from './notesScreen.js';
 import { createApocryphaScreen } from './apocrypha/screen.js';
 import { createTrash } from './trash.js';
@@ -122,7 +126,10 @@ let writeLogTimer = 0;
 let pinLock = null; // this device's PIN, hashed (lock.js); null: none
 const lockScreen = createLock({ getLock: () => pinLock });
 const statsStrip = createStatsStrip({ onOpen: () => showWritingStats() });
-const formatBar = createFormatBar({ getView: () => editor?.view ?? null, actions: { image: () => pickImage(), copy: () => copyFromBar() } });
+const formatBar = createFormatBar({
+  getView: () => editor?.view ?? null,
+  actions: { image: () => pickImage(), copy: () => copyFromBar(), note: (id) => noteTool(id), mode: () => writing.editorMode },
+});
 const versionKept = new Map(); // note id → when a version of it was last kept in this window
 let lastStats = null; // the open note's textStats(), for the strip's pace updates in between
 let trashView = null; // the trash: deleted notes, documents and marks, until restored or deleted for good (trash.js)
@@ -151,9 +158,19 @@ const notesScreen = createNotesScreen({
   deleteNote: (id, options) => deleteNote(id, options),
   restoreNote: (id) => restoreNote(id),
   onOpen: (id) => {
-    hideNotes();
-    if (id !== currentId) openNote(id);
-    else editor.view.focus();
+    // the card grows into the editor: it and the editor's sheet share a name for the transition
+    const card = notesScreen.node.querySelector(`.notes-card[data-id="${CSS.escape(id)}"]`);
+    const sheet = $('#sheet');
+    const forget = shared(card ? [card] : [], () => 'm-hero');
+    navigate('up', async () => {
+      forget();
+      hideNotes();
+      if (id !== currentId) await openNote(id);
+      else editor.view.focus();
+      if (card && sheet) sheet.style.viewTransitionName = 'm-hero';
+    }).finally(() => {
+      if (sheet) sheet.style.viewTransitionName = '';
+    });
   },
   onCreate: (folder) => {
     hideNotes();
@@ -161,7 +178,17 @@ const notesScreen = createNotesScreen({
   },
   onBack: () => showHome(),
   onTrash: () => trashView?.open('notes'),
+  // the easter egg (cats.js): the words sent from the search turn the cat look on, or off again
+  onSearchEnter: (text) => {
+    if (!isCatWords(text)) return false;
+    catWords().then((on) => {
+      applyBars();
+      toast(t(on ? 'cats.on' : 'cats.off'), { timeout: 4500 });
+    });
+    return true;
+  },
 });
+restoreCats();
 
 let markReady;
 const ready = new Promise((resolve) => {
@@ -336,8 +363,8 @@ async function boot() {
   new MutationObserver(updateTabs).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
   readingClock = setInterval(countReading, 30_000);
   showAvatar();
-  await showHome();
-  if (android) receiveIncoming();
+  // sync and updates come before the main page is drawn (which waits for the library): the account
+  // tab has them as soon as the app is up
   sync = createSyncClient({
     api,
     h,
@@ -363,6 +390,8 @@ async function boot() {
     },
   });
   updater?.start();
+  await showHome();
+  if (android) receiveIncoming();
 }
 
 /** A sync round brought notes, cards or settings from another device: show them. */
@@ -479,8 +508,8 @@ function openLibrary({ pick = false } = {}) {
   if (!library) return;
   if (dictation?.listening) dictation.stop();
   flushSave();
-  if (pick) library.pickFiles();
-  else library.open();
+  if (pick) return library.pickFiles();
+  return library.open();
 }
 
 // In the browser build clearing the browser's data would take the notes with it, hence the nudge.
@@ -973,9 +1002,33 @@ function setWriting(patch) {
 /** The formatting bar shows while a note is written: on a phone, or everywhere if so chosen. */
 function showFormatBar() {
   const wanted = writing.formatBar === 'always' || (writing.formatBar === 'touch' && phone);
-  const show = wanted && editing;
+  // reading a note, the bar stays with what does not write in it (copy, tags, versions, export…)
+  const show = wanted && Boolean(currentId);
   formatBar.node.hidden = !show;
+  formatBar.setEditing(editing);
   $('#app').classList.toggle('formatting', show);
+}
+
+/** The note's own tools on the bar (they are also in the ⋯ menu). */
+function noteTool(id) {
+  if (!notes.get(currentId)) return;
+  const run = {
+    paste: () => editor && pasteFromClipboard(editor.view),
+    selectAll: selectAllNote,
+    copyAll,
+    tag: tagSelection,
+    tags: showTags,
+    versions: showVersions,
+    stats: showWritingStats,
+    mode: () => setWriting({ editorMode: writing.editorMode === 'source' ? 'visual' : 'source' }),
+    md: () => exportNote(currentId),
+    txt: () => exportAs('txt'),
+    html: () => exportAs('html'),
+    pdf: () => exportAs('pdf'),
+    clear: clearPage,
+  }[id];
+  run?.();
+  formatBar.refresh();
 }
 
 /**
@@ -1000,7 +1053,7 @@ function openNoteMenu(anchor) {
     { icon: '＋', text: t('rich.insertBlock'), run: () => { ensureEditing(); formatBar.openInsert(anchor); } },
     { icon: '¶', text: t('rich.visual'), run: () => setWriting({ editorMode: 'visual' }) },
     { icon: '</>', text: t('rich.source'), run: () => setWriting({ editorMode: 'source' }) },
-    { icon: '⧉', text: t('noteMenu.copyAll'), run: copyAll },
+    { icon: icon('copy'), text: t('noteMenu.copyAll'), run: copyAll },
     { icon: '#', text: t('noteMenu.tag'), run: tagSelection },
     { icon: '⌗', text: t('tags.title'), run: showTags },
     { icon: '◴', text: t('versions.title'), run: showVersions },
@@ -1708,7 +1761,7 @@ function openEditorMenu(event, view) {
   if (url) items.push({ icon: '↗', text: t('menu.openLink'), kbd: t('menu.ctrlClick'), run: () => openLink(url) }, '-');
   if (!editing) {
     items.push(
-      { icon: '⧉', text: t('menu.copy'), kbd: 'Ctrl+C', disabled: sel.empty, run: () => copySelection(view) },
+      { icon: icon('copy'), text: t('menu.copy'), kbd: 'Ctrl+C', disabled: sel.empty, run: () => copySelection(view) },
       { icon: '🌐', text: t('menu.translate'), kbd: 'Ctrl+Shift+X', disabled: sel.empty, run: () => translateSelection(view) },
       { icon: '▣', text: t('menu.selectAll'), kbd: 'Ctrl+A', run: () => view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } }) },
       { icon: '⇩', text: t('notes.saveCopy'), run: () => exportNote(currentId) },
@@ -1730,7 +1783,7 @@ function openEditorMenu(event, view) {
     { icon: '🌐', text: t('menu.translate'), kbd: 'Ctrl+Shift+X', disabled: sel.empty, run: () => translateSelection(view) },
     '-',
     { icon: '✂', text: t('menu.cut'), kbd: 'Ctrl+X', disabled: sel.empty, run: () => cutSelection(view) },
-    { icon: '⧉', text: t('menu.copy'), kbd: 'Ctrl+C', disabled: sel.empty, run: () => copySelection(view) },
+    { icon: icon('copy'), text: t('menu.copy'), kbd: 'Ctrl+C', disabled: sel.empty, run: () => copySelection(view) },
     { icon: '⎘', text: t('menu.paste'), kbd: 'Ctrl+V', run: () => pasteFromClipboard(view) },
     '-',
     { icon: '⌗', text: t(sel.empty ? 'menu.codeBlock' : 'menu.wrapCode'), kbd: 'Ctrl+E', run: () => insertCodeBlock(view) },
@@ -1779,11 +1832,213 @@ async function copyFromBar() {
   if (!view) return;
   const text = view.rich ? view.rich.getSelectedText() : view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to);
   if (!text) {
-    toast(t('editor.nothingSelected'), { timeout: 2000 });
+    // a note open for reading: what the page shows as selected, if the editor did not follow it
+    const shown = pageSelectionInNote();
+    if (!shown) {
+      toast(t('editor.nothingSelected'), { timeout: 2000 });
+      return;
+    }
+    try {
+      await api.copy(shown);
+      toast(t('editor.copied'), { timeout: 1500 });
+    } catch {
+      toast(t('clipboard.blocked', 'Ctrl+C'));
+    }
     return;
   }
   if (await copySelection(view)) toast(t('editor.copied'), { timeout: 1500 });
 }
+
+/** The words selected on the page, when they are in the open note; '' otherwise. */
+function pageSelectionInNote() {
+  const sel = getSelection();
+  const host = $('#editor');
+  if (!sel?.rangeCount || !host || host.closest('[hidden]')) return '';
+  // the selection may begin or end outside the note (a select-all of the page): it counts when it covers some of it
+  if (!host.contains(sel.anchorNode) && !sel.getRangeAt(0).intersectsNode(host)) return '';
+  return sel.toString().trim() ? sel.toString() : '';
+}
+
+// Words selected in a note get the app's own actions: copy, cut, paste, select all, translate. The phone's
+// own menu by a selection stays away (quietSelection), so these are the ones there are.
+// With a finger, once the selection rests, the words come forward on a card, the rest of the screen blurs
+// and the actions stand in a list under the card (selFocus). With a mouse they are a bar at the foot.
+const noteSel = h('div', { class: 'note-selbar', role: 'toolbar', hidden: true });
+const noteSelButton = (id, glyph, key, run) => {
+  const button = h('button', { type: 'button', class: 'note-sel-btn', 'data-sel': id, 'data-key': key }, icon(glyph), h('span'));
+  button.addEventListener('pointerdown', (event) => event.preventDefault()); // the selection stays
+  button.addEventListener('click', () => {
+    // the card goes once an action is chosen; it comes back for another selection, not for this one
+    if (!selFocus.hidden && id !== 'all') hideSelFocus(true);
+    run();
+  });
+  return button;
+};
+const noteSelButtons = [
+  noteSelButton('copy', 'copy', 'menu.copy', () => copyFromBar()),
+  noteSelButton('cut', 'cut', 'menu.cut', () => editor && cutSelection(editor.view)),
+  noteSelButton('paste', 'paste', 'menu.paste', () => editor && pasteFromClipboard(editor.view)),
+  noteSelButton('all', 'selectAll', 'menu.selectAll', () => selectAllNote()),
+  noteSelButton('translate', 'translate', 'menu.translate', () => translateSelection()),
+];
+noteSel.append(...noteSelButtons);
+
+const selFocusCard = h('div', { class: 'sel-focus-card' });
+const selFocusStack = h('div', { class: 'sel-focus-stack' }, selFocusCard);
+const selFocus = h('div', { class: 'sel-focus', hidden: true }, h('div', { class: 'sel-focus-shade' }), selFocusStack);
+let selFingers = 0; // fingers on the screen: the card waits until they are off
+let selRestTimer = 0;
+let selMoving = false; // a selection handle is being dragged or the page scrolled (Android says so)
+let selMovingTimer = 0;
+let selCancelled = false; // the phone took over a touch (a long press): a finger may still be on the glass
+// how long the selection must stay still before its card comes: a slow drag pauses, and should not get it
+const SEL_REST = 700;
+const SEL_REST_UNSURE = 1300;
+let selDismissed = ''; // the selection whose card was put away (an action, a touch elsewhere)
+
+/** Which selection this is, so a card put away for it does not come straight back. */
+function selKey() {
+  const sel = getSelection();
+  return sel?.rangeCount ? `${sel.anchorOffset}:${sel.focusOffset}:${sel.toString()}` : '';
+}
+
+function hideSelFocus(dismiss = false) {
+  if (dismiss) selDismissed = selKey();
+  selFocus.hidden = true;
+  document.documentElement.classList.remove('sel-focused');
+}
+
+function drawNoteSel() {
+  const show = Boolean(pageSelectionInNote());
+  document.documentElement.classList.toggle('note-selecting', show);
+  clearTimeout(selRestTimer);
+  if (!show) {
+    noteSel.hidden = true;
+    hideSelFocus();
+    selDismissed = '';
+    return;
+  }
+  for (const button of noteSelButtons) {
+    const id = button.dataset.sel;
+    button.lastChild.textContent = t(button.dataset.key);
+    button.setAttribute('aria-label', t(button.dataset.key));
+    button.hidden = (!editing && (id === 'cut' || id === 'paste')) || (id === 'translate' && !phone);
+  }
+  if (!fingerFirst()) {
+    hideSelFocus();
+    if (noteSel.parentNode !== document.body) document.body.append(noteSel);
+    noteSel.hidden = false;
+    return;
+  }
+  // a finger: the card, once the selection has stopped moving (a handle being dragged moves it)
+  if (!selFocus.hidden && selKey() !== selFocus.dataset.key) hideSelFocus();
+  if (selMoving) return; // it comes when the handle is let go
+  selRestTimer = setTimeout(showSelFocus, selCancelled ? SEL_REST_UNSURE : SEL_REST);
+}
+
+function showSelFocus() {
+  if (selFingers || selMoving || !fingerFirst()) return;
+  const text = pageSelectionInNote();
+  const key = selKey();
+  if (!text || key === selDismissed) return;
+  if (!selFocus.hidden && selFocus.dataset.key === key) return; // already up: it keeps where it was scrolled to
+  const host = $('#editor');
+  const range = getSelection().getRangeAt(0).cloneRange();
+  if (!host.contains(range.startContainer)) range.setStart(host, 0);
+  if (!host.contains(range.endContainer)) range.setEnd(host, host.childNodes.length);
+  const words = range.cloneContents();
+  for (const node of words.querySelectorAll('[id], [contenteditable], [tabindex]')) {
+    node.removeAttribute('id');
+    node.removeAttribute('contenteditable');
+    node.removeAttribute('tabindex');
+  }
+  // the words as the note shows them: its typeface, size and colour
+  const root = $('#editor .atlas-rich-content') ?? $('#editor .cm-content') ?? host;
+  const look = getComputedStyle(root);
+  Object.assign(selFocusCard.style, { fontFamily: look.fontFamily, fontSize: look.fontSize, lineHeight: look.lineHeight, color: look.color });
+  selFocusCard.replaceChildren(words);
+  if (noteSel.parentNode !== selFocusStack) selFocusStack.append(noteSel);
+  noteSel.hidden = false;
+  selFocus.dataset.key = key;
+  selFocus.hidden = false;
+  document.documentElement.classList.add('sel-focused');
+  placeSelFocus(range.getBoundingClientRect());
+}
+
+/** The card where the words were (as near as fits), its actions under it, all above the keyboard. */
+function placeSelFocus(rect) {
+  const css = getComputedStyle(document.documentElement);
+  const px = (name) => parseFloat(css.getPropertyValue(name)) || 0;
+  const top = 36;
+  const bottom = (visualViewport?.height ?? innerHeight) - Math.max(px('--kb'), px('--sys-bottom')) - 12;
+  selFocusCard.style.maxHeight = '';
+  selFocusCard.scrollTop = 0;
+  const menu = noteSel.offsetHeight + 10;
+  selFocusCard.style.maxHeight = `${Math.max(72, Math.min(bottom - top - menu, innerHeight * 0.5))}px`;
+  const height = selFocusStack.offsetHeight;
+  const want = (rect?.top ?? top) - 14;
+  selFocusStack.style.top = `${Math.round(Math.max(top, Math.min(want, bottom - height)))}px`;
+}
+
+// fingers on the screen: the card goes while one is down (a handle is being moved, the page scrolled)
+// and comes back when they are off and the selection has rested
+const countFingers = (event) => {
+  selFingers = event.touches.length;
+  if (selFocusStack.contains(event.target)) return; // scrolling the card or pressing its actions
+  selCancelled = event.type === 'touchcancel';
+  if (event.type === 'touchstart') hideSelFocus();
+  if (!selFingers && pageSelectionInNote()) drawNoteSel();
+};
+for (const type of ['touchstart', 'touchend', 'touchcancel']) document.addEventListener(type, countFingers, { capture: true, passive: true });
+// Android (MainActivity, SilentActionMode.hide): a handle is being dragged, or was let go. While it is
+// dragged the phone says so again every few seconds; a word missed (a drag never said to end) runs out.
+document.addEventListener('atlas-selection-moving', (event) => {
+  clearTimeout(selMovingTimer);
+  selMoving = Boolean(event.detail);
+  if (selMoving) {
+    clearTimeout(selRestTimer);
+    hideSelFocus();
+    selMovingTimer = setTimeout(() => {
+      selMoving = false;
+      if (pageSelectionInNote()) drawNoteSel();
+    }, 3500);
+    return;
+  }
+  selCancelled = false; // let go: no finger holds the selection any more
+  if (!pageSelectionInNote()) return;
+  drawNoteSel();
+  clearTimeout(selRestTimer);
+  selRestTimer = setTimeout(showSelFocus, 250); // surely let go: no need to wait long
+});
+visualViewport?.addEventListener('resize', () => {
+  if (selFocus.hidden) return;
+  hideSelFocus();
+  if (pageSelectionInNote()) drawNoteSel();
+});
+document.addEventListener('selectionchange', drawNoteSel);
+
+/** All of the note selected: by the editor while writing, on the page while reading (the editor is shut then). */
+function selectAllNote() {
+  const view = editor?.view;
+  if (!view) return;
+  if (editing) {
+    view.focus();
+    view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
+    return;
+  }
+  const root = $('#editor .atlas-rich-content') ?? $('#editor .cm-content');
+  if (root) getSelection().selectAllChildren(root);
+}
+
+// The phone's own menu by a selection (Copy, Share, Google's suggestions) would sit over the app's bars;
+// it stays away everywhere but in plain fields (search, forms), where Paste is wanted.
+function quietSelection() {
+  const field = document.activeElement?.closest?.('input, textarea, select');
+  api.quietSelection?.(!field);
+}
+document.addEventListener('focusin', quietSelection);
+document.addEventListener('focusout', () => setTimeout(quietSelection, 0));
+quietSelection();
 
 async function cutSelection(view) {
   if (await copySelection(view)) {
@@ -1910,6 +2165,7 @@ function applyLanguage({ persist = true } = {}) {
   applyLook({ persist: false });
   if (!editor) return;
   editor.localize();
+  formatBar.localize();
   renderPace();
   // everything drawn in the old language is drawn again
   renderIndex();
@@ -1979,6 +2235,8 @@ function applyBars() {
 }
 
 function setLook(patch) {
+  // a theme chosen by hand ends the cat look (cats.js)
+  if (catsOn()) setCats(false);
   Object.assign(prefs, normalizeLook({ ...prefs, ...patch }));
   applyLook();
 }
@@ -2135,6 +2393,8 @@ function menuSections() {
         null,
         sideItem({ icon: '◐', text: t('side.darkLight'), kbd: 'Ctrl+Shift+L', run: toggleTheme }),
         sideItem({ icon: 'Aa', text: t('side.readLook'), hint: t('side.readLookHint'), chevron: true, run: () => close(() => showAppearance()) }),
+        // the app's motion (motion.js): on unless turned off here, or the system asks for less
+        sideToggle({ icon: '≈', text: t('side.motion'), hint: t('side.motionHint'), on: motionEnabled(), toggle: () => { setMotion(!motionEnabled()); sideMenu?.refresh(); } }),
       ),
       settingsSection({
         getData: storageInfo,
@@ -2208,6 +2468,8 @@ async function showHome() {
   });
   homeEl.hidden = false;
   document.body.classList.add('at-home');
+  // the first time the main page shows, its parts come in one after another
+  stagger(homeEl.querySelector('.home-body'), 'home', { step: 60, max: 6 });
   updateTabs();
   homeEl.querySelector('.home-book, .home-tile')?.focus({ preventScroll: true });
 }
@@ -2270,25 +2532,40 @@ function updateTabs() {
   tabBar.select(libraryOpen ? 'library' : notesOpen ? 'notes' : apocryphaOpen ? 'apocrypha' : 'home');
 }
 
+/** Which tab the screen is on now: the order of the tabs is the way a change between them moves. */
+function currentTab() {
+  if (document.documentElement.classList.contains('library-open')) return 'library';
+  if (apocrypha?.isOpen()) return 'apocrypha';
+  if (notesScreen.isOpen()) return 'notes';
+  return homeEl.hidden ? null : 'home';
+}
+
 function pickTab(tab) {
   if (tab === 'profile') {
     sideMenu?.open('account');
     return;
   }
-  if (tab === 'library') {
-    hideApocrypha();
-    openLibrary();
-    return;
-  }
-  if (tab === 'apocrypha') {
-    showApocrypha();
-    return;
-  }
-  // the library closes onto whatever is under it
-  if (library?.isOpen()) library.close();
-  if (tab === 'notes') showNotes();
-  else if (tab === 'home') showHome();
-  else editor.view.focus();
+  const from = TABS.indexOf(currentTab());
+  const to = TABS.indexOf(tab);
+  if (from === to) return;
+  const dir = from < 0 ? 'fade' : to > from ? 'forward' : 'back';
+  navigate(dir, async () => {
+    if (tab === 'library') {
+      hideApocrypha();
+      await openLibrary();
+      return;
+    }
+    if (tab === 'apocrypha') {
+      // the screen comes at once; the catalogue fills it when it answers
+      showApocrypha();
+      return;
+    }
+    // the library closes onto whatever is under it
+    if (library?.isOpen()) library.close();
+    if (tab === 'notes') showNotes();
+    else if (tab === 'home') await showHome();
+    else editor.view.focus();
+  });
 }
 
 /** Every half minute with a book open on screen: half a minute more read today. */
@@ -2537,6 +2814,7 @@ function bindChrome() {
   // the statistics strip under the title bar, the formatting bar over the status bar (and the keyboard)
   $('.titlebar').after(statsStrip.node);
   $('.statusbar').before(formatBar.node);
+  document.body.append(noteSel, selFocus);
   // what was written is saved when the app goes away, not only every few seconds
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') flushWriting();

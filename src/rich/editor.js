@@ -1,6 +1,6 @@
 import { EditorState as SourceState, EditorSelection } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { EditorState, TextSelection } from 'prosemirror-state';
+import { EditorState, Plugin, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { history, undo, redo, undoDepth, redoDepth, closeHistory } from 'prosemirror-history';
 import { keymap } from 'prosemirror-keymap';
@@ -9,10 +9,11 @@ import { sinkListItem, liftListItem } from 'prosemirror-schema-list';
 import { columnResizing, tableEditing, goToNextCell } from 'prosemirror-tables';
 import { richSchema as schema, safeLink } from './schema.js';
 import { parseMarkdown, serializeMarkdown } from './markdown.js';
-import { activeFormats, enterParagraph, insertDetails, nextItem, paragraphAfterBlock, setParagraphType, toggleFormat } from './commands.js';
+import { activeFormats, backspaceDetails, enterLine, insertDetails, nextItem, normalParagraph, paragraphAfterBlock, setParagraphType, shiftEnter, toggleFormat } from './commands.js';
 import { nodeViews } from './nodeViews.js';
 import { findMatches, focusKey, focusPlugin, searchKey, searchPlugin } from './plugins.js';
 import { t } from '../i18n.js';
+import { fromTouch } from '../touch.js';
 
 const fitSelection = (doc, from, to = from) => {
   from = Math.max(0, Math.min(doc.content.size, from)); to = Math.max(0, Math.min(doc.content.size, to));
@@ -25,6 +26,9 @@ const change = (old, next) => {
   while (endOld > from && endNew > from && old[endOld - 1] === next[endNew - 1]) { endOld--; endNew--; }
   return { from, to: endOld, insert: next.slice(from, endNew) };
 };
+
+const MARK_NAMES = { bold: 'strong', italic: 'em', underline: 'underline', strike: 'strike', code: 'code' };
+const BLOCK_NAMES = { paragraph: 'paragraph', bullet: 'bullet_list', numbered: 'ordered_list', task: 'task_list', quote: 'blockquote', codeblock: 'code_block' };
 
 export function createRichEditor(options) {
   const root = options.parent;
@@ -92,13 +96,12 @@ export function createRichEditor(options) {
     }
     view.dispatch(tr.scrollIntoView()); return true;
   };
-  const softBreak = () => command((state, dispatch) => {
-    dispatch(state.selection.$from.parent.type === schema.nodes.code_block ? state.tr.insertText('\n') : state.tr.replaceSelectionWith(schema.nodes.hard_break.create()).scrollIntoView()); return true;
-  }, 'input.type');
   const keys = {
     ...baseKeymap,
-    Enter: () => !view.composing && command(enterParagraph, 'input.type'),
-    'Shift-Enter': softBreak,
+    // Enter: a new line in the paragraph; twice, or Shift+Enter: a new paragraph (commands.js, enterLine)
+    Enter: () => !view.composing && command(enterLine, 'input.type'),
+    'Shift-Enter': () => command(shiftEnter, 'input.type'),
+    Backspace: (state, dispatch, pm) => command(backspaceDetails, 'delete.backward') || baseKeymap.Backspace(state, dispatch, pm),
     'Mod-b': () => command(toggleFormat('strong')),
     'Mod-i': () => command(toggleFormat('em')),
     'Mod-u': () => command(toggleFormat('underline')),
@@ -111,7 +114,19 @@ export function createRichEditor(options) {
     Tab: (state, dispatch) => goToNextCell(1)(state, dispatch) || sinkListItem(state.selection.$from.node(-1)?.type === schema.nodes.task_item ? schema.nodes.task_item : schema.nodes.list_item)(state, dispatch),
     'Shift-Tab': (state, dispatch) => goToNextCell(-1)(state, dispatch) || liftListItem(state.selection.$from.node(-1)?.type === schema.nodes.task_item ? schema.nodes.task_item : schema.nodes.list_item)(state, dispatch),
   };
-  const plugins = [history(), keymap(keys), columnResizing(), tableEditing(), searchPlugin, focusPlugin];
+  // Marks pressed on the bar with nothing selected stay on for what is written next, wherever the cursor
+  // goes, until they are pressed again (api.toggle).
+  const sticky = new Set();
+  const stickyPlugin = new Plugin({
+    appendTransaction(transactions, old, state) {
+      if (!sticky.size || !state.selection.empty) return null;
+      const marks = state.storedMarks ?? state.selection.$from.marks();
+      let next = marks;
+      for (const name of sticky) if (!next.some((mark) => mark.type.name === name)) next = schema.marks[name].create().addToSet(next);
+      return next === marks ? null : state.tr.setStoredMarks(next).setMeta('addToHistory', false);
+    },
+  });
+  const plugins = [history(), keymap(keys), columnResizing(), tableEditing(), searchPlugin, focusPlugin, stickyPlugin];
   const view = new EditorView(root, {
     state: EditorState.create({ schema, doc: mapping.doc, plugins }),
     dispatchTransaction: sync,
@@ -122,11 +137,15 @@ export function createRichEditor(options) {
       beforeinput(pm, event) {
         if (!editable || pm.composing || event.isComposing) return false;
         if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') { event.preventDefault(); command(event.inputType === 'historyUndo' ? undo : redo, event.inputType === 'historyUndo' ? 'undo' : 'redo'); return true; }
-        if (event.inputType === 'insertParagraph') { event.preventDefault(); command(enterParagraph, 'input.type'); return true; }
+        // a phone's keyboard sends Enter this way rather than as a key
+        if (event.inputType === 'insertParagraph') { event.preventDefault(); command(enterLine, 'input.type'); return true; }
+        // a phone's keyboard: Backspace at the start of an accordion's title (or its empty body)
+        if (event.inputType === 'deleteContentBackward' && backspaceDetails(pm.state)) { event.preventDefault(); command(backspaceDetails, 'delete.backward'); return true; }
+        if (event.inputType === 'insertLineBreak') { event.preventDefault(); command(shiftEnter, 'input.type'); return true; }
         return false;
       },
       contextmenu(pm, event) {
-        if (event.shiftKey || event.pointerType === 'touch' || event.sourceCapabilities?.firesTouchEvents) return false;
+        if (event.shiftKey || fromTouch(event)) return false; // a finger: the app's bars, not the right-click menu
         event.preventDefault(); options.onContextMenu?.(event, options.getFacade()); return true;
       },
     },
@@ -214,17 +233,44 @@ export function createRichEditor(options) {
         if (specs.some((spec) => spec?.scrollIntoView || spec?.effects)) view.dispatch(view.state.tr.scrollIntoView().setMeta('addToHistory', false));
       }
     },
+    /**
+     * A button of the bar pressed: what is on goes off, what is off comes on. A mark with nothing
+     * selected stays on until pressed again; a heading, list, quote or code pressed where it already
+     * is gives a plain paragraph back.
+     */
+    toggle(id) {
+      if (!editable) return false;
+      const name = MARK_NAMES[id];
+      const now = activeFormats(view.state);
+      if (name && view.state.selection.empty) {
+        const type = schema.marks[name];
+        const marks = view.state.storedMarks ?? view.state.selection.$from.marks();
+        if (sticky.has(name) || now.marks.has(name)) {
+          sticky.delete(name);
+          view.dispatch(view.state.tr.setStoredMarks(type.removeFromSet(marks)).setMeta('addToHistory', false));
+        } else {
+          sticky.add(name);
+          view.dispatch(view.state.tr.setStoredMarks(type.create().addToSet(marks)).setMeta('addToHistory', false));
+        }
+        options.onFormatChange?.();
+        return true;
+      }
+      if (name) sticky.delete(name);
+      if (/^h[1-6]$/.test(id) && now.block === 'heading' && now.level === Number(id[1])) return this.command('paragraph');
+      if (id !== 'paragraph' && BLOCK_NAMES[id] && now.block === BLOCK_NAMES[id]) return this.command('paragraph');
+      return this.command(id);
+    },
+    /** The marks kept on (toggle). */
+    sticky: () => new Set(sticky),
     command(id, value) {
       if (!editable) return false;
-      const marks = { bold: 'strong', italic: 'em', underline: 'underline', strike: 'strike', code: 'code' };
-      if (marks[id]) return command(toggleFormat(marks[id]));
+      if (MARK_NAMES[id]) return command(toggleFormat(MARK_NAMES[id]));
       if (/^h[1-6]$/.test(id)) return command(setParagraphType('heading', { level: Number(id[1]) }));
-      const blocks = { paragraph: 'paragraph', bullet: 'bullet_list', numbered: 'ordered_list', task: 'task_list', quote: 'blockquote', codeblock: 'code_block' };
-      if (blocks[id]) return command(setParagraphType(blocks[id]));
+      if (BLOCK_NAMES[id]) return command(setParagraphType(BLOCK_NAMES[id]));
       if (id === 'accordion') return command(insertDetails(t('accordion.defaultTitle')));
       if (id === 'next') return command(nextItem, 'input.type');
       if (id === 'after') return command(paragraphAfterBlock, 'input.type');
-      if (id === 'newline') return softBreak();
+      if (id === 'newline') return command(normalParagraph, 'input.type');
       if (id === 'rule') { view.dispatch(view.state.tr.replaceSelectionWith(schema.nodes.horizontal_rule.create()).scrollIntoView()); return true; }
       if (id === 'link') {
         const href = safeLink(value); if (!href) return false;

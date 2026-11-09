@@ -22,6 +22,10 @@ import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.util.Base64;
+import android.view.ActionMode;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
@@ -32,6 +36,7 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.PopupMenu;
 import android.widget.Toast;
 
 import androidx.activity.ComponentActivity;
@@ -129,6 +134,11 @@ public class MainActivity extends ComponentActivity {
     // until the reading chrome comes up (a tap in the middle of the book). --sys-insets tells the page
     // where they appear, so showing them moves no text (applyReading).
     private boolean reading;
+    // In a book the page has its own bar for a selection (copy, mark, quote, translate) at the foot of the
+    // screen. The phone's own menu by the selection (Copy, Share, Google's suggestions) would cover it
+    // there, so while the page says so (quietSelection) WebView gets a menu that shows nothing (SilentActionMode).
+    // A field being typed in keeps it: Paste lives there.
+    private volatile boolean quietSelection;
     private boolean barsShown = true;
     private String sysInsets = "";
     private String keyboardInset = "";
@@ -208,7 +218,14 @@ public class MainActivity extends ComponentActivity {
                 .addPathHandler("/incoming/", new WebViewAssetLoader.InternalStoragePathHandler(this, incomingDir))
                 .build();
 
-        web = new WebView(this);
+        web = new WebView(this) {
+            @Override
+            public ActionMode startActionMode(ActionMode.Callback callback, int type) {
+                if (!quietSelection) return super.startActionMode(callback, type);
+                selectionToPage();
+                return new SilentActionMode();
+            }
+        };
         web.setBackgroundColor(Color.parseColor("#09090b"));
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -339,6 +356,8 @@ public class MainActivity extends ComponentActivity {
         if (!css.equals(sysInsets)) {
             sysInsets = css;
             web.evaluateJavascript("document.documentElement.style.setProperty('--sys-insets','" + css + "')", null);
+            // the bottom one on its own: the book's bars at the foot (fixed to the screen) rise above it
+            web.evaluateJavascript("document.documentElement.style.setProperty('--sys-bottom','" + Math.round(bars.bottom / px) + "px')", null);
         }
         // The keyboard is told apart: edge to edge, the window no longer shrinks for it, so what is typed
         // into (a comment on a mark) rises by --kb above it; the book's pages stay as they are.
@@ -754,6 +773,61 @@ public class MainActivity extends ComponentActivity {
         }
     }
 
+    /**
+     * A selection was made or moved (WebView asks for its menu): the page looks at it again and puts up
+     * its own bar, whatever events this phone's WebView did or did not send it.
+     */
+    private void selectionToPage() {
+        if (web == null) return;
+        web.post(() -> web.evaluateJavascript("document.dispatchEvent(new Event('selectionchange'))", null));
+    }
+
+    /** A selection handle is being dragged (or the page scrolled), or that has ended: see SilentActionMode. */
+    private void selectionMoving(boolean moving) {
+        if (web == null) return;
+        String script = "document.dispatchEvent(new CustomEvent('atlas-selection-moving',{detail:" + moving + "}))";
+        web.post(() -> web.evaluateJavascript(script, null));
+    }
+
+    /**
+     * The selection's menu while quietSelection is on (see there): one that shows nothing and never ends by
+     * itself. An emptied real menu was no good: some phones (Xiaomi) close an empty menu at once, and
+     * WebView drops the selection whenever its menu is closed by anyone but itself. WebView lets go of this
+     * one on its own (finish), and the page puts up its own bar.
+     */
+    private final class SilentActionMode extends ActionMode {
+        private Menu menu;
+        private CharSequence title;
+        private CharSequence subtitle;
+        private View custom;
+
+        @Override public void setTitle(CharSequence text) { title = text; }
+        @Override public void setTitle(int resId) { title = MainActivity.this.getString(resId); }
+        @Override public void setSubtitle(CharSequence text) { subtitle = text; }
+        @Override public void setSubtitle(int resId) { subtitle = MainActivity.this.getString(resId); }
+        @Override public void setCustomView(View view) { custom = view; }
+        @Override public void invalidate() { selectionToPage(); } // the selection moved
+        @Override public void finish() { }
+
+        // WebView hides its menu for a long while (and again every few seconds) while a selection handle is
+        // dragged or the page scrolls, and for a moment when that ends: the page waits for the end before
+        // it puts up its card.
+        @Override
+        public void hide(long duration) {
+            selectionMoving(duration >= 1000);
+        }
+        @Override public CharSequence getTitle() { return title; }
+        @Override public CharSequence getSubtitle() { return subtitle; }
+        @Override public View getCustomView() { return custom; }
+        @Override public MenuInflater getMenuInflater() { return new MenuInflater(MainActivity.this); }
+
+        @Override
+        public Menu getMenu() {
+            if (menu == null) menu = new PopupMenu(MainActivity.this, web).getMenu();
+            return menu;
+        }
+    }
+
     /** window.AtlasAndroid in the page (src/bridge.js). Called on a background thread. */
     private class Bridge {
         /** The files waiting for the page, as JSON [{ file, name, type }]; each is handed out once. */
@@ -940,6 +1014,12 @@ public class MainActivity extends ComponentActivity {
             if (clip == null || clip.getItemCount() == 0) return "";
             CharSequence text = clip.getItemAt(0).coerceToText(MainActivity.this);
             return text == null ? "" : text.toString();
+        }
+
+        /** A book is open and nothing is being typed: the phone's menu by a selection stays away (quieted). */
+        @JavascriptInterface
+        public void quietSelection(boolean on) {
+            quietSelection = on;
         }
 
         /** A book is open (or not), and its chrome is up (or not): the system bars follow (applyReading). */
