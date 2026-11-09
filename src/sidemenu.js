@@ -144,9 +144,11 @@ export function createSideMenu({ sections, onClose }) {
       tabBar,
       body,
     );
-    scrim = h('div', { class: 'side-scrim' }, panel);
+    // the dark behind the panel is a layer of its own: it fades by opacity, which costs the phone nothing
+    const shade = h('div', { class: 'side-shade', 'aria-hidden': 'true' });
+    scrim = h('div', { class: 'side-scrim' }, shade, panel);
     scrim.addEventListener('pointerdown', (e) => {
-      if (e.target === scrim) close();
+      if (e.target === scrim || e.target === shade) close();
     });
     // a finger pulls it away to the right, as it came: it follows the finger, and once let go it either
     // goes (far enough, or flicked) or springs back
@@ -171,11 +173,12 @@ export function createSideMenu({ sections, onClose }) {
           }
           if (dx < 10) return;
           drag.on = true;
+          drag.width = panel.offsetWidth || 1; // measured once: a read each frame would stall the drag
           panel.classList.add('m-dragging');
         }
         drag.dx = Math.max(0, dx);
         panel.style.transform = `translate3d(${drag.dx}px, 0, 0)`;
-        scrim.style.backgroundColor = `rgba(0, 0, 0, ${0.38 * Math.max(0, 1 - drag.dx / panel.offsetWidth)})`;
+        shade.style.opacity = String(Math.max(0, 1 - drag.dx / drag.width));
       },
       { passive: true },
     );
@@ -185,10 +188,10 @@ export function createSideMenu({ sections, onClose }) {
         return;
       }
       const speed = drag.dx / Math.max(1, performance.now() - drag.at);
-      const away = drag.dx > panel.offsetWidth * 0.33 || (speed > 0.6 && drag.dx > 40);
+      const away = drag.dx > drag.width * 0.33 || (speed > 0.6 && drag.dx > 40);
       panel.classList.remove('m-dragging');
       panel.style.transform = '';
-      scrim.style.backgroundColor = '';
+      shade.style.opacity = '';
       drag = null;
       if (away) close();
     };

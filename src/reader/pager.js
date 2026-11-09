@@ -71,19 +71,28 @@ export function createPager({ host, strip, frameFor, layout, onTurn, canCross = 
 
   // ---------- the leaf: a page turned by hand (see the top of this file) ----------
 
-  let leaf = null; // { node, page, cast, angle, raf, settle } while a page is being turned
+  let leaf = null; // { node, page, copy, shade, cast, dim, width, angle, raf, settle } while a page is turned
+  // A leaf made ahead, in a quiet moment after a turn: copying a part of a book and laying it out takes
+  // a while on a phone, and done at the touch it made the first frames of a turn stutter. It waits
+  // laid out but unseen; a change to the book (a mark, another part) makes it stale.
+  let spare = null;
+  let spareStale = true;
+  let spareTimer = 0;
+  const watcher = new MutationObserver(() => {
+    spareStale = true;
+  });
+  watcher.observe(strip, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['class', 'hidden'] });
 
   /** A PDF's pages are pictures a copy would not carry: those turn the other ways. */
   const leafable = () => motionWanted() && !strip.querySelector('canvas');
 
-  /** A copy of page `at` over the book, ready to turn. */
-  function buildLeaf(at) {
+  /** A leaf with a copy of the book in it, laid out under the page but unseen. */
+  function makeLeaf() {
     const frame = frameFor(index);
     const copy = strip.cloneNode(true);
     copy.removeAttribute('id');
     for (const el of copy.querySelectorAll('[id]')) el.removeAttribute('id');
     copy.style.transition = 'none';
-    copy.style.transform = `translate3d(${-at * step}px, 0, 0)`;
     copy.setAttribute('aria-hidden', 'true');
     copy.inert = true;
     const paper = getComputedStyle(frame).backgroundColor;
@@ -96,26 +105,69 @@ export function createPager({ host, strip, frameFor, layout, onTurn, canCross = 
     const page = document.createElement('div');
     page.className = 'rd-leaf-page';
     page.append(front);
+    const dim = document.createElement('div');
+    dim.className = 'rd-leaf-dim';
     const cast = document.createElement('div');
     cast.className = 'rd-leaf-cast';
     const node = document.createElement('div');
-    node.className = 'rd-leaf';
+    node.className = 'rd-leaf spare';
     node.setAttribute('aria-hidden', 'true');
-    node.append(cast, page);
+    node.append(dim, cast, page);
     frame.append(node);
-    return { node, page, cast, angle: 0, raf: 0, settle: null };
+    return { node, page, copy, shade, cast, dim, width: 0, angle: 0, raf: 0, settle: null };
   }
 
-  /** The leaf turned to `angle` degrees: 0 lies flat over the book, LEAF_GONE has turned over. */
+  /** Makes the next spare leaf when the reader is idle. */
+  function prepareSpare() {
+    clearTimeout(spareTimer);
+    spareTimer = setTimeout(() => {
+      if (leaf || !leafable() || (spare && !spareStale)) return;
+      const make = () => {
+        if (leaf || (spare && !spareStale)) return;
+        spare?.node.remove();
+        spare = makeLeaf();
+        spareStale = false;
+      };
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(make, { timeout: 1200 });
+      else make();
+    }, 250);
+  }
+
+  /** A copy of page `at` over the book, ready to turn: the spare one if it is still good. */
+  function buildLeaf(at) {
+    let l;
+    if (spare && !spareStale && spare.node.isConnected) {
+      l = spare;
+      spare = null;
+    } else {
+      spare?.node.remove();
+      spare = null;
+      l = makeLeaf();
+    }
+    spareStale = true; // the one in use is gone: another is made after this turn
+    l.copy.style.transform = `translate3d(${-at * step}px, 0, 0)`;
+    l.width = l.node.parentElement?.clientWidth || host.clientWidth || 1;
+    l.node.classList.remove('spare');
+    return l;
+  }
+
+  /**
+   * The leaf turned to `angle` degrees: 0 lies flat over the book, LEAF_GONE has turned over. Each
+   * frame touches only transforms and opacities of four small layers: nothing in the copied book is
+   * styled or laid out again, so a turn keeps up with the screen (120–144 Hz too).
+   */
   function setLeaf(l, angle) {
     l.angle = angle;
     l.page.style.transform = `rotateY(${angle}deg)`;
-    const rad = (-angle * Math.PI) / 180;
+    const rad = Math.min((-angle * Math.PI) / 180, Math.PI / 2);
     // how far it stands off the book (0 flat, 1 upright), and where its free edge falls on the page under it
-    const lift = Math.min(1, Math.sin(Math.min(rad, Math.PI / 2)));
-    const edge = Math.max(0, Math.cos(Math.min(rad, Math.PI / 2))) * l.node.clientWidth;
-    l.node.style.setProperty('--lift', lift.toFixed(3));
-    l.node.style.setProperty('--edge', `${edge.toFixed(1)}px`);
+    const lift = Math.max(0, Math.min(1, Math.sin(rad)));
+    const edge = Math.max(0, Math.cos(rad)) * l.width;
+    l.shade.style.opacity = lift.toFixed(3);
+    l.cast.style.opacity = lift.toFixed(3);
+    l.cast.style.transform = `translate3d(${edge.toFixed(1)}px, 0, 0)`;
+    l.dim.style.opacity = (lift * 0.1).toFixed(3);
+    l.dim.style.transform = `scaleX(${(edge / l.width).toFixed(4)})`;
   }
 
   /** Turns the leaf to `to` over `ms`, then runs done(). */
@@ -150,6 +202,7 @@ export function createPager({ host, strip, frameFor, layout, onTurn, canCross = 
     cancelAnimationFrame(l.raf);
     l.node.remove();
     if (leaf === l) leaf = null;
+    prepareSpare();
   }
 
   /**
@@ -187,6 +240,7 @@ export function createPager({ host, strip, frameFor, layout, onTurn, canCross = 
   function relayout() {
     finishLeaf();
     ({ step, count } = layout());
+    prepareSpare();
     index = Math.max(0, Math.min(index, count - 1));
     target = index;
     strip.style.transition = 'none';
@@ -448,7 +502,15 @@ export function createPager({ host, strip, frameFor, layout, onTurn, canCross = 
       turn = value;
     },
     destroy() {
-      if (leaf) dropLeaf(leaf);
+      clearTimeout(spareTimer);
+      watcher.disconnect();
+      if (leaf) {
+        cancelAnimationFrame(leaf.raf);
+        leaf.node.remove();
+        leaf = null;
+      }
+      spare?.node.remove();
+      spare = null;
       host.removeEventListener('pointerdown', down);
       host.removeEventListener('pointermove', move);
       host.removeEventListener('pointerup', up);

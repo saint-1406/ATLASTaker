@@ -23,9 +23,27 @@ const PEEK =
   '<svg viewBox="0 0 120 64" aria-hidden="true"><path class="cat-body" d="M14 64C14 38 32 20 60 20s46 18 46 44z"/><path class="cat-body" d="M24 34 22 6l24 16zM96 34l2-28-24 16z"/><path class="cat-ear" d="M27 26 26 13l11 8zM93 26l1-13-11 8z"/><g class="cat-eyes"><ellipse cx="45" cy="44" rx="10" ry="11"/><ellipse cx="75" cy="44" rx="10" ry="11"/></g><g class="cat-pupils"><circle cx="47" cy="46" r="5.2"/><circle cx="77" cy="46" r="5.2"/></g><path class="cat-whisk" d="M30 52 12 50M30 56l-17 3M90 52l18-2M90 56l17 3"/></svg>';
 
 let peek = null;
+let lifeTimer = 0;
+
+// The cat blinks now and then and looks about: short moves at random moments, not an endless
+// animation, which would keep the phone drawing every frame for nothing.
+function live() {
+  clearTimeout(lifeTimer);
+  if (!peek) return;
+  lifeTimer = setTimeout(() => {
+    if (!peek) return;
+    if (document.visibilityState === 'visible' && motionOn()) {
+      const move = Math.random() < 0.65 ? 'blink' : Math.random() < 0.5 ? 'look-left' : 'look-right';
+      peek.classList.add(move);
+      setTimeout(() => peek?.classList.remove(move), move === 'blink' ? 180 : 1400);
+    }
+    live();
+  }, 2500 + Math.random() * 4000);
+}
 
 function setPeek(on) {
   if (!on) {
+    clearTimeout(lifeTimer);
     peek?.remove();
     peek = null;
     return;
@@ -43,6 +61,7 @@ function setPeek(on) {
     peek.classList.add('ducking');
   });
   document.body.append(peek);
+  live();
 }
 
 /** The cat look on or off, kept on this device. */
