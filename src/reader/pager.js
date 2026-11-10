@@ -122,22 +122,24 @@ export function createPager({ host, strip, frameFor, layout, onTurn, canCross = 
     const under = div('rd-leaf-under');
     const node = div('rd-leaf spare', under, keep, flap);
     node.setAttribute('aria-hidden', 'true');
+    const l = { node, keep, front, copy, crease, flap, back, gloss, under, shift: null, W: 0, H: 0, B: 0, corner: 'bottom', p: 0, drift: 0, anims: [], settle: null };
+    // sized before it goes in: a copy of the book laid out in a box of no width took half a second.
+    // Laid out for the next page's turn, so the copy is drawn while the reader rests, not at the touch.
+    sizeLeaf(l, index, frame);
     frame.append(node);
-    const l = { node, keep, front, copy, crease, flap, back, gloss, under, at: -1, W: 0, H: 0, B: 0, corner: 'bottom', p: 0, drift: 0, anims: [], settle: null };
-    // laid out for the next page's turn, so the copy is drawn while the reader rests, not at the touch
-    sizeLeaf(l, index);
     return l;
   }
 
-  /** The leaf's layers sized to the page, its copy of the book on page `at`. */
-  function sizeLeaf(l, at) {
-    if (l.at !== at) {
-      l.copy.style.transform = `translate3d(${-at * step}px, 0, 0)`;
-      l.at = at;
+  /** The leaf's layers sized to the page (`frame`, where it lies), its copy of the book on page `at`. */
+  function sizeLeaf(l, at, frame = l.node.parentElement) {
+    // the page's place in the copy (it moves when a new layout changes how wide a page is)
+    const shift = -at * step;
+    if (l.shift !== shift) {
+      l.copy.style.transform = `translate3d(${shift}px, 0, 0)`;
+      l.shift = shift;
     }
-    const box = l.node.parentElement;
-    const W = box?.clientWidth || host.clientWidth || 1;
-    const H = box?.clientHeight || host.clientHeight || 1;
+    const W = frame?.clientWidth || host.clientWidth || 1;
+    const H = frame?.clientHeight || host.clientHeight || 1;
     if (W === l.W && H === l.H) return;
     l.W = W;
     l.H = H;
@@ -180,8 +182,10 @@ export function createPager({ host, strip, frameFor, layout, onTurn, canCross = 
       spare?.node.remove();
       spare = null;
       l = makeLeaf();
+      spareStale = false; // a fresh copy of the book as it is now
     }
-    spareStale = true; // the one in use is gone: another is made after this turn
+    const frame = frameFor(index);
+    if (l.node.parentElement !== frame) frame.append(l.node);
     sizeLeaf(l, at);
     l.corner = corner;
     l.drift = 0;
@@ -305,10 +309,23 @@ export function createPager({ host, strip, frameFor, layout, onTurn, canCross = 
     else dropLeaf(l);
   }
 
+  /**
+   * A turn is over. The leaf waits for the next one as the spare, its copy moved to the page now
+   * shown: a quick run of turns copies the book no more (that took most of a tap's time on a phone).
+   * Only a change to the book (spareStale) makes a new copy, in a quiet moment.
+   */
   function dropLeaf(l) {
     stopLeaf(l);
-    l.node.remove();
     if (leaf === l) leaf = null;
+    if (!spareStale && !spare && leafable() && l.node.isConnected) {
+      for (const key of ['keep', 'flap', 'front', 'back']) l[key].style.transform = '';
+      for (const key of ['gloss', 'crease', 'under']) l[key].style.opacity = '0';
+      l.node.classList.add('spare');
+      sizeLeaf(l, index);
+      spare = l;
+      return;
+    }
+    l.node.remove();
     prepareSpare();
   }
 
