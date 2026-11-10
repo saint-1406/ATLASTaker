@@ -99,6 +99,13 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: node scripts/android-assets.mjs
+      # the scanner's native libraries (ncnn, opencv-mobile), checked against their SHA-256, and the
+      # OCR models in the APK checked too
+      - uses: actions/cache@v4
+        with:
+          path: android/app/src/main/cpp/third_party
+          key: ocr-deps-${{ hashFiles('scripts/android-ocr-deps.mjs') }}
+      - run: node scripts/android-ocr-deps.mjs
 
       # Phones take an APK as an update only when its versionCode (from package.json) is higher than the
       # one they have: a tag must name package.json's version, and that must be newer than the last release.

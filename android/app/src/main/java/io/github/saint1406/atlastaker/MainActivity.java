@@ -29,6 +29,7 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -143,6 +144,11 @@ public class MainActivity extends ComponentActivity {
     private String sysInsets = "";
     private String keyboardInset = "";
     private Updater updater;
+    // the document scanner (Scanner.java, src/scanner in the page): its camera view asks for the camera
+    // through WebView (getUserMedia); Android's permission is asked for then, once
+    private Scanner scanner;
+    private ActivityResultLauncher<String> camera;
+    private PermissionRequest pendingCamera;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -212,10 +218,24 @@ public class MainActivity extends ComponentActivity {
             else stopDictation("error", "not-allowed");
         });
 
+        camera = registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
+            PermissionRequest request = pendingCamera;
+            pendingCamera = null;
+            if (request == null) return;
+            if (granted) request.grant(new String[] {PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+            else request.deny();
+        });
+
+        // pages the scanner made are shown to the page from the cache (/scan/…)
+        scanner = new Scanner(this, event -> runOnUiThread(() -> {
+            if (web != null) web.evaluateJavascript("window.__atlas && window.__atlas.scan && window.__atlas.scan(" + event + ")", null);
+        }));
+
         WebViewAssetLoader loader = new WebViewAssetLoader.Builder()
                 .setDomain(HOST)
                 .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this))
                 .addPathHandler("/incoming/", new WebViewAssetLoader.InternalStoragePathHandler(this, incomingDir))
+                .addPathHandler("/scan/", new WebViewAssetLoader.InternalStoragePathHandler(this, scanner.dir()))
                 .build();
 
         web = new WebView(this) {
@@ -250,6 +270,31 @@ public class MainActivity extends ComponentActivity {
         });
 
         web.setWebChromeClient(new WebChromeClient() {
+            /** The scanner's camera view: the page's own camera, only for the app's own page. */
+            @Override
+            public void onPermissionRequest(PermissionRequest request) {
+                runOnUiThread(() -> {
+                    boolean ours = HOST.equals(request.getOrigin().getHost());
+                    boolean video = Arrays.asList(request.getResources()).contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE);
+                    if (!ours || !video) {
+                        request.deny();
+                        return;
+                    }
+                    if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                        request.grant(new String[] {PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+                        return;
+                    }
+                    if (pendingCamera != null) pendingCamera.deny();
+                    pendingCamera = request;
+                    camera.launch(Manifest.permission.CAMERA);
+                });
+            }
+
+            @Override
+            public void onPermissionRequestCanceled(PermissionRequest request) {
+                if (pendingCamera == request) pendingCamera = null;
+            }
+
             @Override
             public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (chooserCallback != null) chooserCallback.onReceiveValue(null);
@@ -377,8 +422,16 @@ public class MainActivity extends ComponentActivity {
         super.onPause();
     }
 
+    /** Android is short of memory: the scanner lets its models go (they load again when needed). */
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (scanner != null) scanner.trim(level);
+    }
+
     @Override
     protected void onDestroy() {
+        if (scanner != null) scanner.shutdown();
         io.shutdown();
         translating.shutdownNow();
         synchronized (translators) {
@@ -1051,6 +1104,47 @@ public class MainActivity extends ComponentActivity {
                 bars.setAppearanceLightStatusBars(light);
                 bars.setAppearanceLightNavigationBars(light);
             });
+        }
+
+        // ---------- the document scanner (Scanner.java); answers come as window.__atlas.scan(event) ----------
+
+        /** JSON: { ok, engine, abi, … }; ok is false on a phone the recognizer is not built for. */
+        @JavascriptInterface
+        public String scanInfo() {
+            return scanner.info();
+        }
+
+        /** A photo begins (id: [a-z0-9-]); its bytes follow in base64 pieces through scanAppend. */
+        @JavascriptInterface
+        public boolean scanBegin(String id) {
+            return scanner.begin(id);
+        }
+
+        @JavascriptInterface
+        public boolean scanAppend(String id, String base64) {
+            return scanner.append(id, base64);
+        }
+
+        /** options (JSON): quad [[x, y] × 4] as fractions of the photo, rotate, maxSide, recognize, autoRotate. */
+        @JavascriptInterface
+        public void scanProcess(String id, String options) {
+            scanner.process(id, options);
+        }
+
+        @JavascriptInterface
+        public void scanCancel(String id) {
+            scanner.cancel(id);
+        }
+
+        @JavascriptInterface
+        public void scanDrop(String id) {
+            scanner.drop(id);
+        }
+
+        /** The scanner closed: models out of memory, pages out of the cache. */
+        @JavascriptInterface
+        public void scanClose() {
+            scanner.close();
         }
     }
 }

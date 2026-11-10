@@ -8,15 +8,17 @@ import { count, currentLocale, t } from './i18n.js';
 import { ALL, NONE, addFolder, folderCounts, folderList, inFolder, pickNotes, preview, renameFolder } from './noteFolders.js';
 import { changedKeys, createSteps, stepButtons, stepKey } from './undo.js';
 import { flip, restagger, stagger } from './motion.js';
+import { icon } from './icons.js';
 
 const FOLDERS = '$folders'; // the folder list's place in a snapshot, next to the notes' ids
 
 /**
  * getNotes(): [{ id, content, updated, folder }]; getSaved() / saveFolders(list): the folder list in
  * the app's state; moveNote(id, folder), deleteNote(id, { quiet }) and restoreNote(id) (→ true when
- * done) do the storage; onOpen(id); onCreate(folder); onBack().
+ * done) do the storage; onOpen(id); onCreate(folder); onBack(). onScan(folder): the document scanner, where the app has
+ * one (Android): a button in the header and an item in the + menu.
  */
-export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, deleteNote, restoreNote, onOpen, onCreate, onBack, onTrash = null, onSearchEnter = null }) {
+export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, deleteNote, restoreNote, onOpen, onCreate, onBack, onTrash = null, onSearchEnter = null, onScan = null }) {
   let folder = ALL;
   let query = '';
 
@@ -66,6 +68,9 @@ export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, d
     },
     '←',
   );
+  const scanButton = onScan
+    ? h('button', { type: 'button', class: 'tb-btn icon notes-scan', title: t('notesScreen.scan'), 'aria-label': t('notesScreen.scan'), onclick: () => onScan(folderForNew()) }, icon('scan'))
+    : null;
   const heading = h('span', { class: 'notes-heading-text' });
   const counter = h('span', { class: 'notes-count' });
   const search = h('input', {
@@ -83,6 +88,7 @@ export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, d
       [
         { icon: '✎', text: t('notesScreen.newNote'), run: () => onCreate(folderForNew()) },
         { icon: '▭', text: t('notesScreen.newFolder'), run: () => newFolder() },
+        ...(onScan ? [{ icon: '⎚', text: t('notesScreen.scan'), run: () => onScan(folderForNew()) }] : []),
         ...(onTrash ? ['-', { icon: '🗑', text: t('trash.title'), run: () => onTrash() }] : []),
       ],
       { above: true, onClose: () => fab.focus({ preventScroll: true }) },
@@ -94,7 +100,7 @@ export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, d
   const node = h(
     'section',
     { class: 'notes-screen', hidden: true },
-    h('header', { class: 'notes-head' }, backButton, h('h2', { class: 'notes-heading' }, heading, counter), stepPair.node),
+    h('header', { class: 'notes-head' }, backButton, h('h2', { class: 'notes-heading' }, heading, counter), stepPair.node, scanButton),
     h('div', { class: 'notes-body' }, search, h('div', { class: 'notes-chip-row' }, chips), list, empty),
     fab,
   );
@@ -136,6 +142,10 @@ export function createNotesScreen({ getNotes, getSaved, saveFolders, moveNote, d
     heading.textContent = t('notesScreen.title');
     backButton.title = t('notesScreen.back');
     backButton.setAttribute('aria-label', t('notesScreen.back'));
+    if (scanButton) {
+      scanButton.title = t('notesScreen.scan');
+      scanButton.setAttribute('aria-label', t('notesScreen.scan'));
+    }
     search.placeholder = t('notesScreen.search');
     search.setAttribute('aria-label', t('notesScreen.search'));
     fab.title = t('notesScreen.create');

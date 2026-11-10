@@ -4,6 +4,11 @@
     <!-- dictation: the phone's speech recognition listens through the microphone, asked for on first use -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- the document scanner's camera view (the page asks through WebView), asked for on first use;
+         phones without a camera still install the app and scan from the gallery -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
     <!-- translation: ML Kit downloads its language models once, when the person agrees in the app.
          The page itself still reaches only the app's own files (its Content-Security-Policy). -->
     <uses-permission android:name="android.permission.INTERNET" />

@@ -17,3 +17,6 @@ server/google-client.json
 .dev-data2/
 # the Apocrypha Worker's local state (wrangler dev)
 apocrypha/.wrangler/
+# the scanner's native libraries (scripts/android-ocr-deps.mjs downloads them) and CMake's build files
+android/app/src/main/cpp/third_party/
+android/app/.cxx/

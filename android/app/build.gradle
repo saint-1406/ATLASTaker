@@ -15,6 +15,8 @@ def keystore = System.getenv('ATLAS_KEYSTORE')
 android {
     namespace 'io.github.saint1406.atlastaker'
     compileSdk 35
+    // the document scanner's recognizer is C++ (src/main/cpp): this NDK builds it (Gradle installs it if missing)
+    ndkVersion '27.0.12077973'
 
     defaultConfig {
         applicationId 'io.github.saint1406.atlastaker'
@@ -23,10 +25,30 @@ android {
         versionCode parts[0] * 10000 + parts[1] * 100 + parts[2]
         versionName pkg.version
         // ML Kit's translator brings its engine for four kinds of processor; phones are ARM, 64- or 32-bit.
-        // x86 is for emulators (and Intel phones that never reached Android 8)
+        // x86 is for emulators (and Intel phones that never reached Android 8). The scanner's recognizer
+        // is built for the same two.
         ndk {
             abiFilters 'arm64-v8a', 'armeabi-v7a'
         }
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_STL=c++_static'
+            }
+        }
+    }
+
+    // the scanner's recognizer: ncnn and opencv-mobile come from scripts/android-ocr-deps.mjs
+    externalNativeBuild {
+        cmake {
+            path 'src/main/cpp/CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+
+    // the OCR models (assets/ocr) are stored as they are: they hardly compress, and the app copies them
+    // out once without unpacking
+    androidResources {
+        noCompress 'bin', 'param'
     }
 
     // the engine's libraries go into the APK compressed (stored as they are, they made it 67 MB): a

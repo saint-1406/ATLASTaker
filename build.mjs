@@ -21,7 +21,8 @@ const workerAsText = {
 };
 
 const options = {
-  entryPoints: { app: 'src/app.js', reader: 'src/reader/index.js', fontkit: 'src/reader/fontkit.js', translate: 'src/translateModel.js', styles: 'src/styles.css' },
+  // scanner.css: the document scanner's styles, loaded the first time it opens (src/scanner/scanner.js)
+  entryPoints: { app: 'src/app.js', reader: 'src/reader/index.js', fontkit: 'src/reader/fontkit.js', translate: 'src/translateModel.js', styles: 'src/styles.css', scanner: 'src/scanner/scanner.css' },
   bundle: true,
   outdir: 'dist',
   format: 'iife',

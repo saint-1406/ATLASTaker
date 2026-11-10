@@ -1,0 +1,853 @@
+/* The document scanner (scanner.js), loaded the first time it opens (dist/scanner.css). The camera,
+   the corners and the reading are dark whatever the theme, as a camera is; the result takes the
+   theme's own colours. The accent is the app's (orange by default). Motion uses the app's tokens
+   (--ease-*, --dur-*) and stops for "reduce motion" and for Settings → Animations off. */
+
+.scan {
+  --scan-accent: var(--accent, #ff6a2b);
+  --scan-ink: #f4f4f5;
+  --scan-dim: rgba(244, 244, 245, 0.62);
+  --scan-glass: rgba(16, 16, 18, 0.55);
+  --scan-ease: var(--ease-emph, cubic-bezier(0.22, 1, 0.36, 1));
+  --scan-route: var(--dur-route, 280ms);
+  --scan-small: var(--dur-small, 240ms);
+  position: fixed;
+  inset: 0;
+  z-index: 46; /* over the notes screen and the tab bar; dialogs and toasts stay above */
+  overflow: hidden;
+  background: #000;
+  color: var(--scan-ink);
+  font-family: var(--font-ui);
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  transition: opacity var(--dur-panel, 480ms) var(--scan-ease), transform var(--dur-panel, 480ms) var(--scan-ease);
+}
+
+.scan.scan-entering {
+  opacity: 0;
+  transform: translateY(28px) scale(0.985);
+}
+
+.scan.scan-leaving {
+  opacity: 0;
+  transform: translateY(20px);
+  transition-duration: 240ms;
+  transition-timing-function: var(--ease-std, ease);
+  pointer-events: none;
+}
+
+.scan button {
+  font: inherit;
+  color: inherit;
+}
+
+.scan .scan-ico {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
+/* ---------- views: one shown, the others resting a little lower and transparent ---------- */
+
+.scan-view {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(14px);
+  transition: opacity var(--scan-route) var(--scan-ease), transform var(--scan-route) var(--scan-ease), visibility 0s linear var(--scan-route);
+}
+
+.scan[data-view="capture"] .scan-capture,
+.scan[data-view="adjust"] .scan-adjust,
+.scan[data-view="process"] .scan-process,
+.scan[data-view="result"] .scan-result {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: none;
+  transition-delay: 0s;
+}
+
+/* going back: the view left behind sinks, the one returned to was waiting slightly above */
+.scan[data-from="result"] .scan-view:not(.scan-result),
+.scan[data-from="adjust"] .scan-capture {
+  transform: translateY(-10px);
+}
+
+.scan[data-view="capture"][data-from="result"] .scan-capture,
+.scan[data-view="capture"][data-from="adjust"] .scan-capture {
+  transform: none;
+}
+
+/* ---------- the bars at the top and the foot ---------- */
+
+.scan-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) 12px 18px;
+  background: linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0));
+}
+
+.scan-top-solid {
+  position: relative;
+  background: var(--bg);
+  border-bottom: 1px solid var(--hairline);
+  padding-bottom: 10px;
+}
+
+.scan-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 17px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.scan-round {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--scan-glass);
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+  transition: transform var(--dur-micro, 150ms) var(--scan-ease), background-color var(--dur-micro, 150ms);
+}
+
+.scan-round:active {
+  transform: scale(0.92);
+}
+
+.scan-round:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.scan-round[hidden] {
+  display: none;
+}
+
+.scan-top-solid .scan-round {
+  background: transparent;
+  backdrop-filter: none;
+  color: var(--ink);
+}
+
+.scan-torch.on {
+  background: var(--scan-accent);
+  color: var(--accent-ink, #1a0800);
+}
+
+.scan-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: 28px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.7) 38%);
+}
+
+.scan :focus-visible {
+  outline: 2px solid var(--scan-accent);
+  outline-offset: 2px;
+}
+
+/* ---------- capture ---------- */
+
+.scan-viewport {
+  position: absolute;
+  inset: 0;
+}
+
+.scan-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+
+.scan-live {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.scan-live-quad {
+  fill: color-mix(in srgb, var(--scan-accent) 16%, transparent);
+  stroke: var(--scan-accent);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  opacity: 0;
+  transition: opacity var(--scan-small) var(--scan-ease);
+}
+
+.scan-live.found .scan-live-quad {
+  opacity: 1;
+}
+
+.scan-flash {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.scan-flash.go {
+  animation: scan-flash 260ms var(--ease-std, ease-out);
+}
+
+@keyframes scan-flash {
+  from { opacity: 0.85; }
+  to { opacity: 0; }
+}
+
+.scan-cam-message {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 16px;
+  padding: 24px;
+  text-align: center;
+  background: #0b0b0d;
+}
+
+.scan-cam-message[hidden] {
+  display: none;
+}
+
+.scan-cam-message p {
+  max-width: 320px;
+  margin: 0 auto;
+  color: var(--scan-dim);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.scan-cam-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.scan .btn {
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 999px;
+  font-size: 14px;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.scan-hint {
+  color: var(--scan-dim);
+  font-size: 13.5px;
+  text-align: center;
+}
+
+.scan-hint[hidden],
+.scan-tray[hidden] {
+  display: none;
+}
+
+.scan-tray {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px;
+  scrollbar-width: none;
+}
+
+.scan-thumb {
+  position: relative;
+  flex: none;
+  width: 48px;
+  height: 64px;
+  padding: 0;
+  overflow: hidden;
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  border-radius: 8px;
+  background: #1c1c20;
+  cursor: pointer;
+  animation: scan-pop var(--scan-small) var(--scan-ease);
+}
+
+.scan-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.scan-thumb.is-done,
+.scan-thumb.is-flat {
+  border-color: var(--scan-accent);
+}
+
+.scan-thumb.is-failed {
+  border-color: var(--danger, #ff5f57);
+}
+
+.scan-thumb-n {
+  position: absolute;
+  left: 3px;
+  bottom: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  text-shadow: 0 1px 3px #000;
+}
+
+.scan-thumb-bad {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  color: var(--danger, #ff5f57);
+  font-weight: 700;
+}
+
+.scan-spinner {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: var(--scan-accent);
+  border-radius: 50%;
+  animation: scan-spin 0.9s linear infinite;
+}
+
+@keyframes scan-spin {
+  to { transform: rotate(1turn); }
+}
+
+@keyframes scan-pop {
+  from { opacity: 0; transform: scale(0.6); }
+}
+
+.scan-controls {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+}
+
+.scan-controls > :first-child {
+  justify-self: start;
+}
+
+.scan-controls > :last-child {
+  justify-self: end;
+}
+
+.scan-shutter {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  padding: 0;
+  border: 4px solid #fff;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.scan-shutter span {
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  background: var(--scan-accent);
+  transition: transform var(--dur-micro, 150ms) var(--scan-ease);
+}
+
+.scan-shutter:active span,
+.scan-shooting .scan-shutter span {
+  transform: scale(0.82);
+}
+
+.scan-shutter:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.scan-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  padding: 0 14px 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--scan-accent);
+  color: var(--accent-ink, #1a0800) !important;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity var(--scan-small), transform var(--dur-micro, 150ms) var(--scan-ease);
+}
+
+.scan-done:disabled {
+  opacity: 0;
+  transform: scale(0.8);
+  pointer-events: none;
+}
+
+.scan-count {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.22);
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+}
+
+/* ---------- adjust ---------- */
+
+.scan-adjust {
+  background: #0b0b0d;
+}
+
+.scan-stage-wrap {
+  position: absolute;
+  inset: calc(64px + env(safe-area-inset-top, 0px)) 0 calc(96px + env(safe-area-inset-bottom, 0px));
+  display: grid;
+  place-items: center;
+}
+
+.scan-stage {
+  position: relative;
+  transition: transform var(--scan-route) var(--scan-ease);
+}
+
+.scan-photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.scan-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.scan-shade {
+  fill: rgba(0, 0, 0, 0.55);
+}
+
+.scan-quad {
+  fill: none;
+  stroke: var(--scan-accent);
+  stroke-width: 2.5px;
+  stroke-linejoin: round;
+}
+
+.scan-handle {
+  position: absolute;
+  width: 48px;
+  height: 48px;
+  margin: -24px 0 0 -24px;
+  display: grid;
+  place-items: center;
+  touch-action: none;
+  cursor: grab;
+}
+
+.scan-handle span {
+  width: 22px;
+  height: 22px;
+  border: 3px solid var(--scan-accent);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+  transition: transform var(--dur-micro, 150ms) var(--scan-ease);
+}
+
+.scan-handle.dragging span {
+  transform: scale(1.35);
+}
+
+.scan-handle:focus-visible span {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.scan-rotate-badge {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--scan-glass);
+  font-size: 12.5px;
+}
+
+.scan-rotate-badge[hidden] {
+  display: none;
+}
+
+.scan-loupe {
+  position: fixed;
+  z-index: 5;
+  width: 110px;
+  height: 110px;
+  border: 2px solid var(--scan-accent);
+  border-radius: 50%;
+  background: #000;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+.scan-loupe[hidden] {
+  display: none;
+}
+
+.scan-adjust-bar {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: #0b0b0d;
+  padding-top: 14px;
+}
+
+.scan-tool {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 64px;
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--scan-dim) !important;
+  font-size: 11.5px !important;
+  cursor: pointer;
+}
+
+.scan-tool:active {
+  color: var(--scan-ink) !important;
+}
+
+.scan-accept {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 22px 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--scan-accent);
+  color: var(--accent-ink, #1a0800) !important;
+  font-weight: 600;
+  font-size: 15px !important;
+  cursor: pointer;
+  transition: transform var(--dur-micro, 150ms) var(--scan-ease);
+}
+
+.scan-accept:active {
+  transform: scale(0.95);
+}
+
+.scan-ghost {
+  position: fixed;
+  z-index: 6;
+  object-fit: cover;
+  pointer-events: none;
+  transform-origin: center;
+}
+
+/* ---------- process ---------- */
+
+.scan-process {
+  background: #0b0b0d;
+}
+
+.scan-proc-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: calc(72px + env(safe-area-inset-top, 0px)) 24px calc(110px + env(safe-area-inset-bottom, 0px));
+}
+
+.scan-proc-page {
+  position: relative;
+  overflow: hidden;
+  border-radius: 6px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+}
+
+.scan-proc-image {
+  display: block;
+  max-width: min(78vw, 420px);
+  max-height: 56vh;
+  object-fit: contain;
+  background: #1c1c20;
+  min-width: 120px;
+  min-height: 160px;
+}
+
+/* the line that runs over the page while it is read */
+.scan-sweep {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 3px;
+  background: var(--scan-accent);
+  box-shadow: 0 0 18px 4px color-mix(in srgb, var(--scan-accent) 55%, transparent);
+  animation: scan-sweep 1.8s var(--ease-std, ease-in-out) infinite alternate;
+}
+
+@keyframes scan-sweep {
+  from { transform: translateY(0); }
+  to { transform: translateY(calc(56vh - 3px)); }
+}
+
+.scan-proc-text {
+  margin: 0;
+  color: var(--scan-dim);
+  font-size: 14.5px;
+  text-align: center;
+}
+
+.scan-progress {
+  width: min(320px, 70vw);
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.scan-progress span {
+  display: block;
+  height: 100%;
+  background: var(--scan-accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--scan-small) var(--scan-ease);
+}
+
+.scan-process .scan-bottom {
+  align-items: center;
+}
+
+/* ---------- result: the theme's own colours ---------- */
+
+.scan-result {
+  background: var(--bg);
+  color: var(--ink);
+  user-select: text;
+}
+
+.scan-res-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  overflow-y: auto;
+  padding: 14px 16px 16px;
+}
+
+.scan .scan-res-title {
+  height: 44px;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  border-radius: 0;
+  padding: 0 2px;
+}
+
+.scan-res-notes {
+  display: grid;
+  gap: 6px;
+}
+
+.scan-res-notes[hidden] {
+  display: none;
+}
+
+.scan-res-notes p {
+  margin: 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.scan .scan-res-text {
+  flex: 1 0 auto;
+  min-height: 42vh;
+  height: auto;
+  padding: 12px 14px;
+  resize: vertical;
+  font-family: var(--font-ui);
+  font-size: 15.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.scan-res-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 20px;
+  font-size: 14px;
+}
+
+.scan-check,
+.scan-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scan-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.scan .scan-res-images {
+  width: auto;
+  height: 34px;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+}
+
+.scan-details {
+  color: var(--ink-dim);
+  font-size: 13px;
+}
+
+.scan-details summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.scan-report {
+  margin: 8px 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.scan-details-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* the licenses dialog sits in the app's overlay layer, outside .scan */
+.scan-licenses {
+  max-height: 60vh;
+  overflow: auto;
+  margin: 10px 0 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.scan-result .btn {
+  border-color: var(--hairline);
+  color: var(--ink);
+}
+
+.scan-result .btn.primary {
+  color: var(--accent-ink);
+}
+
+.scan-res-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--hairline);
+  background: var(--bg);
+}
+
+.scan-res-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scan-res-actions .scan-ico {
+  width: 16px;
+  height: 16px;
+}
+
+.scan-save {
+  margin-left: auto;
+}
+
+/* ---------- less motion: changes happen at once ---------- */
+
+:root[data-motion="off"] .scan,
+:root[data-motion="off"] .scan * {
+  transition: none !important;
+  animation: none !important;
+}
+
+:root[data-motion="off"] .scan-sweep {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scan,
+  .scan * {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  .scan-sweep {
+    display: none;
+  }
+}

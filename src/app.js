@@ -47,6 +47,9 @@ import welcomeBrowserTextEn from './welcome-browser-en.md';
 import welcomeAndroidTextEn from './welcome-android-en.md';
 import { addReading, avatarNode, createTabBar, dayKey, drawHome, GOALS, shrinkPicture, streakOf, TABS } from './home.js';
 import { createNotesScreen } from './notesScreen.js';
+import { createScanner } from './scanner/scanner.js';
+import { scanNote } from './scanner/note.js';
+import { androidEngine, dispatch as scanDispatch, pageEngine } from './scanner/engine.js';
 import { createApocryphaScreen } from './apocrypha/screen.js';
 import { createTrash } from './trash.js';
 import { createUpdater } from './update.js';
@@ -142,6 +145,9 @@ const tabBar = createTabBar((tab) => pickTab(tab));
 let apocrypha = null; // the shared library (src/apocrypha/screen.js)
 let readingTimer = 0;
 let noteFolders = []; // the notes' folders in order (noteFolders.js); each note names its own
+// the document scanner (src/scanner): on Android, where the app reads text on the phone; elsewhere none
+const scanEngine = androidEngine(android);
+let scanner = null;
 const notesScreen = createNotesScreen({
   getNotes: () => [...notes.values()],
   getSaved: () => noteFolders,
@@ -178,6 +184,7 @@ const notesScreen = createNotesScreen({
   },
   onBack: () => showHome(),
   onTrash: () => trashView?.open('notes'),
+  onScan: scanEngine ? (folder) => openScanner(folder) : null,
   // the easter egg (cats.js): the words sent from the search turn the cat look on, or off again
   onSearchEnter: (text) => {
     if (!isCatWords(text)) return false;
@@ -2102,6 +2109,41 @@ async function addImage(file, pos) {
   view.focus();
 }
 
+/** The document scanner over the notes screen; engine: the app's own unless a test hands one in. */
+function openScanner(folder = '', engine = scanEngine) {
+  if (!engine || suspended || lost) return;
+  scanner ??= createScanner({
+    engine,
+    saveNote: saveScan,
+    download: (name, data, type) => api.download(name, data, type),
+    copy: (text) => api.copy(text),
+    onClosed: () => {
+      scanner = null;
+    },
+  });
+  scanner.open({ folder });
+}
+
+/** A scan becomes a new note: a heading, its text, and the pages' pictures if they were asked for. */
+async function saveScan({ title, text, images, folder }) {
+  const names = [];
+  const alts = [];
+  for (const image of images) {
+    if (!api.saveAsset) {
+      toast(t('image.unsupported'));
+      break;
+    }
+    if (image.blob.size > IMAGE_LIMIT) {
+      toast(t('image.tooBig'));
+      continue;
+    }
+    names.push(await api.saveAsset(image.blob));
+    alts.push(image.alt);
+  }
+  hideNotes();
+  await createNote(scanNote(title, text, names, alts), { folder });
+}
+
 /** What a backup holds: every note as a .md file, and the pictures they show under assets/. */
 async function backupFiles() {
   await flushSave();
@@ -2912,6 +2954,10 @@ window.__atlas = {
   ready,
   // Android's updater reports here (MainActivity → Updater.java)
   updateEvent: (event) => updater?.event(event),
+  // the document scanner's answers (MainActivity → Scanner.java), and the scanner itself for a check
+  // from outside: scanner() opens it, with flattening in the page where the app has no recognizer
+  scan: (event) => scanDispatch(event),
+  scanner: ({ folder = '', recognize = null } = {}) => openScanner(folder, scanEngine ?? pageEngine({ recognize })),
   trash: (tab) => trashView?.open(tab),
   setEditing: (on) => setEditing(on),
   summary: () => {
@@ -2958,6 +3004,7 @@ window.__atlas = {
   library: () => library,
   /** The Android back button: closes the topmost thing that is open; false when nothing was. */
   back() {
+    if (scanner?.back()) return true;
     if (dictation?.listening) {
       dictation.stop();
       return true;

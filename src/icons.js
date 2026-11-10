@@ -40,6 +40,8 @@ const PATHS = {
   source: '<path d="M5.25 4.5L1.75 8l3.5 3.5M10.75 4.5l3.5 3.5-3.5 3.5M9.25 2.75l-2.5 10.5"/>',
   visual: '<path d="M2.25 13.75h11.5"/><path d="M4.5 11.25L7.75 2.5h.5l3.25 8.75M5.6 8.25h4.8"/>',
   clear: '<path d="M6 13.75h7.75M2.6 9.4l5.9-6.15a1.4 1.4 0 0 1 2 0l2.4 2.4a1.4 1.4 0 0 1 0 2L7.1 13.75H4.9L2.6 11.4a1.4 1.4 0 0 1 0-2zM5.75 6.25l4.25 4.25"/>',
+  // the document scanner: a frame's corners round a line of text
+  scan: '<path d="M2.25 5.25v-2a1 1 0 0 1 1-1h2M10.75 2.25h2a1 1 0 0 1 1 1v2M13.75 10.75v2a1 1 0 0 1-1 1h-2M5.25 13.75h-2a1 1 0 0 1-1-1v-2"/><path d="M1.75 8h12.5"/><path d="M5 5.5h6M5 10.5h4" opacity=".55"/>',
   // a series of books: a folder with books standing in it (like an archive's folder inside a folder)
   // Apocrypha, the shared library: a scroll
   apocrypha: '<path d="M4.2 2.2h7.6a1.6 1.6 0 0 1 0 3.2H4.2zm0 0a1.6 1.6 0 0 0 0 3.2M4.2 5.4v7.2a1.4 1.4 0 0 0 1.4 1.4h7a1.4 1.4 0 0 1-1.4-1.4V5.4"/><path d="M6.6 8.4h3.4M6.6 10.8h2.6"/>',
