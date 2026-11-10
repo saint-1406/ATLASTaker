@@ -23,6 +23,7 @@ import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.util.Base64;
 import android.view.ActionMode;
+import android.view.Display;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.View;
@@ -1084,6 +1085,36 @@ public class MainActivity extends ComponentActivity {
                 barsShown = shown;
                 applyReading();
             });
+        }
+
+        /**
+         * How often the screen redraws while ATLAS is in front: high is the fastest the screen can (90, 120,
+         * 144 Hz), else 60 Hz. Some phones hold an app at 60 Hz unless it asks. Returns the fastest rate.
+         */
+        @JavascriptInterface
+        @SuppressWarnings("deprecation")
+        public float setFrameRate(boolean high) {
+            float fastest = 60f;
+            Display display = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ? getDisplay() : getWindowManager().getDefaultDisplay();
+            if (display == null) return fastest;
+            Display.Mode current = display.getMode();
+            Display.Mode best = null;
+            for (Display.Mode mode : display.getSupportedModes()) {
+                // only the modes at this resolution: a refresh rate must not change how sharp the screen is
+                if (mode.getPhysicalWidth() != current.getPhysicalWidth() || mode.getPhysicalHeight() != current.getPhysicalHeight()) continue;
+                fastest = Math.max(fastest, mode.getRefreshRate());
+                if (best == null) best = mode;
+                else if (high ? mode.getRefreshRate() > best.getRefreshRate() : Math.abs(mode.getRefreshRate() - 60f) < Math.abs(best.getRefreshRate() - 60f)) best = mode;
+            }
+            Display.Mode chosen = best;
+            runOnUiThread(() -> {
+                Window window = getWindow();
+                WindowManager.LayoutParams attrs = window.getAttributes();
+                attrs.preferredDisplayModeId = chosen == null ? 0 : chosen.getModeId();
+                attrs.preferredRefreshRate = chosen == null ? 0f : chosen.getRefreshRate();
+                window.setAttributes(attrs);
+            });
+            return fastest;
         }
 
         /** The status and navigation bars take the page's background; light icons on dark, dark on light. */

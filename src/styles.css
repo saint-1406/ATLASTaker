@@ -9864,10 +9864,10 @@ html:has(.app.formatting) .note-selbar {
   pointer-events: none;
 }
 
-/* made ahead and waiting: laid out, not drawn */
+/* made ahead and waiting: drawn already (so the first frame of a turn has nothing to draw) but not
+   to be seen — a trace of paper over the same paper */
 .rd-leaf.spare {
-  z-index: -1;
-  visibility: hidden;
+  opacity: 0.004;
 }
 
 .rd-leaf-box {

@@ -7,6 +7,7 @@ import { android, api, rescue } from './bridge.js';
 import { icon } from './icons.js';
 import { fingerFirst } from './touch.js';
 import { flip, motionEnabled, navigate, setMotion, shared, stagger } from './motion.js';
+import { fastestFrameRate, frameRateChoice, highFrameRate, setHighFrameRate } from './frameRate.js';
 import { catsOn, catWords, isCatWords, restoreCats, setCats } from './cats.js';
 import { createLibrary } from './library.js';
 import { insertComment, insertCodeBlock, insertDictation, pasteText, codeLanguageAt, showDictationPreview, urlAt } from './editor.js';
@@ -2440,6 +2441,10 @@ function menuSections() {
         sideItem({ icon: 'Aa', text: t('side.readLook'), hint: t('side.readLookHint'), chevron: true, run: () => close(() => showAppearance()) }),
         // the app's motion (motion.js): on unless turned off here, or the system asks for less
         sideToggle({ icon: '≈', text: t('side.motion'), hint: t('side.motionHint'), on: motionEnabled(), toggle: () => { setMotion(!motionEnabled()); sideMenu?.refresh(); } }),
+        // Android, on a screen faster than 60 Hz: its full rate or 60 Hz (frameRate.js)
+        frameRateChoice()
+          ? sideToggle({ icon: '⚡', text: t('side.frameRate', fastestFrameRate()), hint: t('side.frameRateHint', fastestFrameRate()), on: highFrameRate(), toggle: () => { setHighFrameRate(!highFrameRate()); sideMenu?.refresh(); } })
+          : null,
       ),
       settingsSection({
         getData: storageInfo,

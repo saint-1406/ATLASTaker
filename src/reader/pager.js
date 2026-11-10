@@ -123,7 +123,35 @@ export function createPager({ host, strip, frameFor, layout, onTurn, canCross = 
     const node = div('rd-leaf spare', under, keep, flap);
     node.setAttribute('aria-hidden', 'true');
     frame.append(node);
-    return { node, keep, front, copy, crease, flap, back, gloss, under, W: 0, H: 0, S: 0, corner: 'bottom', p: 0, drift: 0, raf: 0, settle: null };
+    const l = { node, keep, front, copy, crease, flap, back, gloss, under, at: -1, W: 0, H: 0, B: 0, corner: 'bottom', p: 0, drift: 0, anims: [], settle: null };
+    // laid out for the next page's turn, so the copy is drawn while the reader rests, not at the touch
+    sizeLeaf(l, index);
+    return l;
+  }
+
+  /** The leaf's layers sized to the page, its copy of the book on page `at`. */
+  function sizeLeaf(l, at) {
+    if (l.at !== at) {
+      l.copy.style.transform = `translate3d(${-at * step}px, 0, 0)`;
+      l.at = at;
+    }
+    const box = l.node.parentElement;
+    const W = box?.clientWidth || host.clientWidth || 1;
+    const H = box?.clientHeight || host.clientHeight || 1;
+    if (W === l.W && H === l.H) return;
+    l.W = W;
+    l.H = H;
+    // the boxes that cut the page at the fold: as small as still holds the page however the fold lies
+    l.B = Math.ceil(Math.hypot(W, H) * 1.15) + 2;
+    for (const el of [l.keep, l.flap]) {
+      el.style.width = `${l.B}px`;
+      el.style.height = `${2 * l.B}px`;
+    }
+    for (const el of [l.front, l.back]) {
+      el.style.width = `${W}px`;
+      el.style.height = `${H}px`;
+    }
+    l.under.style.height = `${2 * l.B}px`;
   }
 
   /** Makes the next spare leaf when the reader is idle. */
@@ -154,21 +182,7 @@ export function createPager({ host, strip, frameFor, layout, onTurn, canCross = 
       l = makeLeaf();
     }
     spareStale = true; // the one in use is gone: another is made after this turn
-    l.copy.style.transform = `translate3d(${-at * step}px, 0, 0)`;
-    const box = l.node.parentElement;
-    l.W = box?.clientWidth || host.clientWidth || 1;
-    l.H = box?.clientHeight || host.clientHeight || 1;
-    // the boxes that cut the page at the fold: big enough to hold the page however the fold lies
-    l.S = Math.ceil(2 * Math.hypot(l.W, l.H)) + 4;
-    for (const el of [l.keep, l.flap]) {
-      el.style.width = `${l.S}px`;
-      el.style.height = `${l.S}px`;
-    }
-    for (const el of [l.front, l.back]) {
-      el.style.width = `${l.W}px`;
-      el.style.height = `${l.H}px`;
-    }
-    l.under.style.height = `${l.S}px`;
+    sizeLeaf(l, at);
     l.corner = corner;
     l.drift = 0;
     l.node.classList.remove('spare');
@@ -176,20 +190,21 @@ export function createPager({ host, strip, frameFor, layout, onTurn, canCross = 
   }
 
   /**
-   * The leaf turned to `p`: 0 lies flat over the book, 1 has gone over to the spine. `drift` moves
-   * the corner up or down (the finger's way). Each frame touches only transforms and opacities of a
-   * few layers: nothing in the copied book is styled or laid out again, so a turn keeps up with the
-   * screen (120-144 Hz too).
+   * How the leaf's layers stand with the page turned to `p` (0 lies flat over the book, 1 has gone
+   * over to the spine) and the corner moved `drift` up or down: transforms and opacities only.
+   * Every transform keeps the same list of functions whatever p is, so the browser can blend two of
+   * these in between, and the page's copy and the box cutting it move by the same numbers: the text
+   * stays exactly where it is while the fold sweeps over it.
    */
-  function setLeaf(l, p, drift = l.drift) {
-    l.p = p;
-    l.drift = drift;
-    const { W, H, S } = l;
+  function leafPose(l, p, drift) {
+    const { W, H, B } = l;
     const cy = l.corner === 'top' ? 0 : H; // the corner's edge of the page
     const inward = cy === 0 ? 1 : -1; // toward the middle of the page
-    const arc = Math.sin(Math.PI * p);
+    // before the first moment the fold lies just past the corner, already at the angle it starts at
+    const q = Math.max(p, 0.0005);
+    const arc = Math.sin(Math.PI * q);
     // where the corner is: carried over toward the spine, rising a little on the way
-    let x = W - 2 * W * p;
+    let x = W - 2 * W * q;
     let y = cy + inward * H * 0.12 * arc + drift * arc;
     // paper does not stretch: the corner stays within a page's width of the spine at its edge...
     const reach = Math.hypot(x, y - cy);
@@ -204,61 +219,82 @@ export function createPager({ host, strip, frameFor, layout, onTurn, canCross = 
       x *= diag / far;
       y = H - cy + ((y - (H - cy)) * diag) / far;
     }
-    let vx = W - x;
-    let vy = cy - y;
-    let len = Math.hypot(vx, vy);
+    const vx = W - x;
+    const vy = cy - y;
+    const len = Math.hypot(vx, vy) || 1;
     // the fold: through the middle of the corner's way, across it
     let mx = (W + x) / 2;
     let my = (cy + y) / 2;
-    if (len < 0.5) {
-      // not lifted yet: the fold lies past the page's edge
-      vx = 1;
-      vy = 0;
-      len = 0;
-      mx = W + 1;
-      my = cy;
+    if (p <= 0) {
+      mx = W + (2 * vx) / len;
+      my = cy + (2 * vy) / len;
     }
     const turn = (Math.atan2(vy, vx) * 180) / Math.PI;
-    const at = `translate3d(${mx.toFixed(2)}px, ${my.toFixed(2)}px, 0) rotate(${turn.toFixed(3)}deg)`;
-    const back = `rotate(${(-turn).toFixed(3)}deg) translate3d(${(-mx).toFixed(2)}px, ${(-my).toFixed(2)}px, 0)`;
-    const box = `${at} translate3d(${-S}px, ${-S / 2}px, 0)`;
-    l.keep.style.transform = box;
-    l.flap.style.transform = box;
-    l.front.style.transform = `translate3d(${S}px, ${S / 2}px, 0) ${back}`;
-    l.back.style.transform = `translate3d(${S}px, ${S / 2}px, 0) scaleX(-1) ${back}`;
-    // shading: how deep the folded part is decides how wide its light and shadows are
-    const depth = len / 2;
+    const depth = p <= 0 ? 0 : len / 2; // how deep the folded part is: how wide its light and shadows are
     const shown = Math.min(1, depth / 12);
-    const strength = Math.sqrt(Math.max(0, arc)) * shown;
-    const grade = (n) => Math.max(0.001, n / 100).toFixed(4);
-    l.gloss.style.transform = `scaleX(${grade(depth)})`;
-    l.gloss.style.opacity = shown.toFixed(3);
-    l.crease.style.transform = `scaleX(${grade(Math.min(depth, W * 0.3) * 0.6)})`;
-    l.crease.style.opacity = strength.toFixed(3);
-    l.under.style.transform = `${at} translate3d(0, ${-S / 2}px, 0) scaleX(${grade(8 + Math.min(depth * 0.5, W * 0.22))})`;
-    l.under.style.opacity = strength.toFixed(3);
+    const strength = Math.sqrt(Math.max(0, Math.sin(Math.PI * p))) * shown;
+    const n = (v) => v.toFixed(3);
+    const grade = (v) => Math.max(0.001, v / 100).toFixed(4);
+    const at = `translate3d(${n(mx)}px, ${n(my)}px, 0px) rotate(${n(turn)}deg)`;
+    const undo = `rotate(${n(-turn)}deg) translate3d(${n(-mx)}px, ${n(-my)}px, 0px)`;
+    const box = `${at} translate3d(${-B}px, ${-B}px, 0px)`;
+    return {
+      keep: { transform: box },
+      flap: { transform: box },
+      front: { transform: `translate3d(${B}px, ${B}px, 0px) ${undo}` },
+      back: { transform: `translate3d(${B}px, ${B}px, 0px) scaleX(-1) ${undo}` },
+      gloss: { transform: `scaleX(${grade(depth)})`, opacity: n(shown) },
+      crease: { transform: `scaleX(${grade(Math.min(depth, W * 0.3) * 0.6)})`, opacity: n(strength) },
+      under: { transform: `${at} translate3d(0px, ${-B}px, 0px) scaleX(${grade(8 + Math.min(depth * 0.5, W * 0.22))})`, opacity: n(strength) },
+    };
   }
 
-  /** Turns the leaf to `to` over `ms` (the corner's drift settles too), then runs done(). */
+  const LAYERS = ['keep', 'flap', 'front', 'back', 'gloss', 'crease', 'under'];
+
+  function stopLeaf(l) {
+    for (const a of l.anims) a.cancel();
+    l.anims = [];
+  }
+
+  /** The leaf put at `p` at once (a finger moving it). */
+  function setLeaf(l, p, drift = l.drift) {
+    stopLeaf(l);
+    l.p = p;
+    l.drift = drift;
+    const pose = leafPose(l, p, drift);
+    for (const key of LAYERS) Object.assign(l[key].style, pose[key]);
+  }
+
+  /**
+   * Turns the leaf to `to` over `ms` (the corner's drift settles too), then runs done(). The way is
+   * worked out beforehand, a pose every few milliseconds, and handed to the browser as animations
+   * of transforms and opacities: it plays them off the page's own thread at the screen's own rate
+   * (60, 90, 120, 144 Hz), and nothing the page does meanwhile can make the page stutter.
+   */
   function animateLeaf(l, to, ms, ease, done) {
-    cancelAnimationFrame(l.raf);
     const from = l.p;
     const drift = l.drift;
-    const start = performance.now();
+    const steps = Math.max(12, Math.min(90, Math.ceil(ms / 10)));
+    const frames = Object.fromEntries(LAYERS.map((key) => [key, []]));
+    for (let i = 0; i <= steps; i++) {
+      const e = ease(i / steps);
+      const pose = leafPose(l, from + (to - from) * e, drift * (1 - e));
+      for (const key of LAYERS) frames[key].push(pose[key]);
+    }
+    stopLeaf(l);
+    l.p = to;
+    l.drift = 0;
+    // the end pose stays on the layers themselves, so nothing jumps when the animations go
+    const last = leafPose(l, to, 0);
+    for (const key of LAYERS) Object.assign(l[key].style, last[key]);
+    l.anims = LAYERS.map((key) => l[key].animate(frames[key], { duration: ms, easing: 'linear' }));
     l.settle = () => {
-      cancelAnimationFrame(l.raf);
-      setLeaf(l, to, 0);
+      if (!l.settle) return;
       l.settle = null;
+      stopLeaf(l);
       done();
     };
-    const tick = (now) => {
-      const t = Math.min(1, (now - start) / ms);
-      const e = ease(t);
-      setLeaf(l, from + (to - from) * e, drift * (1 - e));
-      if (t < 1) l.raf = requestAnimationFrame(tick);
-      else l.settle?.();
-    };
-    l.raf = requestAnimationFrame(tick);
+    l.anims[0].finished.then(() => l.settle?.(), () => {});
   }
 
   /** A turn still under way ends at once where it was going (a quick next turn, a new layout). */
@@ -270,7 +306,7 @@ export function createPager({ host, strip, frameFor, layout, onTurn, canCross = 
   }
 
   function dropLeaf(l) {
-    cancelAnimationFrame(l.raf);
+    stopLeaf(l);
     l.node.remove();
     if (leaf === l) leaf = null;
     prepareSpare();
@@ -587,7 +623,7 @@ export function createPager({ host, strip, frameFor, layout, onTurn, canCross = 
       clearTimeout(spareTimer);
       watcher.disconnect();
       if (leaf) {
-        cancelAnimationFrame(leaf.raf);
+        stopLeaf(leaf);
         leaf.node.remove();
         leaf = null;
       }
