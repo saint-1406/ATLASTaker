@@ -78,6 +78,7 @@ export function isNewer(candidate, current) {
 }
 
 const RELEASES = 'https://api.github.com/repos/saint-1406/ATLASTaker/releases/latest';
+const RELEASE_PAGE = 'https://github.com/saint-1406/ATLASTaker/releases/latest';
 let releaseCache = null; // { at, value }: GitHub is asked at most once an hour
 
 /** The newest release on GitHub, for the page's "update" line: { version, current, newer, notes, page }. */
@@ -89,12 +90,26 @@ async function latestRelease(fetchImpl = fetch) {
   } catch (err) {
     throw new HttpError(503, `GitHub: ${err.message}`);
   }
-  if (!res.ok) throw new HttpError(502, `GitHub ${res.status}`);
-  const body = await res.json();
+  // GitHub lets each address ask its API only 60 times an hour: past that, the release page's address
+  // still names the newest tag (no notes then)
+  const body = res.ok ? await res.json() : await releaseWithoutApi(fetchImpl, res.status);
   const version = String(body.tag_name ?? '').replace(/^v/, '');
   const value = { version, current: VERSION, newer: isNewer(version, VERSION), notes: String(body.body ?? '').slice(0, 4000), page: String(body.html_url ?? '') };
   releaseCache = { at: Date.now(), value };
   return value;
+}
+
+/** { tag_name, html_url, body } from where github.com/…/releases/latest leads. */
+async function releaseWithoutApi(fetchImpl, apiStatus) {
+  let res;
+  try {
+    res = await fetchImpl(RELEASE_PAGE, { redirect: 'manual', headers: { 'User-Agent': 'ATLAS-Notetaker' }, signal: AbortSignal.timeout(15_000) });
+  } catch {
+    throw new HttpError(502, `GitHub ${apiStatus}`);
+  }
+  const tag = /\/releases\/tag\/([0-9A-Za-z.-]+)/.exec(res.headers.get('location') ?? '')?.[1];
+  if (!tag) throw new HttpError(502, `GitHub ${apiStatus}`);
+  return { tag_name: tag, html_url: `https://github.com/saint-1406/ATLASTaker/releases/tag/${tag}`, body: '' };
 }
 
 export function defaultDataDir() {

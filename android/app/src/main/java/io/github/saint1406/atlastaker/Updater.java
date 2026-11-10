@@ -48,6 +48,9 @@ import java.util.concurrent.Executors;
  */
 final class Updater {
     private static final String LATEST = "https://api.github.com/repos/saint-1406/ATLASTaker/releases/latest";
+    // the same, without the API: GitHub lets each address ask its API only 60 times an hour, and a shared
+    // Wi-Fi uses that up. The release page's address names the newest tag; the files have fixed names.
+    private static final String REPO = "https://github.com/saint-1406/ATLASTaker";
     private static final String APK_TYPE = "application/vnd.android.package-archive";
 
     interface Events {
@@ -83,8 +86,18 @@ final class Updater {
     // ---------- asking GitHub ----------
 
     private void checkNow() {
+        JSONObject release;
         try {
-            JSONObject release = new JSONObject(readText(LATEST));
+            release = new JSONObject(readText(LATEST));
+        } catch (IOException | JSONException apiFailed) {
+            try {
+                release = releaseWithoutApi();
+            } catch (IOException | JSONException e) {
+                error("check", apiFailed);
+                return;
+            }
+        }
+        try {
             String version = release.optString("tag_name", "").replaceFirst("^v", "");
             JSONObject apk = null;
             JSONArray assets = release.optJSONArray("assets");
@@ -111,6 +124,63 @@ final class Updater {
         } catch (IOException | JSONException e) {
             error("check", e);
         }
+    }
+
+    /**
+     * The newest release as the API would describe it (tag, page, the APK's address, size and digest),
+     * found without the API: the tag from where /releases/latest leads, the digest from SHA256SUMS.txt.
+     */
+    private static JSONObject releaseWithoutApi() throws IOException, JSONException {
+        HttpURLConnection page = (HttpURLConnection) new URL(REPO + "/releases/latest").openConnection();
+        String location;
+        try {
+            page.setConnectTimeout(20_000);
+            page.setReadTimeout(30_000);
+            page.setInstanceFollowRedirects(false);
+            page.setRequestProperty("User-Agent", "ATLAS-Notetaker");
+            page.getResponseCode();
+            location = page.getHeaderField("Location");
+        } finally {
+            page.disconnect();
+        }
+        String marker = "/releases/tag/";
+        if (location == null || !location.contains(marker)) throw new IOException("no latest release");
+        String tag = location.substring(location.indexOf(marker) + marker.length()).replaceAll("[^0-9A-Za-z.\\-]", "");
+        String version = tag.replaceFirst("^v", "");
+        String name = "ATLASTaker-" + version + "-android.apk";
+        String base = REPO + "/releases/download/" + tag + "/";
+        String digest = null;
+        for (String line : readText(base + "SHA256SUMS.txt", false).split("\n")) {
+            String[] parts = line.trim().split("\\s+");
+            if (parts.length == 2 && parts[1].equals(name) && parts[0].matches("[0-9a-fA-F]{64}")) digest = parts[0].toLowerCase(Locale.ROOT);
+        }
+        // without the digest the file could not be checked: no update rather than an unchecked one
+        if (digest == null) throw new IOException("no checksum for " + name);
+        HttpURLConnection head = (HttpURLConnection) new URL(base + name).openConnection();
+        long size;
+        try {
+            head.setRequestMethod("HEAD");
+            head.setConnectTimeout(20_000);
+            head.setReadTimeout(30_000);
+            head.setInstanceFollowRedirects(true);
+            head.setRequestProperty("User-Agent", "ATLAS-Notetaker");
+            if (head.getResponseCode() / 100 != 2) throw new IOException("HTTP " + head.getResponseCode());
+            size = head.getContentLengthLong();
+        } finally {
+            head.disconnect();
+        }
+        if (size <= 0) throw new IOException("no size for " + name);
+        JSONObject apk = new JSONObject();
+        apk.put("name", name);
+        apk.put("browser_download_url", base + name);
+        apk.put("size", size);
+        apk.put("digest", "sha256:" + digest);
+        JSONObject release = new JSONObject();
+        release.put("tag_name", tag);
+        release.put("html_url", REPO + marker + tag);
+        release.put("body", "");
+        release.put("assets", new JSONArray().put(apk));
+        return release;
     }
 
     /** "0.16.0" newer than "0.15.0"; a part that is not a number counts as 0. */
@@ -333,7 +403,11 @@ final class Updater {
     }
 
     private static String readText(String url) throws IOException {
-        HttpURLConnection connection = open(url, true);
+        return readText(url, true);
+    }
+
+    private static String readText(String url, boolean api) throws IOException {
+        HttpURLConnection connection = open(url, api);
         try (InputStream in = connection.getInputStream()) {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             byte[] buffer = new byte[16 * 1024];
