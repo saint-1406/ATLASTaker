@@ -4,7 +4,7 @@
 
 import { h } from './overlays.js';
 import { currentLocale, t } from './i18n.js';
-import { BRIGHTNESS, isModified, READ_THEMES, styleVars, themeStyle, TURNS } from './skins.js';
+import { BRIGHTNESS, isModified, READ_THEMES, styleVars, themeStyle, TURN_SPEED, TURNS } from './skins.js';
 
 /** Puts a theme on a node (the reader, a card, the preview): its palette and its text style. */
 export function paintTheme(node, look, id) {
@@ -68,6 +68,10 @@ export const icon = (inner, cls = '') => {
   node.innerHTML = inner; // fixed markup from this file, never user text
   return node;
 };
+// slow and fast: one chevron, then three
+const ICON_SLOW = '<path d="M6.5 4.5 10 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>';
+const ICON_FAST =
+  '<path d="M2.5 4.5 6 8l-3.5 3.5M6.5 4.5 10 8l-3.5 3.5M10.5 4.5 14 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>';
 export const ICONS = { scroll: ICON_SCROLL, pages: ICON_PAGES, moon: ICON_MOON, sun: ICON_SUN, gear: ICON_GEAR };
 
 /**
@@ -75,7 +79,7 @@ export const ICONS = { scroll: ICON_SCROLL, pages: ICON_PAGES, moon: ICON_MOON, 
  * onReading(patch, { redraw }), onBright(value) (live, while the slider moves), onCustomize(), onClose() }.
  */
 export function drawQuickPanel(panel, ctx) {
-  const { readMode, readTurn, readLook: look } = ctx.reading;
+  const { readMode, readTurn, readSpeed = 1, readLook: look } = ctx.reading;
   const pick = (patch) => ctx.onReading(patch);
   const lookPatch = (change) => pick({ readLook: { ...look, ...change } });
 
@@ -117,6 +121,24 @@ export function drawQuickPanel(panel, ctx) {
         ),
       )
     : null;
+  // how fast the pages turn: under the ways of turning, while there is a turn to see
+  let speed = null;
+  if (paged && readTurn !== 'none') {
+    const range = h('input', {
+      type: 'range',
+      class: 'rq-range',
+      min: String(TURN_SPEED.min),
+      max: String(TURN_SPEED.max),
+      step: '0.05',
+      value: String(readSpeed),
+      'aria-label': t('reader.speed'),
+      title: t('reader.speed'),
+    });
+    fillRange(range);
+    range.addEventListener('input', () => fillRange(range));
+    range.addEventListener('change', () => ctx.onReading({ readSpeed: Number(range.value) }, { redraw: false }));
+    speed = h('div', { class: 'rq-bright rq-speed' }, icon(ICON_SLOW, 'rq-sun-small'), range, icon(ICON_FAST, 'rq-sun-large'));
+  }
   const slider = h('input', {
     type: 'range',
     class: 'rq-range',
@@ -149,6 +171,6 @@ export function drawQuickPanel(panel, ctx) {
       h('button', { type: 'button', class: 'rq-close', title: t('reader.marks.close'), 'aria-label': t('reader.marks.close'), onclick: () => ctx.onClose() }, '✕'),
       h('span', { class: 'rq-title' }, t('appearance.quick')),
     ),
-    ...[h('div', { class: 'rq-row' }, sizes, toggles), turns, bright, cards, customize].filter(Boolean),
+    ...[h('div', { class: 'rq-row' }, sizes, toggles), turns, speed, bright, cards, customize].filter(Boolean),
   );
 }

@@ -3913,21 +3913,21 @@ textarea {
 :root[data-turn="flip"][data-turn-dir="next"]::view-transition-old(rd-page) {
   z-index: 2;
   transform-origin: 0 50%;
-  animation: rd-flip-away 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: rd-flip-away calc(480ms * var(--rd-turn-k, 1)) cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 :root[data-turn="flip"][data-turn-dir="next"]::view-transition-new(rd-page) {
-  animation: rd-uncover 480ms ease-out both;
+  animation: rd-uncover calc(480ms * var(--rd-turn-k, 1)) ease-out both;
 }
 
 :root[data-turn="flip"][data-turn-dir="prev"]::view-transition-new(rd-page) {
   z-index: 2;
   transform-origin: 0 50%;
-  animation: rd-flip-back 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: rd-flip-back calc(480ms * var(--rd-turn-k, 1)) cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 :root[data-turn="flip"][data-turn-dir="prev"]::view-transition-old(rd-page) {
-  animation: rd-cover 480ms ease-out both;
+  animation: rd-cover calc(480ms * var(--rd-turn-k, 1)) ease-out both;
 }
 
 @keyframes rd-flip-away {
@@ -3979,22 +3979,22 @@ textarea {
 /* the stack: the next page slides in over the one before, which sinks a little */
 :root[data-turn="stack"][data-turn-dir="next"]::view-transition-new(rd-page) {
   z-index: 2;
-  animation: rd-slide-in 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: rd-slide-in calc(420ms * var(--rd-turn-k, 1)) cubic-bezier(0.2, 0.8, 0.2, 1) both;
   box-shadow: -18px 0 40px rgba(0, 0, 0, 0.3);
 }
 
 :root[data-turn="stack"][data-turn-dir="next"]::view-transition-old(rd-page) {
-  animation: rd-sink 420ms ease-out both;
+  animation: rd-sink calc(420ms * var(--rd-turn-k, 1)) ease-out both;
 }
 
 :root[data-turn="stack"][data-turn-dir="prev"]::view-transition-old(rd-page) {
   z-index: 2;
-  animation: rd-slide-out 420ms cubic-bezier(0.4, 0, 0.6, 1) both;
+  animation: rd-slide-out calc(420ms * var(--rd-turn-k, 1)) cubic-bezier(0.4, 0, 0.6, 1) both;
   box-shadow: -18px 0 40px rgba(0, 0, 0, 0.3);
 }
 
 :root[data-turn="stack"][data-turn-dir="prev"]::view-transition-new(rd-page) {
-  animation: rd-rise 420ms ease-out both;
+  animation: rd-rise calc(420ms * var(--rd-turn-k, 1)) ease-out both;
 }
 
 @keyframes rd-slide-in {
@@ -4025,11 +4025,11 @@ textarea {
 
 /* the fade: one page dissolves into the next */
 :root[data-turn="fade"]::view-transition-old(rd-page) {
-  animation: rd-fade-out 320ms ease both;
+  animation: rd-fade-out calc(320ms * var(--rd-turn-k, 1)) ease both;
 }
 
 :root[data-turn="fade"]::view-transition-new(rd-page) {
-  animation: rd-fade-in 320ms ease both;
+  animation: rd-fade-in calc(320ms * var(--rd-turn-k, 1)) ease both;
 }
 
 @keyframes rd-fade-out {
@@ -9851,17 +9851,16 @@ html:has(.app.formatting) .note-selbar {
 }
 
 /* ---------- the reader: a page turned by hand (pager.js, the leaf) ----------
-   A copy of the page swings about its left edge over the book; the page under it is already in place.
-   Each frame the script moves only transforms and opacities of the small layers here: the copied
-   book inside is never styled or laid out again while it turns. */
+   A copy of the page lies over the book and is folded back from a corner toward the spine, as paper
+   is. Two big boxes share one edge on the fold line: one holds the page as it still lies, the other
+   the folded-over part mirrored onto it. Each frame the script moves only transforms and opacities;
+   the copied book inside is never styled or laid out again while it turns. */
 
 .rd-leaf {
   position: absolute;
   inset: 0;
   z-index: 6;
   overflow: hidden;
-  perspective: 2200px;
-  perspective-origin: 0 50%;
   pointer-events: none;
 }
 
@@ -9871,19 +9870,26 @@ html:has(.app.formatting) .note-selbar {
   visibility: hidden;
 }
 
-.rd-leaf-page {
+.rd-leaf-box {
   position: absolute;
-  inset: 0;
-  transform-origin: 0 50%;
-  transform-style: preserve-3d;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.rd-leaf-front,
+.rd-leaf-back {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  transform-origin: 0 0;
   will-change: transform;
 }
 
 .rd-leaf-front {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  backface-visibility: hidden;
   /* the copy of the book keeps to itself: nothing in it reaches the page around */
   contain: strict;
 }
@@ -9896,34 +9902,56 @@ html:has(.app.formatting) .note-selbar {
   width: 100%;
 }
 
-/* light leaves the page as it rises: darker toward its free edge, a soft gleam near the fold */
-.rd-leaf-shade {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 0%, rgba(0, 0, 0, 0) 35%, rgba(0, 0, 0, 0.16) 78%, rgba(0, 0, 0, 0.34) 100%);
-  will-change: opacity;
+/* the back of the page: plain paper, a shade darker, its edges casting a soft shadow on the page */
+.rd-leaf-back {
+  box-shadow:
+    0 0 3px rgba(0, 0, 0, 0.18),
+    0 0 26px rgba(0, 0, 0, 0.3);
+  background-image: linear-gradient(rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.05));
 }
 
-/* the shadow the rising page casts on the page under it, just past its free edge */
-.rd-leaf-cast {
+/* the folded part bends over: in shadow at the fold, catching the light where it curves, dimmer at its edge */
+.rd-leaf-gloss {
   position: absolute;
   top: 0;
+  right: 0;
   bottom: 0;
-  left: 0;
-  width: clamp(36px, 14%, 90px);
+  width: 100px;
   opacity: 0;
-  background: linear-gradient(90deg, rgba(0, 0, 0, 0.38), rgba(0, 0, 0, 0.12) 45%, transparent);
+  transform-origin: 100% 50%;
+  background: linear-gradient(
+    to left,
+    rgba(0, 0, 0, 0.22) 0%,
+    rgba(0, 0, 0, 0.04) 10%,
+    rgba(255, 255, 255, 0.12) 26%,
+    rgba(255, 255, 255, 0.04) 55%,
+    rgba(0, 0, 0, 0.1) 100%
+  );
   will-change: transform, opacity;
 }
 
-/* and the page under it dims a little while it is covered */
-.rd-leaf-dim {
+/* the page still lying curves up into the fold: darker toward it */
+.rd-leaf-crease {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 100px;
   opacity: 0;
-  background: #000;
-  transform-origin: 0 50%;
+  transform-origin: 100% 50%;
+  background: linear-gradient(to left, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.06) 45%, transparent);
+  will-change: transform, opacity;
+}
+
+/* the lifted page's shadow on the page under it, along the fold */
+.rd-leaf-under {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100px;
+  opacity: 0;
+  transform-origin: 0 0;
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.42), rgba(0, 0, 0, 0.14) 35%, transparent);
   will-change: transform, opacity;
 }
 

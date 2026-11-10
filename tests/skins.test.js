@@ -61,9 +61,14 @@ test('reading preferences keep only what the reader knows', () => {
   assert.deepEqual(normalizeReading({ readMode: 'pages', readTurn: 'stack', readLook: { theme: 'night', bright: 0.6 } }), {
     readMode: 'pages',
     readTurn: 'stack',
+    readSpeed: 1,
     readLook: { theme: 'night', auto: false, bright: 0.6, themes: {} },
   });
   assert.equal(normalizeReading({ readTurn: 'explode' }).readTurn, 'flip');
+  // the speed of turns stays within its range; anything else is as designed
+  assert.equal(normalizeReading({ readSpeed: 9 }).readSpeed, 2);
+  assert.equal(normalizeReading({ readSpeed: 0.1 }).readSpeed, 0.5);
+  assert.equal(normalizeReading({ readSpeed: 'fast' }).readSpeed, 1);
   for (const turn of TURNS) assert.equal(typeof STRINGS.en.reader.turns[turn], 'string', turn);
 });
 

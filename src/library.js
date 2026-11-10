@@ -1434,7 +1434,9 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
 
   /** Paints the reader in its theme; a new font or spacing lays the open book out again. */
   function applyReadLook() {
-    const look = getReading().readLook;
+    const { readLook: look, readSpeed = 1 } = getReading();
+    // how long a page turn takes, against its designed length (pager.js and the view transitions in styles.css)
+    document.documentElement.style.setProperty('--rd-turn-k', String(Math.round((1 / readSpeed) * 1000) / 1000));
     const style = paintTheme(reader, look, shownTheme(look, systemDark.matches));
     setDim(reader, look.bright);
     const key = JSON.stringify([style.font, style.bold, style.leading, style.letter, style.word, style.margin, style.justify]);
@@ -1469,7 +1471,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   function setReading(patch, { redraw = true } = {}) {
     onReading(patch);
     const controller = reading?.controller;
-    if ('readLook' in patch) applyReadLook();
+    if ('readLook' in patch || 'readSpeed' in patch) applyReadLook();
     if (controller) {
       if ('readMode' in patch) {
         controller.setMode(patch.readMode);

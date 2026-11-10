@@ -32,6 +32,7 @@ const STATE_RULES = {
   // how the reader shows a book (src/skins.js)
   readMode: (v) => v === 'scroll' || v === 'pages',
   readTurn: (v) => ['flip', 'slide', 'stack', 'fade', 'none'].includes(v),
+  readSpeed: (v) => typeof v === 'number' && v >= 0.5 && v <= 2,
   readFont: (v) => v === 'serif' || v === 'sans',
   readLeading: (v) => ['tight', 'normal', 'loose'].includes(v),
   // reading themes and their changes: the page checks every field (normalizeReadLook), here only the size

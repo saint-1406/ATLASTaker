@@ -112,6 +112,7 @@ export const SETTING_KEYS = [
   'fontScale',
   'readMode',
   'readTurn',
+  'readSpeed',
   'readFont',
   'readLeading',
   'readLook',

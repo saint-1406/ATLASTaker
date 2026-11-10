@@ -38,6 +38,8 @@ export function toneOf(theme, systemDark = true) {
 export const READ_MODES = ['scroll', 'pages'];
 /** Page turns: a book page over its spine, a slide, a stack of cards, a fade, or none at all. */
 export const TURNS = ['flip', 'slide', 'stack', 'fade', 'none'];
+/** How fast pages turn: 1 is as designed, 2 twice as fast, 0.5 half as fast. */
+export const TURN_SPEED = { min: 0.5, max: 2 };
 
 // ---------- reading themes: colours, a font and a layout, laid over the reader only ----------
 //
@@ -148,13 +150,14 @@ function fromOldReading(saved) {
   return normalizeReadLook({ themes: { app } });
 }
 
-export const DEFAULT_READING = { readMode: 'scroll', readTurn: 'flip', readLook: DEFAULT_READ_LOOK };
+export const DEFAULT_READING = { readMode: 'scroll', readTurn: 'flip', readSpeed: 1, readLook: DEFAULT_READ_LOOK };
 
 export function normalizeReading(saved = {}) {
   const pick = (key, list) => (list.includes(saved[key]) ? saved[key] : DEFAULT_READING[key]);
   return {
     readMode: pick('readMode', READ_MODES),
     readTurn: pick('readTurn', TURNS),
+    readSpeed: Number.isFinite(saved.readSpeed) ? Math.round(Math.min(TURN_SPEED.max, Math.max(TURN_SPEED.min, saved.readSpeed)) * 100) / 100 : 1,
     readLook: saved.readLook ? normalizeReadLook(saved.readLook) : fromOldReading(saved),
   };
 }
