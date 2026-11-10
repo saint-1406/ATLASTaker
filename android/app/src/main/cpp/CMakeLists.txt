@@ -16,6 +16,14 @@ endif()
 set(ncnn_DIR ${DEPS}/ncnn/${ANDROID_ABI}/lib/cmake/ncnn)
 find_package(ncnn REQUIRED)
 
+# ncnn's package puts -fno-rtti;-fno-exceptions on whoever links it, after this target's own options,
+# so -fexceptions below lost and `try` did not compile. Its -fno-exceptions goes; -fno-rtti stays.
+get_target_property(NCNN_OPTIONS ncnn INTERFACE_COMPILE_OPTIONS)
+if(NCNN_OPTIONS)
+    list(REMOVE_ITEM NCNN_OPTIONS -fno-exceptions)
+    set_target_properties(ncnn PROPERTIES INTERFACE_COMPILE_OPTIONS "${NCNN_OPTIONS}")
+endif()
+
 set(OpenCV_DIR ${DEPS}/opencv-mobile/sdk/native/jni)
 find_package(OpenCV REQUIRED core imgproc)
 
