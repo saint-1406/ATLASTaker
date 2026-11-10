@@ -71,11 +71,18 @@ export function showMenu(x, y, items, { onClose, above = false, preserveFocus = 
     if (!item.disabled) buttons.push(button);
   }
   layer().append(node);
-  const rect = node.getBoundingClientRect();
+  // the size as laid out: getBoundingClientRect would see it shrunk by its entrance (scale 0.94)
+  const rect = { width: node.offsetWidth, height: node.offsetHeight };
   const left = above ? x - rect.width : x;
   const top = above ? y - rect.height : y;
-  node.style.left = `${Math.max(8, Math.min(left, innerWidth - rect.width - 8))}px`;
-  node.style.top = `${Math.max(8, Math.min(top, innerHeight - rect.height - 8))}px`;
+  const finalLeft = Math.max(8, Math.min(left, innerWidth - rect.width - 8));
+  const finalTop = Math.max(8, Math.min(top, innerHeight - rect.height - 8));
+  node.style.left = `${finalLeft}px`;
+  node.style.top = `${finalTop}px`;
+  // the menu grows out of the point it was opened at (the pointer, a button's corner)
+  const ox = Math.max(0, Math.min(rect.width, x - finalLeft));
+  const oy = Math.max(0, Math.min(rect.height, y - finalTop));
+  node.style.transformOrigin = `${ox}px ${oy}px`;
 
   const onPointer = (e) => {
     if (!node.contains(e.target)) closeMenu();

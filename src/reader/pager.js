@@ -7,7 +7,7 @@
 // A long book is laid out a part at a time (view.js): at the last page of a part the next turn
 // asks the owner to put the next part in place (canCross / cross) and lands on its first page.
 
-const DURATION = { slide: 380, leaf: 650 };
+const DURATION = { slide: 380, leaf: 480 };
 const VIEW_TURNS = new Set(['flip', 'stack', 'fade']);
 const hasViewTransitions = () => typeof document.startViewTransition === 'function';
 
@@ -33,7 +33,7 @@ function bezier(x1, y1, x2, y2) {
     return at(y1, y2, (lo + hi) / 2);
   };
 }
-const EASE_PAGE = bezier(0.35, 0.04, 0.18, 1);
+const EASE_PAGE = bezier(0.22, 1, 0.36, 1);
 const EASE_OUT = bezier(0.2, 0.8, 0.2, 1);
 
 /**
@@ -58,7 +58,7 @@ export function createPager({ host, strip, frameFor, layout, onTurn, canCross = 
    * transitions are missing. A slide cannot carry on into another part: that turn fades instead.
    */
   function effective(intoAnotherPart = false) {
-    if (reduced.matches) return 'none';
+    if (reduced.matches || !motionWanted()) return 'none';
     if (turn === 'flip' && !intoAnotherPart && leafable()) return 'flip';
     if (VIEW_TURNS.has(turn) && !hasViewTransitions()) return 'slide';
     if (intoAnotherPart && turn === 'slide') return hasViewTransitions() ? 'fade' : 'none';
@@ -379,7 +379,11 @@ export function createPager({ host, strip, frameFor, layout, onTurn, canCross = 
         return;
       }
       const far = Math.abs(g.dx) > Math.min(80, host.clientWidth * 0.18);
-      go(far ? target + (g.dx < 0 ? 1 : -1) : index);
+      // a quick flick turns the page even when it went only a little way — unless the finger turned back at the end
+      const velocity = Math.abs(g.dx) / Math.max(1, performance.now() - g.at);
+      const reversing = (g.speed ?? 0) * g.dx < 0 && Math.abs(g.speed ?? 0) > 0.3;
+      const flick = velocity > 0.11 && Math.abs(g.dx) > 16 && !reversing;
+      go(far || flick ? target + (g.dx < 0 ? 1 : -1) : index);
       return;
     }
     // a short tap near an edge turns the page, unless it lands on a link or text is being selected

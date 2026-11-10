@@ -128,14 +128,22 @@ export const transitionName = (prefix, id) => `${prefix}-${String(id).replace(/[
 // element gets .m-press for as long as the finger is down (styles.css draws it).
 const PRESSABLE = 'button, [role="button"], .lib-card, .notes-card, .home-book, .home-tile, .lib-pocket, .lib-chip, .side-item, .ctx-item, a.btn';
 let pressed = null;
+let lastPress = null; // where the last press was, for what it opens to grow out of (a book from its cover)
 function release() {
   pressed?.classList.remove('m-press');
   pressed = null;
 }
+
+/** The point of a press made in the last moment (x, y on the screen), or null. */
+export function pressPoint(maxAge = 1500) {
+  return lastPress && performance.now() - lastPress.at < maxAge ? lastPress : null;
+}
+
 document.addEventListener(
   'pointerdown',
   (event) => {
     if (event.button !== 0) return;
+    lastPress = { x: event.clientX, y: event.clientY, at: performance.now() };
     const el = event.target.closest?.(PRESSABLE);
     if (!el || el.disabled) return;
     release();

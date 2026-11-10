@@ -2522,7 +2522,7 @@ textarea {
 .lib-body {
   flex: 1;
   overflow: auto;
-  padding: 24px clamp(14px, 4vw, 48px) 80px;
+  padding: 24px clamp(18px, 4vw, 48px) 80px;
 }
 
 .lib-grid {
@@ -3913,21 +3913,21 @@ textarea {
 :root[data-turn="flip"][data-turn-dir="next"]::view-transition-old(rd-page) {
   z-index: 2;
   transform-origin: 0 50%;
-  animation: rd-flip-away 560ms cubic-bezier(0.45, 0.05, 0.4, 1) both;
+  animation: rd-flip-away 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 :root[data-turn="flip"][data-turn-dir="next"]::view-transition-new(rd-page) {
-  animation: rd-uncover 560ms ease-out both;
+  animation: rd-uncover 480ms ease-out both;
 }
 
 :root[data-turn="flip"][data-turn-dir="prev"]::view-transition-new(rd-page) {
   z-index: 2;
   transform-origin: 0 50%;
-  animation: rd-flip-back 560ms cubic-bezier(0.45, 0.05, 0.4, 1) both;
+  animation: rd-flip-back 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 :root[data-turn="flip"][data-turn-dir="prev"]::view-transition-old(rd-page) {
-  animation: rd-cover 560ms ease-in both;
+  animation: rd-cover 480ms ease-out both;
 }
 
 @keyframes rd-flip-away {
@@ -6607,8 +6607,8 @@ textarea {
 .lib-chips {
   display: flex;
   gap: 8px;
-  margin: -6px calc(-1 * clamp(14px, 4vw, 48px)) 18px;
-  padding: 4px clamp(14px, 4vw, 48px) 6px;
+  margin: -6px calc(-1 * clamp(18px, 4vw, 48px)) 18px;
+  padding: 4px clamp(18px, 4vw, 48px) 6px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -7595,6 +7595,18 @@ body.typing .dictate:not(.listening) {
   font-family: var(--font-ui);
   font-size: 13px;
   letter-spacing: 0;
+}
+
+/* on a phone every screen's header lines up: the same 18px side margin as the main page and the
+   notes, the back button in the same place, headings of one size */
+@media (max-width: 620px) {
+  :root[data-skin="cozy"] .lib-head {
+    padding: calc(12px + env(safe-area-inset-top, 0px)) 18px 6px;
+  }
+
+  :root[data-skin="cozy"] :is(.lib-heading, .notes-heading) {
+    font-size: 24px;
+  }
 }
 
 /* the notes screen: a new note leads the folder row and stays put while the folders scroll beside it */
@@ -9492,16 +9504,22 @@ html:has(.app.formatting) .note-selbar {
 :root {
   --ease-emph: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-std: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --ease-page: cubic-bezier(0.35, 0.04, 0.18, 1);
+  --ease-page: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-spring: cubic-bezier(0.2, 1.35, 0.35, 1);
   --dur-micro: 150ms;
   --dur-small: 240ms;
-  --dur-route: 380ms;
+  --dur-route: 280ms;
   --dur-panel: 480ms;
   --dur-book: 650ms;
 }
 
 /* ---------- screens: the old one and the new one overlap (motion.js, navigate) ---------- */
+
+/* while a picture of the change plays, taps go through it to the page under it (already the new one):
+   a quick tap on a tab or a page is never lost to the transition */
+::view-transition {
+  pointer-events: none;
+}
 
 /* the tab bar stays where it is while the screens change under it — only then: other transitions
    (a page turned in the reader over it) must not lift it over everything */
@@ -9756,12 +9774,28 @@ html:has(.app.formatting) .note-selbar {
   animation: fade 0.24s var(--ease-std);
 }
 
+/* the command palette is opened from the keyboard many times a day: it appears and goes at once */
+.scrim:has(> .modal.qs),
+.modal.qs {
+  animation: none !important;
+}
+
+.scrim.leaving:has(> .modal.qs) {
+  visibility: hidden;
+}
+
+/* a dialog or the side menu on its way out takes no taps: the next tap reaches what is under it */
+.scrim.leaving,
+.side-scrim.leaving {
+  pointer-events: none;
+}
+
 :root[data-motion="on"] .ctx {
-  animation: m-menu-in 0.26s var(--ease-emph);
+  animation: m-menu-in 0.18s var(--ease-emph);
 }
 
 @keyframes m-menu-in {
-  from { opacity: 0; transform: scale(0.94) translate3d(0, -6px, 0); }
+  from { opacity: 0; transform: scale(0.94); }
 }
 
 /* ---------- cards lift under a pointer ---------- */
@@ -9779,12 +9813,13 @@ html:has(.app.formatting) .note-selbar {
 
 /* ---------- the reader comes up out of the book it opens ---------- */
 
+/* library.js puts its transform-origin on the cover that was pressed */
 :root[data-motion="on"] .reader:not([hidden]) {
-  animation: m-reader-in 0.46s var(--ease-emph);
+  animation: m-reader-in 0.4s var(--ease-emph);
 }
 
 @keyframes m-reader-in {
-  from { opacity: 0; transform: translate3d(0, 14px, 0) scale(0.97); }
+  from { opacity: 0; transform: scale(0.9); }
 }
 
 /* ---------- the library's search field slides open ---------- */

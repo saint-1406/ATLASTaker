@@ -14,7 +14,7 @@ import { live, MARK_COLORS, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, MAX_TEXT_LENGTH, 
 import { openPageEditor } from './pageEditor.js';
 import { createFind } from './readerFind.js';
 import { changedKeys, createSteps, stepButtons, stepKey } from './undo.js';
-import { flip, navigate, restagger, stagger } from './motion.js';
+import { flip, navigate, pressPoint, restagger, stagger } from './motion.js';
 
 /** A link from a note back to a place in a document: atlas:<document>#<mark>. */
 export const DOC_LINK_RE = /^atlas:(d-[a-z0-9]{6,40})(?:#(m-[a-z0-9]{4,40}))?$/;
@@ -1315,6 +1315,9 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       cover(true);
       render();
     }
+    // the reader grows out of the cover just pressed (or the middle of the screen, opened by a key)
+    const press = pressPoint();
+    reader.style.transformOrigin = press ? `${press.x}px ${press.y}px` : '';
     reader.hidden = false;
     systemBars(); // before the book is laid out: the page takes the whole screen first, then the text
     tocPanel.hidden = true;

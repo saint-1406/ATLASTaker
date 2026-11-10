@@ -176,7 +176,12 @@ export function createSideMenu({ sections, onClose }) {
           drag.width = panel.offsetWidth || 1; // measured once: a read each frame would stall the drag
           panel.classList.add('m-dragging');
         }
-        drag.dx = Math.max(0, dx);
+        // the finger's speed over its last moves: a flick at the end counts, however slowly it began
+        const now = performance.now();
+        const dxNow = Math.max(0, dx);
+        drag.speed = drag.lastAt ? (dxNow - drag.dx) / Math.max(1, now - drag.lastAt) : 0;
+        drag.lastAt = now;
+        drag.dx = dxNow;
         panel.style.transform = `translate3d(${drag.dx}px, 0, 0)`;
         shade.style.opacity = String(Math.max(0, 1 - drag.dx / drag.width));
       },
@@ -187,8 +192,9 @@ export function createSideMenu({ sections, onClose }) {
         drag = null;
         return;
       }
-      const speed = drag.dx / Math.max(1, performance.now() - drag.at);
-      const away = drag.dx > drag.width * 0.33 || (speed > 0.6 && drag.dx > 40);
+      // a pause before letting go is no flick
+      const speed = performance.now() - (drag.lastAt ?? 0) < 80 ? drag.speed ?? 0 : 0;
+      const away = drag.dx > drag.width * 0.33 || (speed > 0.3 && drag.dx > 24);
       panel.classList.remove('m-dragging');
       panel.style.transform = '';
       shade.style.opacity = '';
@@ -217,7 +223,8 @@ export function createSideMenu({ sections, onClose }) {
     document.removeEventListener('keydown', onKey, true);
     leaving.classList.remove('open');
     leaving.classList.add('leaving');
-    setTimeout(() => leaving.remove(), 220);
+    // removed once its way out (0.26 s) is over, not cut short at the end
+    setTimeout(() => leaving.remove(), 280);
     if (then) then();
     else onClose?.();
   }
