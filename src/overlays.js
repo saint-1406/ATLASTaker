@@ -513,7 +513,12 @@ export function showImage(src, alt) {
 let toastNode = null;
 let toastTimer = 0;
 
-export function toast(message, { action, timeout = 4200 } = {}) {
+/**
+ * A short notice at the foot of the screen. It stays a couple of seconds (a moment longer with a
+ * button, such as "Undo", or a long message). A timeout of 20 s or more is a status that stays until
+ * the next notice replaces it. A swipe sideways or down puts it away at once; a finger on it holds it.
+ */
+export function toast(message, { action, timeout } = {}) {
   toastNode?.remove();
   clearTimeout(toastTimer);
   const node = h('div', { class: 'toast', role: 'status' }, h('span', {}, message));
@@ -530,10 +535,71 @@ export function toast(message, { action, timeout = 4200 } = {}) {
   }
   layer().append(node);
   toastNode = node;
-  toastTimer = setTimeout(() => {
+  // a timeout under a second clears a status at once (it is not read); 20 s or more keeps a status up
+  const stays = timeout < 1000 || timeout >= 20_000 ? timeout : (action ? 3000 : 2000) + Math.min(1500, Math.max(0, String(message).length - 60) * 25);
+  const leave = () => {
+    clearTimeout(toastTimer);
     node.classList.add('leaving');
     setTimeout(() => node.remove(), 220);
-  }, timeout);
+  };
+  const wait = (ms) => {
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(leave, ms);
+  };
+  wait(stays);
+  swipeAway(node, { hold: () => clearTimeout(toastTimer), resume: () => wait(1500), gone: () => node.remove() });
+}
+
+/** A finger (or the mouse) can push a notice off the screen: sideways or down. */
+function swipeAway(node, { hold, resume, gone }) {
+  let drag = null;
+  node.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY, at: performance.now(), moved: false };
+    hold();
+  });
+  node.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x;
+    const dy = Math.max(0, e.clientY - drag.y); // up is the screen's content: only down and sideways
+    if (!drag.moved && Math.hypot(dx, dy) < 6) return;
+    if (!drag.moved) {
+      drag.moved = true;
+      node.classList.add('dragging');
+      try {
+        node.setPointerCapture(e.pointerId);
+      } catch {
+        // the pointer is gone already
+      }
+    }
+    drag.dx = dx;
+    drag.dy = dy;
+    node.style.translate = `${dx}px ${dy}px`;
+    node.style.opacity = String(Math.max(0.2, 1 - Math.hypot(dx, dy) / 220));
+  });
+  const end = (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const { dx = 0, dy = 0, moved, at } = drag;
+    drag = null;
+    node.classList.remove('dragging');
+    if (!moved) return resume();
+    const far = Math.hypot(dx, dy);
+    const quick = far / Math.max(1, performance.now() - at) > 0.5;
+    if (far > 56 || (quick && far > 20)) {
+      // off the way it was pushed
+      const sideways = Math.abs(dx) > dy;
+      node.classList.add('swiped');
+      node.style.translate = sideways ? `${Math.sign(dx) * (innerWidth / 2 + node.offsetWidth)}px ${dy}px` : `${dx}px ${dy + 140}px`;
+      node.style.opacity = '0';
+      setTimeout(gone, 200);
+      return;
+    }
+    node.style.translate = '';
+    node.style.opacity = '';
+    resume();
+  };
+  node.addEventListener('pointerup', end);
+  node.addEventListener('pointercancel', end);
 }
 
 /** A non-dismissable notice over everything (another window took over, or startup failed). */

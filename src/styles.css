@@ -2262,6 +2262,24 @@ textarea {
   animation: fade 0.2s ease-in reverse forwards;
 }
 
+/* a notice follows the finger that pushes it away (overlays.js: swipeAway), and comes back if let go short */
+.toast {
+  touch-action: none;
+  transition:
+    translate 0.22s var(--ease-std, ease-out),
+    opacity 0.22s var(--ease-std, ease-out);
+}
+
+.toast.dragging {
+  transition: none;
+}
+
+.toast.swiped {
+  transition:
+    translate 0.2s ease-in,
+    opacity 0.2s ease-in;
+}
+
 .toast button {
   padding: 3px 9px;
   border: 1px solid var(--accent-text);
