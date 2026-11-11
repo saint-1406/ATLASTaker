@@ -1,7 +1,7 @@
 {
   "name": "atlas-notetaker",
   "productName": "ATLAS Notetaker",
-  "version": "0.19.5",
+  "version": "0.19.6",
   "description": "Блокнот, в котором каждая заметка — территория на карте.",
   "private": true,
   "type": "module",
