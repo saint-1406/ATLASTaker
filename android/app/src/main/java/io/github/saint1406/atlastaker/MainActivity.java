@@ -716,6 +716,77 @@ public class MainActivity extends ComponentActivity {
         });
     }
 
+    // ---------- translation: Yandex Translate with the person's own API key (src/translate.js) ----------
+
+    private static final String YANDEX_TRANSLATE = "https://translate.api.cloud.yandex.net/translate/v2/translate";
+
+    /**
+     * The pieces (a JSON array of strings) through Yandex Cloud's API v2; the page cannot ask it itself.
+     * Codes as the desktop's (server/translate.js): yandex-key, yandex-quota, network, failed.
+     */
+    private void yandexTranslate(String id, String key, String from, String to, String piecesJson) {
+        translating.execute(() -> {
+            HttpURLConnection connection = null;
+            try {
+                String apiKey = key == null ? "" : key.trim();
+                if (apiKey.isEmpty() || apiKey.length() > 400 || apiKey.contains("\n") || apiKey.contains("\r")
+                        || !("ru".equals(from) || "en".equals(from)) || !("ru".equals(to) || "en".equals(to))) {
+                    sendTranslation(id, null, "failed");
+                    return;
+                }
+                JSONArray pieces = new JSONArray(piecesJson);
+                JSONObject request = new JSONObject();
+                request.put("sourceLanguageCode", from);
+                request.put("targetLanguageCode", to);
+                request.put("format", "PLAIN_TEXT");
+                request.put("texts", pieces);
+                byte[] body = request.toString().getBytes(StandardCharsets.UTF_8);
+                connection = (HttpURLConnection) new URL(YANDEX_TRANSLATE).openConnection();
+                connection.setConnectTimeout(15_000);
+                connection.setReadTimeout(20_000);
+                connection.setRequestMethod("POST");
+                connection.setDoOutput(true);
+                connection.setRequestProperty("Content-Type", "application/json");
+                connection.setRequestProperty("Authorization", "Api-Key " + apiKey);
+                try (OutputStream out = connection.getOutputStream()) {
+                    out.write(body);
+                }
+                int status = connection.getResponseCode();
+                if (status == 401 || status == 403) {
+                    sendTranslation(id, null, "yandex-key");
+                    return;
+                }
+                if (status == 429) {
+                    sendTranslation(id, null, "yandex-quota");
+                    return;
+                }
+                if (status / 100 != 2) {
+                    sendTranslation(id, null, "failed");
+                    return;
+                }
+                java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+                try (InputStream in = connection.getInputStream()) {
+                    byte[] chunk = new byte[16 * 1024];
+                    for (int n; (n = in.read(chunk)) > 0; ) buffer.write(chunk, 0, n);
+                }
+                JSONArray translations = new JSONObject(buffer.toString(StandardCharsets.UTF_8.name())).optJSONArray("translations");
+                if (translations == null || translations.length() != pieces.length()) {
+                    sendTranslation(id, null, "failed");
+                    return;
+                }
+                JSONArray texts = new JSONArray();
+                for (int i = 0; i < translations.length(); i++) texts.put(translations.getJSONObject(i).optString("text", ""));
+                sendTranslation(id, texts, null);
+            } catch (IOException e) {
+                sendTranslation(id, null, "network");
+            } catch (JSONException | RuntimeException e) {
+                sendTranslation(id, null, "failed");
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        });
+    }
+
     private void sendTranslation(String id, JSONArray texts, String code) {
         try {
             JSONObject event = new JSONObject();
@@ -1050,6 +1121,12 @@ public class MainActivity extends ComponentActivity {
         @JavascriptInterface
         public void translate(String id, String from, String to, String pieces) {
             MainActivity.this.translate(id, from, to, pieces);
+        }
+
+        /** Yandex Translate with the key the person gave (kept in the page); the answer comes as translate(event). */
+        @JavascriptInterface
+        public void yandexTranslate(String id, String key, String from, String to, String pieces) {
+            MainActivity.this.yandexTranslate(id, key, from, to, pieces);
         }
 
         @JavascriptInterface

@@ -4,7 +4,7 @@
 
 import { h, toast } from './overlays.js';
 import { t } from './i18n.js';
-import { androidEngine, browserEngine, directionOf, modelEngine, otherWay, pickEngine, translateWith } from './translate.js';
+import { androidEngine, androidYandexSend, browserEngine, directionOf, modelEngine, otherWay, pickEngine, translateWith, yandexEngine } from './translate.js';
 
 let modelCode = null;
 
@@ -34,7 +34,12 @@ const LANG_NAMES = { ru: 'RU', en: 'EN' };
  */
 export function createTranslator({ api, android = null }) {
   const mlkit = android?.translate ? androidEngine(android) : null;
-  const engines = mlkit ? [mlkit] : [browserEngine(), api.translate ? modelEngine({ translateApi: api.translate, loadModelCode }) : null];
+  const offline = mlkit ? [mlkit] : [browserEngine(), api.translate ? modelEngine({ translateApi: api.translate, loadModelCode }) : null];
+  // Yandex first when the person gave a key (and there is a way to reach it); without the internet
+  // the on-device engines take over
+  const yandexSend = android?.yandexTranslate ? androidYandexSend(android) : api.translateYandex ? (body) => api.translateYandex(body) : null;
+  const yandex = yandexSend ? yandexEngine({ send: yandexSend }) : null;
+  const engines = [yandex, ...offline];
 
   let card = null;
   let run = 0; // the latest translation; an older one that finishes late is dropped
@@ -124,7 +129,16 @@ export function createTranslator({ api, android = null }) {
           actions.lastChild.focus({ preventScroll: true });
           return;
         }
-        await translate(picked.engine, pair, mine);
+        try {
+          await translate(picked.engine, pair, mine);
+        } catch (err) {
+          // Yandex out of reach: the engine on the device, if it has the languages already
+          if (picked.engine !== yandex || err?.code !== 'network') throw err;
+          const local = await pickEngine(offline, pair);
+          if (!live()) return;
+          if (local?.state !== 'ready') throw err;
+          await translate(local.engine, pair, mine);
+        }
       } catch (err) {
         if (live()) failed(err);
       }
@@ -204,7 +218,7 @@ export function createTranslator({ api, android = null }) {
     open,
     close,
     isOpen: () => Boolean(card),
-    receive: (event) => mlkit?.receive(event),
+    receive: (event) => (yandexSend?.receive?.(event) ? undefined : mlkit?.receive(event)),
   };
 }
 

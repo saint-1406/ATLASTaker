@@ -39,6 +39,8 @@ import {
 import { fileNameFor, makeZip } from './backup.js';
 import { createSyncClient } from './sync/client.js';
 import { createSideMenu, sideGroup, sideItem, sideToggle } from './sidemenu.js';
+import { openYandexDialog, yandexPossible } from './yandexSettings.js';
+import { yandexKey } from './translate.js';
 import { openAppearance } from './appearance.js';
 import welcomeText from './welcome.md';
 import welcomeBrowserText from './welcome-browser.md';
@@ -2456,6 +2458,13 @@ function menuSections() {
         },
       }),
       writingSettings(close),
+      // translation by Yandex with the person's own key (yandexSettings.js); where the app can reach it
+      yandexPossible({ api, android })
+        ? sideGroup(
+            t('yandex.group'),
+            sideItem({ icon: '⇄', text: t('yandex.title'), hint: t(yandexKey() ? 'yandex.on' : 'yandex.off'), chevron: true, run: () => close(() => openYandexDialog({ onDone: () => sideMenu?.refresh() })) }),
+          )
+        : null,
       pinSettings(close),
     ],
     account: (close) => [

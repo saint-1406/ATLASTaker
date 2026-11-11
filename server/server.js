@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { createStore } from './store.js';
 import { createBackups } from './backups.js';
 import { createLibrary, MAX_DOC } from './library.js';
-import { createTranslateFiles, TRANSLATE_TYPES } from './translate.js';
+import { createTranslateFiles, TRANSLATE_TYPES, yandexTranslate } from './translate.js';
 import { callbackPage, createSync } from './sync.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -332,6 +332,7 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
       throw new HttpError(405, 'method not allowed');
     }
     // the translator's files: which are missing, and fetching one (once the person agreed in the page)
+    if (route === 'translate/yandex' && req.method === 'POST') return send(res, 200, await yandexTranslate(await readJson(req)));
     if (route === 'translate/status' && req.method === 'POST') return send(res, 200, await translateFiles.status((await readJson(req)).paths));
     if (route === 'translate/download' && req.method === 'POST') {
       await translateFiles.download(String((await readJson(req)).path ?? ''), res);

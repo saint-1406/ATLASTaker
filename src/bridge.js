@@ -112,6 +112,12 @@ function serverApi() {
       return (await res.json()).name;
     },
     /** The translator's model files (server/translate.js): which are missing, and fetching one with its progress. */
+    /** Yandex Translate through the local server (the API does not answer a page): { key, from, to, texts } → texts. */
+    translateYandex: async (body) => {
+      const answer = await call('POST', 'translate/yandex', body);
+      if (answer.code) throw Object.assign(new Error(answer.code), { code: answer.code });
+      return answer.texts;
+    },
     translate: {
       status: (paths) => call('POST', 'translate/status', { paths }),
       async download(path, onBytes) {
