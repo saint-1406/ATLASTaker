@@ -15,6 +15,7 @@ import { openPageEditor } from './pageEditor.js';
 import { createFind } from './readerFind.js';
 import { changedKeys, createSteps, stepButtons, stepKey } from './undo.js';
 import { flip, navigate, pressPoint, restagger, stagger } from './motion.js';
+import { rangeText, tidyText } from './reader/copyText.js';
 
 /** A link from a note back to a place in a document: atlas:<document>#<mark>. */
 export const DOC_LINK_RE = /^atlas:(d-[a-z0-9]{6,40})(?:#(m-[a-z0-9]{4,40}))?$/;
@@ -1650,7 +1651,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     const controller = reading?.controller;
     if (!selected || !controller) return;
     const range = selected;
-    const text = passage(controller, range.toString(), 200_000);
+    const text = passage(controller, range, 200_000);
     try {
       await api.copy(text);
       toast(t('reader.copied'), { timeout: 1500 });
@@ -1664,9 +1665,14 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     }
   }
 
-  /** The words of a passage, tidied: a PDF's lines are broken where the page broke them, so they become one paragraph. */
-  function passage(controller, raw, max = 5000) {
-    return (controller.kind === 'pdf' ? raw.replace(/\s+/g, ' ') : raw.replace(/[ \t ]+/g, ' ').replace(/\s*\n\s*/g, '\n')).trim().slice(0, max);
+  /**
+   * The words of a selection, tidied. A book keeps its paragraphs (a blank line between them) and its
+   * line breaks, which the selection's own text runs together. A PDF's lines are broken where the page
+   * broke them, so they become one paragraph.
+   */
+  function passage(controller, range, max = 5000) {
+    if (controller.kind === 'pdf') return range.toString().replace(/\s+/g, ' ').trim().slice(0, max);
+    return tidyText(rangeText(range)).slice(0, max);
   }
   const whereText = (where) => (where.page ? t('reader.page', where.page) : where.heading) || '';
 
@@ -1700,7 +1706,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     const range = selected;
     if (!reading?.controller || !range || range.collapsed) return;
     const { doc, controller } = reading;
-    const text = passage(controller, range.toString());
+    const text = passage(controller, range);
     if (!text) return;
     quoteButton.disabled = true;
     try {
@@ -1724,7 +1730,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     const range = selected;
     if (!translator || !reading?.controller || !range || range.collapsed) return;
     const { doc, controller } = reading;
-    const text = passage(controller, range.toString());
+    const text = passage(controller, range);
     const where = whereText(controller.where(range.startContainer));
     hideSelBar();
     translator.open({
@@ -1858,7 +1864,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       id: newMarkId(),
       color,
       note: '',
-      text: passage(controller, range.toString(), MAX_TEXT),
+      text: passage(controller, range, MAX_TEXT),
       where: whereText(controller.where(range.startContainer)).slice(0, 300),
       anchor,
       created: Date.now(),
