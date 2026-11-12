@@ -4,15 +4,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { appFiles, serverSources } from './appFiles.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const STAGE = path.join(ROOT, 'out', 'stage');
-// src/marks.js: the rules for a document's marks, which the server checks too; src/bergamotFiles.js:
-// the offline translator's files, which the server downloads
-const APP_FILES = ['index.html', 'package.json', 'dist', 'assets', 'server', 'src/marks.js', 'src/sync', 'src/bergamotFiles.js'];
+const STAGE = process.env.ATLAS_STAGE ? path.resolve(process.env.ATLAS_STAGE) : path.join(ROOT, 'out', 'stage');
+// the interface, the server, and the src/ modules the server imports (found by following its imports)
+const APP_FILES = appFiles(ROOT);
 
 if (!fs.existsSync(path.join(ROOT, 'dist', 'app.js'))) {
   console.error('Нет сборки интерфейса: сначала npm run build');
+  process.exit(1);
+}
+const { missing } = serverSources(ROOT);
+if (missing.length) {
+  console.error(`Сервер импортирует файлы, которых нет:\n  ${missing.join('\n  ')}`);
   process.exit(1);
 }
 

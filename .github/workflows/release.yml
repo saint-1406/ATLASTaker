@@ -44,6 +44,10 @@ jobs:
             "::warning::GOOGLE_DESKTOP_CLIENT_SECRET is not set: this build cannot sign in to Google (sync is off)"
           }
       - run: node scripts/stage.mjs
+      # the staged app must start from its own files with its own Node, as on the person's computer: a
+      # module left out of the stage stopped every MSI and portable from 0.17.0 to 0.19.8 at their start
+      - name: Start the staged app
+        run: out/stage/node/node.exe scripts/smoke-stage.mjs
 
       - name: Version
         id: version

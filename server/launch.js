@@ -6,7 +6,6 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BUILD, defaultDataDir } from './server.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -53,6 +52,9 @@ function openWindow(url) {
 }
 
 async function main() {
+  // the server's code is loaded here, not as a static import: a file missing from an installation then
+  // ends in the message below (with the window left open by the portable start file), not in silence
+  const { BUILD, defaultDataDir } = await import('./server.js');
   if (!fs.existsSync(path.join(ROOT, 'dist', 'app.js'))) {
     const build = spawnSync(process.execPath, [path.join(ROOT, 'build.mjs')], { cwd: ROOT, stdio: 'inherit' });
     if (build.status !== 0) throw new Error('сборка интерфейса не удалась');
@@ -92,6 +94,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('ATLAS:', err.message);
+  console.error(`\nATLAS Notetaker не запустился / did not start:\n  ${err.message}\n`);
+  console.error('Журнал сервера / server log: %APPDATA%\\ATLAS Notetaker\\server.log');
   process.exitCode = 1;
 });
