@@ -4,7 +4,7 @@
 
 import { h, toast } from './overlays.js';
 import { t } from './i18n.js';
-import { androidEngine, browserEngine, directionOf, modelEngine, otherWay, pickEngine, translateWith } from './translate.js';
+import { androidEngine, browserEngine, directionOf, modelEngine, myMemoryEngine, otherWay, pickEngine, translateWith } from './translate.js';
 
 let modelCode = null;
 
@@ -34,7 +34,11 @@ const LANG_NAMES = { ru: 'RU', en: 'EN' };
  */
 export function createTranslator({ api, android = null }) {
   const mlkit = android?.translate ? androidEngine(android) : null;
-  const engines = mlkit ? [mlkit] : [browserEngine(), api.translate ? modelEngine({ translateApi: api.translate, loadModelCode }) : null];
+  const offline = mlkit ? [mlkit] : [browserEngine(), api.translate ? modelEngine({ translateApi: api.translate, loadModelCode }) : null];
+  // MyMemory first (online, no key); the single-file browser build may not reach the network at all
+  const online = api.kind === 'browser' && !android ? null : myMemoryEngine();
+  const engines = [online, ...offline];
+  let onlineOff = false; // MyMemory said no today (its allowance is used up): the device's engines from now on
 
   let card = null;
   let run = 0; // the latest translation; an older one that finishes late is dropped
@@ -94,6 +98,7 @@ export function createTranslator({ api, android = null }) {
     document.addEventListener('pointerdown', onPointer, true);
 
     let current = way;
+    let skipOnline = false; // this passage: MyMemory failed, the device translates it
     swap.onclick = () => {
       current = otherWay(current);
       go();
@@ -111,7 +116,7 @@ export function createTranslator({ api, android = null }) {
       say(t('translate.working'));
       const live = () => mine === run && card;
       try {
-        const picked = await pickEngine(engines, pair);
+        const picked = await pickEngine(onlineOff || skipOnline ? offline : engines, pair);
         if (!live()) return;
         if (!picked) return say(t(api.kind === 'browser' && !android ? 'translate.unavailableBrowser' : 'translate.unavailable'), 'error');
         if (picked.state === 'download') {
@@ -126,7 +131,17 @@ export function createTranslator({ api, android = null }) {
         }
         await translate(picked.engine, pair, mine);
       } catch (err) {
-        if (live()) failed(err);
+        if (!live()) return;
+        // MyMemory out of reach or out of allowance: the same passage on the device, if it can
+        if (err?.code === 'quota' || err?.code === 'network') {
+          if (err.code === 'quota') onlineOff = true;
+          if (!skipOnline && (await pickEngine(offline, pair))) {
+            skipOnline = true;
+            toast(t(`translate.offlineNow.${err.code}`));
+            return go();
+          }
+        }
+        failed(err);
       }
     }
 

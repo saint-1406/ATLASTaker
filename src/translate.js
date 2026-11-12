@@ -1,12 +1,16 @@
-// Translation of a selected passage, Russian ↔ English, on the device. Three engines behind one interface:
+// Translation of a selected passage, Russian ↔ English. Engines behind one interface, tried in order:
+//   - MyMemory (api.mymemory.translated.net): online, free, no key; a daily allowance per address
+//     (more with an e-mail given in the settings). The page asks it itself;
 //   - Android: Google ML Kit in the app's native side (MainActivity.java: translate…), offline once
 //     the language models (about 30 MB each) are on the phone; results come back through
 //     window.__atlas.translate(event);
 //   - a browser with the built-in Translator API (Chrome): the browser's own on-device model;
 //   - the Windows app otherwise: Marian opus-mt models run in the page (dist/translate.js, with
 //     transformers.js), downloaded once through the local server (server/translate.js) into the data
-//     folder — the page itself still talks only to its own server.
-// The single-file browser build may not use the network at all: there only the Translator API works.
+//     folder.
+// Without the internet, or once MyMemory's allowance for the day is used up, the engines on the device
+// take over. The single-file browser build may not use the network at all: there only the Translator
+// API works.
 
 export const PAIRS = ['ru-en', 'en-ru'];
 
@@ -209,6 +213,92 @@ export function modelEngine({ translateApi, loadModelCode }) {
   };
 }
 
+// ---------- MyMemory: online, free, no key ----------
+
+const MYMEMORY = 'https://api.mymemory.translated.net/get';
+export const MYMEMORY_EMAIL = 'atlas.myMemoryEmail';
+// a request carries at most 500 bytes of text: a Cyrillic letter is two
+const MYMEMORY_PIECE = 200;
+
+/** The e-mail that raises MyMemory's daily allowance (kept on this device only), or ''. */
+export function myMemoryEmail() {
+  try {
+    return (localStorage.getItem(MYMEMORY_EMAIL) ?? '').trim();
+  } catch {
+    return '';
+  }
+}
+
+export function setMyMemoryEmail(email) {
+  try {
+    const value = String(email ?? '').trim();
+    if (value) localStorage.setItem(MYMEMORY_EMAIL, value);
+    else localStorage.removeItem(MYMEMORY_EMAIL);
+  } catch {
+    // only on this device anyway
+  }
+}
+
+/** A plausible e-mail address (MyMemory only needs one to count the allowance by). */
+export const isEmail = (value) => /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,24}$/.test(String(value).trim());
+
+// MyMemory answers with a few HTML entities in its text
+const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&apos;': "'", '&nbsp;': ' ' };
+export const unentity = (text) =>
+  String(text).replace(/&(?:amp|lt|gt|quot|apos|nbsp|#39|#(\d{1,6}));/g, (whole, code) => (code ? String.fromCodePoint(Number(code)) : ENTITIES[whole]));
+
+/** Runs task(item) for every item, a few at a time; the answers in the items' order. */
+async function inTurns(items, task, width = 3) {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await task(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(width, items.length) }, worker));
+  return out;
+}
+
+/**
+ * MyMemory. Errors: quota (the day's allowance is used up), network (out of reach), failed.
+ * fetchImpl and getEmail are there for the tests.
+ */
+export function myMemoryEngine({ fetchImpl = (...args) => globalThis.fetch(...args), getEmail = myMemoryEmail, online = () => globalThis.navigator?.onLine !== false } = {}) {
+  async function one(text, from, to) {
+    const params = new URLSearchParams({ q: text, langpair: `${from}|${to}` });
+    const email = getEmail();
+    if (email) params.set('de', email);
+    let res;
+    try {
+      res = await fetchImpl(`${MYMEMORY}?${params}`, { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' });
+    } catch {
+      throw new TranslateError('network');
+    }
+    if (res.status === 429) throw new TranslateError('quota');
+    if (!res.ok) throw new TranslateError('failed');
+    const answer = await res.json().catch(() => null);
+    const translated = answer?.responseData?.translatedText;
+    if (answer?.quotaFinished || Number(answer?.responseStatus) === 429 || /^MYMEMORY WARNING/i.test(translated ?? '')) throw new TranslateError('quota');
+    if (Number(answer?.responseStatus) !== 200 || typeof translated !== 'string') throw new TranslateError('failed');
+    return unentity(translated);
+  }
+  return {
+    name: 'mymemory',
+    online: true,
+    maxPiece: MYMEMORY_PIECE,
+    async state() {
+      return online() ? 'ready' : 'unavailable';
+    },
+    async prepare() {},
+    translate(pair, texts) {
+      const [from, to] = pair.split('-');
+      return inTurns(texts, (text) => one(text, from, to));
+    },
+  };
+}
+
 export class TranslateError extends Error {
   constructor(code) {
     super(code);
@@ -230,7 +320,7 @@ export async function pickEngine(engines, pair) {
 
 /** Translates a passage with an engine that is ready: pieces in, the text with its paragraphs out. */
 export async function translateWith(engine, pair, text) {
-  const pieces = splitText(text);
+  const pieces = splitText(text, engine.maxPiece ?? 400);
   if (!pieces.length) return '';
   const out = await engine.translate(pair, pieces.map((p) => p.text));
   return joinPieces(pieces, out);

@@ -39,6 +39,7 @@ import {
 import { fileNameFor, makeZip } from './backup.js';
 import { createSyncClient } from './sync/client.js';
 import { createSideMenu, sideGroup, sideItem, sideToggle } from './sidemenu.js';
+import { onlineHint, openOnlineDialog } from './translateSettings.js';
 import { openAppearance } from './appearance.js';
 import welcomeText from './welcome.md';
 import welcomeBrowserText from './welcome-browser.md';
@@ -2456,6 +2457,11 @@ function menuSections() {
         },
       }),
       writingSettings(close),
+      // the translator online (translateSettings.js): free, an e-mail raises the daily allowance;
+      // not in the single-file browser build, which may not reach the network
+      api.kind === 'browser' && !android
+        ? null
+        : sideGroup(t('translate.online.group'), sideItem({ icon: '⇄', text: t('translate.online.title'), hint: onlineHint(), chevron: true, run: () => close(() => openOnlineDialog({ onDone: () => sideMenu?.refresh() })) })),
       pinSettings(close),
     ],
     account: (close) => [
