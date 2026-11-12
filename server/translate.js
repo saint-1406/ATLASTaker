@@ -105,39 +105,3 @@ export function createTranslateFiles(dataDir, { fetchImpl = globalThis.fetch } =
 
   return { root, fileFor, sizeOf, status, download };
 }
-
-// ---------- Yandex Translate (Yandex Cloud, API v2), with the person's own key ----------
-// The page cannot ask the API itself (it does not answer pages), so the local server does: only this
-// one address, only a translation, with the key the page sends along (it is kept in the page).
-
-const YANDEX_URL = 'https://translate.api.cloud.yandex.net/translate/v2/translate';
-const YANDEX_LANGS = new Set(['ru', 'en']);
-
-/**
- * { key, from, to, texts } → { texts } or { code }: yandex-key (refused: a wrong key, or no rights),
- * yandex-quota (too many requests), network (Yandex out of reach), failed (anything else).
- */
-export async function yandexTranslate(body, { fetchImpl = globalThis.fetch } = {}) {
-  const key = String(body?.key ?? '').trim();
-  const { from, to } = body ?? {};
-  const texts = Array.isArray(body?.texts) ? body.texts : null;
-  const size = texts ? texts.reduce((sum, t) => sum + (typeof t === 'string' ? t.length : Infinity), 0) : Infinity;
-  if (!key || key.length > 400 || /[\r\n]/.test(key) || !YANDEX_LANGS.has(from) || !YANDEX_LANGS.has(to) || !texts?.length || size > 10_000) return { code: 'failed' };
-  let res;
-  try {
-    res = await fetchImpl(YANDEX_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Api-Key ${key}` },
-      body: JSON.stringify({ sourceLanguageCode: from, targetLanguageCode: to, format: 'PLAIN_TEXT', texts }),
-      signal: AbortSignal.timeout(20_000),
-    });
-  } catch {
-    return { code: 'network' };
-  }
-  if (res.status === 401 || res.status === 403) return { code: 'yandex-key' };
-  if (res.status === 429) return { code: 'yandex-quota' };
-  if (!res.ok) return { code: 'failed' };
-  const answer = await res.json().catch(() => null);
-  const out = Array.isArray(answer?.translations) ? answer.translations.map((t) => String(t?.text ?? '')) : null;
-  return out && out.length === texts.length ? { texts: out } : { code: 'failed' };
-}
