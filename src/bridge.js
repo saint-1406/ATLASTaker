@@ -89,6 +89,8 @@ function serverApi() {
     getState: () => call('GET', 'state'),
     setState: (patch) => call('PATCH', 'state', patch),
     ping: () => call('POST', 'ping'),
+    // a line held open while the window is open (server.js 'live'): the server goes on while it is held
+    live: () => fetch('/api/live', { cache: 'no-store', headers: { 'X-Atlas-Token': token } }),
     /** The newest release on GitHub, as the local server sees it (update.js). */
     update: () => call('GET', 'update'),
     // Google Drive sync, run by the server (server/sync.js)

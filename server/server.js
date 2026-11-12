@@ -195,6 +195,7 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
   };
   let actualPort = 0;
   let lastSeen = Date.now();
+  const live = new Set(); // the windows' open lines (/api/live)
 
   async function serveStatic(req, res, url) {
     if (req.method !== 'GET' && req.method !== 'HEAD') throw new HttpError(405, 'method not allowed');
@@ -263,6 +264,24 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
     const given = Buffer.from(String(req.headers['x-atlas-token'] ?? ''));
     if (given.length !== tokenBytes.length || !crypto.timingSafeEqual(given, tokenBytes)) throw new HttpError(403, 'bad token');
     lastSeen = Date.now();
+
+    // the window's open line (src/app.js holdLine): while one is held the window is open, even when
+    // the browser has frozen its timers (a window covered or minimised for long) and no pings come
+    if (route === 'live' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.write('.\n');
+      live.add(res);
+      const beat = setInterval(() => res.write('.\n'), 25_000);
+      await new Promise((resolve) =>
+        res.on('close', () => {
+          clearInterval(beat);
+          live.delete(res);
+          lastSeen = Date.now();
+          resolve();
+        }),
+      );
+      return;
+    }
 
     // a note's earlier versions: the list, one version's text, a new one (src/versionRules.js)
     const versionsRoute = /^notes\/([^/]+)\/versions(?:\/(\d{1,15}))?$/.exec(route);
@@ -430,6 +449,8 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
       // A long gap between ticks means the machine slept. The window slept too and hasn't had a
       // chance to ping yet, so it gets a fresh grace period instead of losing its server.
       if (now - lastTick > every * 3) lastSeen = now;
+      // a window holding its line is open, pings or not
+      if (live.size) lastSeen = now;
       lastTick = now;
       if (now - lastSeen > idleExitMs) {
         clearInterval(idleTimer);
@@ -505,6 +526,10 @@ function parseArgs(argv) {
 }
 
 async function main() {
+  // an error nothing caught (a stream's, a timer's) goes into the log and the server goes on: the window
+  // losing its server in the middle of a sentence costs more than whatever one request got wrong
+  process.on('uncaughtException', (err) => console.error(`${new Date().toISOString()} uncaught:`, err));
+  process.on('unhandledRejection', (err) => console.error(`${new Date().toISOString()} unhandled rejection:`, err));
   const args = parseArgs(process.argv.slice(2));
   const dataDir = args.data ? path.resolve(args.data) : defaultDataDir();
   await fsp.mkdir(dataDir, { recursive: true });
@@ -547,10 +572,13 @@ async function main() {
     dataDir,
     port: Number.isInteger(args.port) ? args.port : DEFAULT_PORT,
     portTries: Number.isInteger(args.port) ? 1 : 20,
-    // the window pings every 20 s (throttled to about once a minute when hidden);
-    // three minutes of silence means it was closed
-    idleExitMs: args.idleExit ? 180_000 : 0,
-    onIdle: shutdown,
+    // the window holds a line open and pings every 20 s (once a minute when hidden); ten minutes with
+    // neither means it was closed (or the browser put it away, and may bring it back for a while)
+    idleExitMs: args.idleExit ? 600_000 : 0,
+    onIdle: () => {
+      console.log(`${new Date().toISOString()} ATLAS: no window for 10 minutes, stopping`);
+      shutdown();
+    },
   });
   await fsp.writeFile(infoFile, JSON.stringify({ port: app.port, pid: process.pid, startedAt: Date.now() }));
   console.log(`${new Date().toISOString()} ATLAS: ${app.url} · заметки в ${app.notesDir}`);

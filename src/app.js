@@ -379,7 +379,14 @@ async function boot() {
   const restoredId = drafts.length ? await offerRestore(drafts) : null;
   await openNote(restoredId ?? (notes.has(saved.lastOpen) ? saved.lastOpen : newestId()));
   if (inBrowser && !firstRun && !drafts.length && Date.now() - (saved.lastBackup ?? 0) > BACKUP_EVERY) remindBackup(saved.lastBackup);
-  if (api.ping) setInterval(ping, 20_000);
+  if (api.ping) {
+    setInterval(ping, 20_000);
+    // back in the window: the server hears of it at once, and a gone server shows at once
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') ping();
+    });
+  }
+  if (api.live) holdLine();
   setInterval(tickPace, 10_000);
   markReady();
   // the app opens on the main page, where the person picks where to go
@@ -546,10 +553,39 @@ function pickDefined(source, keys) {
   return Object.fromEntries(keys.filter((key) => source[key] !== undefined).map((key) => [key, source[key]]));
 }
 
+/**
+ * The window says it is open. One failed ping is asked again a moment later before the window gives
+ * up: a single request lost (the machine waking, a busy moment) is not a server gone.
+ */
 function ping() {
   api.ping?.().catch((err) => {
-    if (err.offline || err.status === 403) connectionLost(err);
+    if (err.status === 403) connectionLost(err);
+    else if (err.offline) {
+      setTimeout(() => {
+        api.ping().catch((again) => {
+          if (again.offline || again.status === 403) connectionLost(again);
+        });
+      }, 2500);
+    }
   });
+}
+
+/**
+ * Holds a line open to the server while the window is open. A browser freezes the timers of a window
+ * covered or minimised for long, and then no pings come; the open line still tells the server the
+ * window is there (server.js, 'live'). When the line breaks it is taken up again.
+ */
+async function holdLine() {
+  while (!lost && !suspended) {
+    try {
+      const res = await api.live();
+      const reader = res.body.getReader();
+      while (!(await reader.read()).done);
+    } catch {
+      // the server is gone or restarting: the pings tell the person
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
 }
 
 // ---------- unsaved text from the last run ----------

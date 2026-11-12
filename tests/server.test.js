@@ -297,3 +297,24 @@ test('the PIN is kept only as a hash of the right shape; writing settings are ch
   state = await (await call('PATCH', 'state', { pinLock: null })).json();
   assert.equal(state.pinLock, null);
 });
+
+test('a window holding its line keeps the server with no pings; let go, the server ends after the quiet time', async (t) => {
+  const dataDir = mkdtempSync(path.join(tmpdir(), 'atlas-live-'));
+  let idled = 0;
+  const app = await createAtlasServer({ dataDir, port: 0, idleExitMs: 400, onIdle: () => idled++ });
+  t.after(async () => {
+    await app.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  assert.equal((await fetch(`${app.url}api/live`)).status, 403, 'only the window with the token');
+  const held = new AbortController();
+  const res = await fetch(`${app.url}api/live`, { headers: { 'X-Atlas-Token': app.token }, signal: held.signal });
+  assert.equal(res.status, 200);
+  await res.body.getReader().read();
+  await sleep(1200);
+  assert.equal(idled, 0, 'the line is held: the window is open, though it sends nothing');
+  held.abort();
+  await sleep(1200);
+  assert.equal(idled, 1, 'the line is let go: after the quiet time the server ends');
+});

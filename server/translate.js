@@ -96,6 +96,12 @@ export function createTranslateFiles(dataDir, { fetchImpl = globalThis.fetch } =
     await fsp.mkdir(path.dirname(file), { recursive: true });
     const part = `${file}.part`;
     const sink = fs.createWriteStream(part);
+    // a write that fails (a full disk, a file held by an antivirus) ends this download, not the server:
+    // an 'error' with no listener stops the whole process
+    let sinkError = null;
+    sink.on('error', (err) => {
+      sinkError = err;
+    });
     const expected = BERGAMOT_FILES[rel]?.sha256;
     const hash = expected ? crypto.createHash('sha256') : null;
     const length = Number(response.headers.get('content-length')) || 0;
@@ -103,7 +109,14 @@ export function createTranslateFiles(dataDir, { fetchImpl = globalThis.fetch } =
     try {
       for await (const chunk of Readable.fromWeb(response.body)) {
         hash?.update(chunk);
-        if (!sink.write(chunk)) await new Promise((resolve) => sink.once('drain', resolve));
+        if (sinkError) throw sinkError;
+        if (!sink.write(chunk)) {
+          await new Promise((resolve) => {
+            sink.once('drain', resolve);
+            sink.once('error', resolve);
+          });
+          if (sinkError) throw sinkError;
+        }
         if (!out.destroyed) out.write(chunk); // the page may have gone: the file is finished anyway
       }
       await new Promise((resolve, reject) => sink.end((err) => (err ? reject(err) : resolve())));
