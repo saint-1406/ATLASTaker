@@ -2,6 +2,7 @@
 // reader.js (the library's reader with pdf.js, loaded only when a document is opened), translate.js
 // (the opus-mt translator, loaded the first time the Windows app translates), styles.css with the
 // fonts. Served by the local server and packed into the Android app (all but translate.js).
+// bergamot-worker.js: the offline translator from Firefox (src/bergamot.js), its glue and its worker.
 import * as esbuild from 'esbuild';
 import fs from 'node:fs';
 
@@ -37,6 +38,17 @@ const options = {
   define: { __VERSION__: JSON.stringify(JSON.parse(fs.readFileSync('package.json', 'utf8')).version) },
   logLevel: 'info',
 };
+
+// The offline translator's worker: Firefox's Bergamot glue as it is (MPL-2.0, it keeps its notice),
+// then the worker's own code. A classic script started from a blob: URL (src/bergamot.js).
+async function buildBergamotWorker() {
+  const glue = fs.readFileSync('src/vendor/bergamot/bergamot-translator.js', 'utf8');
+  const own = await esbuild.build({ entryPoints: ['src/bergamotWorker.js'], bundle: true, format: 'iife', minify: !watch, write: false, target: ['chrome120'], legalComments: 'none', logLevel: 'error' });
+  fs.mkdirSync('dist', { recursive: true });
+  fs.writeFileSync('dist/bergamot-worker.js', `${glue}
+${own.outputFiles[0].text}`);
+}
+await buildBergamotWorker();
 
 if (watch) {
   const ctx = await esbuild.context(options);

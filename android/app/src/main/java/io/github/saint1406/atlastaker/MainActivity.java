@@ -148,6 +148,7 @@ public class MainActivity extends ComponentActivity {
     // the document scanner (Scanner.java, src/scanner in the page): its camera view asks for the camera
     // through WebView (getUserMedia); Android's permission is asked for then, once
     private Scanner scanner;
+    private TranslateFiles translateFiles;
     private ActivityResultLauncher<String> camera;
     private PermissionRequest pendingCamera;
 
@@ -232,11 +233,17 @@ public class MainActivity extends ComponentActivity {
             if (web != null) web.evaluateJavascript("window.__atlas && window.__atlas.scan && window.__atlas.scan(" + event + ")", null);
         }));
 
+        // the offline translator's files, once downloaded, are served to the page (/translate-files/…)
+        translateFiles = new TranslateFiles(this, event -> runOnUiThread(() -> {
+            if (web != null) web.evaluateJavascript("window.__atlas && window.__atlas.translate && window.__atlas.translate(" + event + ")", null);
+        }));
+
         WebViewAssetLoader loader = new WebViewAssetLoader.Builder()
                 .setDomain(HOST)
                 .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this))
                 .addPathHandler("/incoming/", new WebViewAssetLoader.InternalStoragePathHandler(this, incomingDir))
                 .addPathHandler("/scan/", new WebViewAssetLoader.InternalStoragePathHandler(this, scanner.dir()))
+                .addPathHandler("/translate-files/", new WebViewAssetLoader.InternalStoragePathHandler(this, translateFiles.dir()))
                 .build();
 
         web = new WebView(this) {
@@ -1050,6 +1057,18 @@ public class MainActivity extends ComponentActivity {
         @JavascriptInterface
         public void translate(String id, String from, String to, String pieces) {
             MainActivity.this.translate(id, from, to, pieces);
+        }
+
+        /** The offline translator's files (TranslateFiles.java): which are not here yet, as JSON. */
+        @JavascriptInterface
+        public String translateFilesStatus(String paths) {
+            return translateFiles.status(paths);
+        }
+
+        /** Downloads one of them; how far it got and how it ended come as translate(event). */
+        @JavascriptInterface
+        public void translateFileDownload(String id, String path) {
+            translateFiles.download(id, path);
         }
 
         @JavascriptInterface

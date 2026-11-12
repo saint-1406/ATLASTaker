@@ -5,6 +5,7 @@
 import { h, toast } from './overlays.js';
 import { t } from './i18n.js';
 import { androidEngine, browserEngine, directionOf, modelEngine, myMemoryEngine, otherWay, pickEngine, translateWith } from './translate.js';
+import { androidFiles, bergamotEngine } from './bergamot.js';
 
 let modelCode = null;
 
@@ -34,7 +35,10 @@ const LANG_NAMES = { ru: 'RU', en: 'EN' };
  */
 export function createTranslator({ api, android = null }) {
   const mlkit = android?.translate ? androidEngine(android) : null;
-  const offline = mlkit ? [mlkit] : [browserEngine(), api.translate ? modelEngine({ translateApi: api.translate, loadModelCode }) : null];
+  // Firefox's offline translator where its files can be fetched (the Windows app's server, the Android app)
+  const files = android?.translateFilesStatus ? androidFiles(android) : api.translate ?? null;
+  const bergamot = files ? bergamotEngine({ files }) : null;
+  const offline = [bergamot, ...(mlkit ? [mlkit] : [browserEngine(), api.translate ? modelEngine({ translateApi: api.translate, loadModelCode }) : null])];
   // MyMemory first (online, no key); the single-file browser build may not reach the network at all
   const online = api.kind === 'browser' && !android ? null : myMemoryEngine();
   const engines = [online, ...offline];
@@ -219,7 +223,22 @@ export function createTranslator({ api, android = null }) {
     open,
     close,
     isOpen: () => Boolean(card),
-    receive: (event) => mlkit?.receive(event),
+    /** Firefox's offline model: null where there is none; else { ready } for both directions. */
+    async offline() {
+      if (!bergamot) return null;
+      const states = await Promise.all(['ru-en', 'en-ru'].map((pair) => bergamot.state(pair)));
+      if (states.includes('unavailable')) return null;
+      return { ready: states.every((s) => s === 'ready') };
+    },
+    /** Downloads it for both directions; onProgress(share 0..1). */
+    async prepareOffline(onProgress) {
+      let done = 0;
+      for (const pair of ['ru-en', 'en-ru']) {
+        await bergamot.prepare(pair, (share) => onProgress?.((done + share) / 2));
+        done += 1;
+      }
+    },
+    receive: (event) => (files?.receive?.(event) ? undefined : mlkit?.receive(event)),
   };
 }
 

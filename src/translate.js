@@ -1,6 +1,8 @@
 // Translation of a selected passage, Russian ↔ English. Engines behind one interface, tried in order:
 //   - MyMemory (api.mymemory.translated.net): online, free, no key; a daily allowance per address
 //     (more with an e-mail given in the settings). The page asks it itself;
+//   - Firefox's own offline translator (Bergamot, src/bergamot.js): about 37 MB a direction, downloaded
+//     once; better than the two below, and nothing leaves the device;
 //   - Android: Google ML Kit in the app's native side (MainActivity.java: translate…), offline once
 //     the language models (about 30 MB each) are on the phone; results come back through
 //     window.__atlas.translate(event);
@@ -307,15 +309,18 @@ export class TranslateError extends Error {
 }
 
 /**
- * Picks the engine for a pair: Android's on a phone; else the browser's where it knows the pair; else
- * the model one where there is a server. Returns { engine, state } or null where nothing translates.
+ * Picks the engine for a pair, in the order given: the first one ready to translate; when none is,
+ * the first that needs a download (the person is asked first). Returns { engine, state } or null where
+ * nothing translates.
  */
 export async function pickEngine(engines, pair) {
+  let later = null;
   for (const engine of engines.filter(Boolean)) {
     const state = await engine.state(pair);
-    if (state !== 'unavailable') return { engine, state };
+    if (state === 'ready') return { engine, state };
+    if (state === 'download' && !later) later = { engine, state };
   }
-  return null;
+  return later;
 }
 
 /** Translates a passage with an engine that is ready: pieces in, the text with its paragraphs out. */

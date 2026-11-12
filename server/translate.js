@@ -7,12 +7,17 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
+import crypto from 'node:crypto';
+import { BERGAMOT_FILES, bergamotUpstream } from '../src/bergamotFiles.js';
 
 const MODEL_RE = /^hf\/Xenova\/opus-mt-(ru-en|en-ru)\/(config\.json|generation_config\.json|tokenizer\.json|tokenizer_config\.json|onnx\/encoder_model_quantized\.onnx|onnx\/decoder_model_merged_quantized\.onnx)$/;
 const ORT_RE = /^ort\/(\d{1,3}\.\d{1,3}\.\d{1,3}(?:-[0-9A-Za-z.-]{1,60})?)\/(ort-wasm-simd-threaded\.asyncify\.(?:mjs|wasm))$/;
 
 /** Where a file the translator may ask for comes from; null for anything else. */
 export function upstreamFor(rel) {
+  // the offline translator from Firefox (src/bergamotFiles.js): Mozilla's CDN, each file's SHA-256 known
+  const bergamot = bergamotUpstream(String(rel));
+  if (bergamot) return bergamot;
   const model = MODEL_RE.exec(String(rel));
   if (model) return `https://huggingface.co/Xenova/opus-mt-${model[1]}/resolve/main/${model[2]}`;
   const ort = ORT_RE.exec(String(rel));
@@ -25,6 +30,8 @@ export const TRANSLATE_TYPES = {
   '.onnx': 'application/octet-stream',
   '.mjs': 'text/javascript; charset=utf-8',
   '.wasm': 'application/wasm',
+  '.bin': 'application/octet-stream',
+  '.spm': 'application/octet-stream',
 };
 
 export function createTranslateFiles(dataDir, { fetchImpl = globalThis.fetch } = {}) {
@@ -48,6 +55,10 @@ export function createTranslateFiles(dataDir, { fetchImpl = globalThis.fetch } =
     const sizes = {};
     await Promise.all(
       missing.map(async (rel) => {
+        if (BERGAMOT_FILES[rel]) {
+          sizes[rel] = BERGAMOT_FILES[rel].size;
+          return;
+        }
         try {
           const head = await fetchImpl(upstreamFor(rel), { method: 'HEAD', redirect: 'follow' });
           sizes[rel] = Number(head.headers.get('x-linked-size') || head.headers.get('content-length')) || 0;
@@ -85,14 +96,19 @@ export function createTranslateFiles(dataDir, { fetchImpl = globalThis.fetch } =
     await fsp.mkdir(path.dirname(file), { recursive: true });
     const part = `${file}.part`;
     const sink = fs.createWriteStream(part);
+    const expected = BERGAMOT_FILES[rel]?.sha256;
+    const hash = expected ? crypto.createHash('sha256') : null;
     const length = Number(response.headers.get('content-length')) || 0;
     out.writeHead(200, { 'Content-Type': 'application/octet-stream', ...(length ? { 'Content-Length': length } : {}), 'Cache-Control': 'no-store' });
     try {
       for await (const chunk of Readable.fromWeb(response.body)) {
+        hash?.update(chunk);
         if (!sink.write(chunk)) await new Promise((resolve) => sink.once('drain', resolve));
         if (!out.destroyed) out.write(chunk); // the page may have gone: the file is finished anyway
       }
       await new Promise((resolve, reject) => sink.end((err) => (err ? reject(err) : resolve())));
+      // a file that is not exactly the one Firefox gets is not kept
+      if (hash && hash.digest('hex') !== expected) throw Object.assign(new Error('checksum mismatch'), { status: 502 });
       await fsp.rename(part, file);
     } catch (err) {
       sink.destroy();

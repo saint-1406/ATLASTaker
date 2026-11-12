@@ -39,7 +39,7 @@ import {
 import { fileNameFor, makeZip } from './backup.js';
 import { createSyncClient } from './sync/client.js';
 import { createSideMenu, sideGroup, sideItem, sideToggle } from './sidemenu.js';
-import { onlineHint, openOnlineDialog } from './translateSettings.js';
+import { onlineHint, openOfflineDialog, openOnlineDialog } from './translateSettings.js';
 import { openAppearance } from './appearance.js';
 import welcomeText from './welcome.md';
 import welcomeBrowserText from './welcome-browser.md';
@@ -116,6 +116,17 @@ let outline;
 let library = null; // the shelf and the reader, where this build has a place for documents
 let dictation = null; // speech to text at the cursor (dictation.js)
 const translator = createTranslator({ api, android }); // a selected passage, Russian ↔ English (translateCard.js)
+// whether Firefox's offline model is here (the settings show it): asked at start and after a download
+let offlineModel = null;
+function refreshOfflineModel() {
+  translator
+    .offline()
+    .then((state) => {
+      offlineModel = state;
+      sideMenu?.refresh();
+    })
+    .catch(() => {});
+}
 const phone = Boolean(android) || matchMedia('(pointer: coarse)').matches;
 let sync = null; // Google Drive sync (sync/client.js), where this build has it
 let sideMenu = null; // the menu sliding in from the right (sidemenu.js)
@@ -358,6 +369,7 @@ async function boot() {
   }
   trashView = createTrash({ getNotes: () => [...trashedNotes.values()], restoreNote, purgeNote, library });
   sideMenu = createSideMenu({ sections: menuSections(), onClose: () => editor.view.focus({ preventScroll: true }) });
+  refreshOfflineModel();
   bindChrome();
   applyLook({ persist: false });
   applyWriting();
@@ -2461,7 +2473,21 @@ function menuSections() {
       // not in the single-file browser build, which may not reach the network
       api.kind === 'browser' && !android
         ? null
-        : sideGroup(t('translate.online.group'), sideItem({ icon: '⇄', text: t('translate.online.title'), hint: onlineHint(), chevron: true, run: () => close(() => openOnlineDialog({ onDone: () => sideMenu?.refresh() })) })),
+        : sideGroup(
+            t('translate.online.group'),
+            sideItem({ icon: '⇄', text: t('translate.online.title'), hint: onlineHint(), chevron: true, run: () => close(() => openOnlineDialog({ onDone: () => sideMenu?.refresh() })) }),
+            // Firefox's offline model: here already, or a download (src/bergamot.js)
+            offlineModel
+              ? sideItem({
+                  icon: '⤓',
+                  text: t('translate.offline.title'),
+                  hint: t(offlineModel.ready ? 'translate.offline.ready' : 'translate.offline.missing'),
+                  chevron: !offlineModel.ready,
+                  disabled: offlineModel.ready,
+                  run: () => close(() => openOfflineDialog({ translator, onDone: () => refreshOfflineModel() })),
+                })
+              : null,
+          ),
       pinSettings(close),
     ],
     account: (close) => [
