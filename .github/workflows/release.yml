@@ -182,7 +182,8 @@ jobs:
   # The iPhone app: the same page in a WKWebView (ios/), built unsigned — an Apple ID signs it when it is
   # installed (Sideloadly, AltStore, SideStore). A release goes out without it if it does not build.
   ios:
-    runs-on: macos-15
+    # Intel: the ARM macOS runners were too busy to take the job ("not acquired… capacity constraints")
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
 
