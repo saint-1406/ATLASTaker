@@ -1,5 +1,5 @@
 # Tests the app and builds what a release holds: the Windows installer (MSI), the portable Windows
-# zip and the Android app (APK). A pushed tag v* publishes all three as a GitHub release; other runs
+# zip, the Android app (APK) and the iPhone app (an unsigned IPA, signed by whoever installs it). A pushed tag v* publishes all three as a GitHub release; other runs
 # keep them as artifacts. A manual run with `release` set replaces the files of that existing release.
 name: Release builds
 
@@ -179,9 +179,51 @@ jobs:
           name: android
           path: out/*.apk
 
+  # The iPhone app: the same page in a WKWebView (ios/), built unsigned — an Apple ID signs it when it is
+  # installed (Sideloadly, AltStore, SideStore). A release goes out without it if it does not build.
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+      - run: node scripts/ios-assets.mjs
+
+      - name: The Xcode project
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen generate
+
+      - name: Build the IPA
+        run: |
+          version=$(node -p "require('./package.json').version")
+          # a build number that only goes up: 0.19.9 → 1909
+          build=$(node -p "require('./package.json').version.split('.').reduce((n, p) => n * 100 + Number(p), 0)")
+          xcodebuild -project ios/ATLASTaker.xcodeproj -target ATLASTaker -configuration Release -sdk iphoneos             SYMROOT="$PWD/ios/build" MARKETING_VERSION="$version" CURRENT_PROJECT_VERSION="$build"             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+          app=ios/build/Release-iphoneos/ATLASTaker.app
+          test -f "$app/www/index.html" || { echo "::error::the page is not in the app"; exit 1; }
+          mkdir -p out/ipa/Payload
+          cp -R "$app" out/ipa/Payload/
+          (cd out/ipa && zip -qry "../ATLASTaker-$version-ios.ipa" Payload)
+          ls -l out/*.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: out/*.ipa
+
   publish:
-    needs: [windows, android]
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release != '')
+    needs: [windows, android, ios]
+    # the Windows and Android builds must pass; the iPhone one is welcome but not required yet
+    if: >-
+      always() && needs.windows.result == 'success' && needs.android.result == 'success' &&
+      (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release != ''))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

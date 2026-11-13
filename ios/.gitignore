@@ -1,0 +1,5 @@
+# made by CI: the page copied in (scripts/ios-assets.mjs), the Xcode project (xcodegen) and the build
+www/
+ATLASTaker.xcodeproj/
+build/
+ATLAS/Info.plist

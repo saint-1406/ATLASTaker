@@ -158,7 +158,14 @@ function render(size, colorAt = shade) {
 
 // node scripts/make-icon.mjs --android android/app/src/main/res → the launcher icons for every density
 const androidAt = process.argv.indexOf('--android');
-if (androidAt > 0) {
+// node scripts/make-icon.mjs --ios → the iPhone app's icon: 1024 px, square and opaque (iOS rounds it
+// itself), the rings and the summit on the plain background, as Android's adaptive icon has them
+const iosAt = process.argv.indexOf('--ios');
+if (iosAt > 0) {
+  const file = path.join(OUT, '..', 'ios', 'ATLAS', 'Assets.xcassets', 'AppIcon.appiconset', 'icon-1024.png');
+  writeFileSync(file, render(1024, (u, v) => foreground(u, v) ?? ICON_BG));
+  console.log(`иконка iOS записана в ${file}`);
+} else if (androidAt > 0) {
   const res = path.resolve(process.argv[androidAt + 1]);
   const densities = { mdpi: 1, hdpi: 1.5, xhdpi: 2, xxhdpi: 3, xxxhdpi: 4 };
   for (const [name, scale] of Object.entries(densities)) {
