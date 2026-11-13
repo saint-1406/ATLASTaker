@@ -3,7 +3,7 @@
 
 import { EditorSelection, Transaction } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { android, api, rescue } from './bridge.js';
+import { android, api, ios, rescue } from './bridge.js';
 import { icon } from './icons.js';
 import { fingerFirst } from './touch.js';
 import { flip, motionEnabled, navigate, setMotion, shared, stagger } from './motion.js';
@@ -336,7 +336,7 @@ async function boot() {
       getReading: () => normalizeReading(prefs),
       onReading: setReading,
       onCustomize: () => showAppearance({ pdf: library.openDocKind?.() === 'pdf' }),
-      onReaderColors: (bg, light) => (bg ? android?.setBars(bg, light) : applyBars()),
+      onReaderColors: (bg, light) => (bg ? (android ?? ios)?.setBars(bg, light) : applyBars()),
       onSystemBars: (reading, shown) => android?.setReading?.(reading, shown),
       onQuote: quoteToNote,
       onOpenNote: (id) => {
@@ -2326,7 +2326,7 @@ function applyLook({ persist = true } = {}) {
 
 /** The phone's status and navigation bars take the page's colour. */
 function applyBars() {
-  android?.setBars(getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(), effectiveTheme() === 'light');
+  (android ?? ios)?.setBars(getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(), effectiveTheme() === 'light');
 }
 
 function setLook(patch) {
@@ -2507,7 +2507,7 @@ function menuSections() {
       writingSettings(close),
       // the translator online (translateSettings.js): free, an e-mail raises the daily allowance;
       // not in the single-file browser build, which may not reach the network
-      api.kind === 'browser' && !android
+      api.kind === 'browser' && !android && !ios
         ? null
         : sideGroup(
             t('translate.online.group'),

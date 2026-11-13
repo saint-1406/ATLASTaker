@@ -14,6 +14,18 @@ const onServer = location.protocol.startsWith('http') && token !== '' && !token.
 /** The Android app's native side (android/…/MainActivity.java), when the page runs inside it. */
 export const android = typeof window.AtlasAndroid === 'object' && window.AtlasAndroid ? window.AtlasAndroid : null;
 
+/**
+ * The iPhone app's native side (ios/ATLAS/WebViewController.swift), when the page runs inside it: the
+ * page keeps its notes in IndexedDB as on Android, and tells the app the colour of its bars.
+ */
+export const ios =
+  typeof window.AtlasIOS === 'object' && window.AtlasIOS && window.webkit?.messageHandlers?.atlas
+    ? {
+        platform: 'ios',
+        setBars: (color, light) => window.webkit.messageHandlers.atlas.postMessage({ type: 'bars', color: String(color), light: Boolean(light) }),
+      }
+    : null;
+
 /** The fields of a library card the page may change. */
 const DOC_FIELDS = ['title', 'author', 'cover', 'position', 'progress', 'opened', 'notesId', 'scale', 'marks', 'bookmarks', 'texts', 'edits', 'shelf', 'series', 'seriesNo', 'finished', 'trashed'];
 const newDoc = (blob, { name, format }) => ({

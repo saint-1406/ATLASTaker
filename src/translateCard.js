@@ -6,6 +6,7 @@ import { h, toast } from './overlays.js';
 import { t } from './i18n.js';
 import { androidEngine, browserEngine, directionOf, modelEngine, myMemoryEngine, otherWay, pickEngine, translateWith } from './translate.js';
 import { androidFiles, bergamotEngine } from './bergamot.js';
+import { ios } from './bridge.js';
 
 let modelCode = null;
 
@@ -40,7 +41,7 @@ export function createTranslator({ api, android = null }) {
   const bergamot = files ? bergamotEngine({ files }) : null;
   const offline = [bergamot, ...(mlkit ? [mlkit] : [browserEngine(), api.translate ? modelEngine({ translateApi: api.translate, loadModelCode }) : null])];
   // MyMemory first (online, no key); the single-file browser build may not reach the network at all
-  const online = api.kind === 'browser' && !android ? null : myMemoryEngine();
+  const online = api.kind === 'browser' && !android && !ios ? null : myMemoryEngine();
   const engines = [online, ...offline];
   let onlineOff = false; // MyMemory said no today (its allowance is used up): the device's engines from now on
 
@@ -122,7 +123,7 @@ export function createTranslator({ api, android = null }) {
       try {
         const picked = await pickEngine(onlineOff || skipOnline ? offline : engines, pair);
         if (!live()) return;
-        if (!picked) return say(t(api.kind === 'browser' && !android ? 'translate.unavailableBrowser' : 'translate.unavailable'), 'error');
+        if (!picked) return say(t(api.kind === 'browser' && !android && !ios ? 'translate.unavailableBrowser' : 'translate.unavailable'), 'error');
         if (picked.state === 'download') {
           // nothing is downloaded before the person says so
           body.replaceChildren(h('p', { class: 'tr-note' }, t(`translate.download.${picked.engine.name}`)));

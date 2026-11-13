@@ -1,0 +1,61 @@
+# The iPhone and iPad app, described for XcodeGen (`xcodegen generate` makes ATLASTaker.xcodeproj; the
+# project itself is not kept). CI builds it unsigned into an .ipa (.github/workflows/release.yml); the
+# person signs it with their own Apple ID when installing (Sideloadly, AltStore or SideStore).
+name: ATLASTaker
+options:
+  bundleIdPrefix: io.github.saint1406
+  deploymentTarget:
+    iOS: "15.0"
+targets:
+  ATLASTaker:
+    type: application
+    platform: iOS
+    sources:
+      - path: ATLAS
+      # the page (scripts/ios-assets.mjs copies it here): a folder, kept as it is in the app
+      - path: www
+        type: folder
+        buildPhase: resources
+    info:
+      path: ATLAS/Info.plist
+      properties:
+        CFBundleDisplayName: ATLAS
+        CFBundleName: ATLAS
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDevelopmentRegion: ru
+        CFBundleAllowMixedLocalizations: true
+        LSRequiresIPhoneOS: true
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIStatusBarStyle: UIStatusBarStyleLightContent
+        UIViewControllerBasedStatusBarAppearance: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIRequiresFullScreen: false
+        NSCameraUsageDescription: ATLAS снимает страницы документов для сканера.
+        NSMicrophoneUsageDescription: ATLAS слушает речь для диктовки в заметку.
+        NSPhotoLibraryAddUsageDescription: ATLAS сохраняет картинки из заметок в Фото.
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.saint1406.atlastaker
+        PRODUCT_NAME: ATLASTaker
+        MARKETING_VERSION: "0.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_BITCODE: NO
+        # unsigned: whoever installs it signs it with their own Apple ID
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_IDENTITY: ""
