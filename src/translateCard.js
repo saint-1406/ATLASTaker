@@ -42,7 +42,8 @@ export function createTranslator({ api, android = null }) {
   const offline = [bergamot, ...(mlkit ? [mlkit] : [browserEngine(), api.translate ? modelEngine({ translateApi: api.translate, loadModelCode }) : null])];
   // MyMemory first (online, no key); the single-file browser build may not reach the network at all
   const online = api.kind === 'browser' && !android && !ios ? null : myMemoryEngine();
-  const engines = [online, ...offline];
+  // Firefox's model first once it is here (better, private, no allowance); MyMemory while it is not
+  const engines = [bergamot, online, ...offline.filter((engine) => engine !== bergamot)];
   let onlineOff = false; // MyMemory said no today (its allowance is used up): the device's engines from now on
 
   let card = null;
@@ -138,7 +139,7 @@ export function createTranslator({ api, android = null }) {
       } catch (err) {
         if (!live()) return;
         // MyMemory out of reach or out of allowance: the same passage on the device, if it can
-        if (err?.code === 'quota' || err?.code === 'network') {
+        if (err?.code === 'quota' || err?.code === 'network' || err?.code === 'nonsense') {
           if (err.code === 'quota') onlineOff = true;
           if (!skipOnline && (await pickEngine(offline, pair))) {
             skipOnline = true;

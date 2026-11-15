@@ -12,10 +12,10 @@ test('MyMemory is asked one piece at a time, with the e-mail when there is one',
     fetchImpl: async (url) => {
       const u = new URL(url);
       asked.push({ q: u.searchParams.get('q'), langpair: u.searchParams.get('langpair'), de: u.searchParams.get('de') });
-      return answer(ok(`[${u.searchParams.get('q')}]`))();
+      return answer(ok(`перевод ${u.searchParams.get('q')}`))();
     },
   });
-  assert.deepEqual(await engine.translate('en-ru', ['one', 'two']), ['[one]', '[two]']);
+  assert.deepEqual(await engine.translate('en-ru', ['one', 'two']), ['перевод one', 'перевод two']);
   assert.deepEqual(asked, [
     { q: 'one', langpair: 'en|ru', de: 'me@example.com' },
     { q: 'two', langpair: 'en|ru', de: 'me@example.com' },
@@ -23,10 +23,11 @@ test('MyMemory is asked one piece at a time, with the e-mail when there is one',
 });
 
 test('a passage goes to MyMemory in pieces it takes (500 bytes: 200 letters), paragraphs kept', async () => {
-  const engine = myMemoryEngine({ getEmail: () => '', fetchImpl: async (url) => answer(ok(new URL(url).searchParams.get('q').toUpperCase()))() });
+  const words = { 'Первый.': 'First.', 'Второй.': 'Second.' };
+  const engine = myMemoryEngine({ getEmail: () => '', fetchImpl: async (url) => answer(ok(words[new URL(url).searchParams.get('q')] ?? 'word'))() });
   const long = `${'слово '.repeat(80).trim()}.`;
   for (const piece of splitText(long, engine.maxPiece)) assert.ok(new TextEncoder().encode(piece.text).length <= 500);
-  assert.equal(await translateWith(engine, 'ru-en', 'Первый.\n\nВторой.'), 'ПЕРВЫЙ.\n\nВТОРОЙ.');
+  assert.equal(await translateWith(engine, 'ru-en', 'Первый.\n\nВторой.'), 'First.\n\nSecond.');
 });
 
 test('MyMemory says when the day is used up or it is out of reach', async () => {
@@ -44,4 +45,27 @@ test('MyMemory’s entities become characters; e-mails are checked', () => {
   assert.ok(isEmail('name@example.com'));
   assert.ok(!isEmail('name@example'));
   assert.ok(!isEmail('no spaces@example.com'));
+});
+
+test('MyMemory’s nonsense is passed over: the next answer it has in the right language, or none', async () => {
+  const { inLanguage, matchCase } = await import('../src/translate.js');
+  assert.ok(!inLanguage('hostile', "VRAZHDEBNOST'", 'ru'), 'a Russian word in Latin letters is not Russian');
+  assert.ok(inLanguage('hostile', 'враждебный', 'ru'));
+  assert.ok(inLanguage('Aisling smiled', 'Aisling улыбнулась', 'ru'), 'a name may stay as it is');
+  assert.ok(!inLanguage('враждебный', 'враждебный', 'en'));
+  assert.ok(inLanguage('42', '42', 'ru'), 'no letters, nothing to check');
+  assert.equal(matchCase('portent', 'Знамение'), 'знамение');
+  assert.equal(matchCase('Portent', 'Знамение'), 'Знамение');
+  assert.equal(matchCase('hostile', 'ВРАЖДЕБНЫЙ'), 'враждебный');
+  assert.equal(matchCase('NASA', 'НАСА'), 'НАСА');
+
+  const reply = (body) => async () => ({ status: 200, ok: true, json: async () => ({ responseStatus: 200, ...body }) });
+  const run = (body) => myMemoryEngine({ getEmail: () => '', fetchImpl: reply(body) }).translate('en-ru', ['hostile']).catch((e) => e.code);
+  const bad = { responseData: { translatedText: 'VRAZHDEBNOST&apos;' } };
+  assert.deepEqual(
+    await run({ ...bad, matches: [{ translation: 'VRAZHDEBNOST&apos;', 'created-by': 'MateCat' }, { translation: 'Враждебный', 'created-by': 'MT!' }] }),
+    ['враждебный'],
+  );
+  assert.equal(await run({ ...bad, matches: [] }), 'nonsense');
+  assert.deepEqual(await run({ responseData: { translatedText: 'многолюдный&#x0D;' } }), ['многолюдный']);
 });

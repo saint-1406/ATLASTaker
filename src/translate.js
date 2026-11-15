@@ -247,7 +247,51 @@ export const isEmail = (value) => /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,24}$/.t
 // MyMemory answers with a few HTML entities in its text
 const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&apos;': "'", '&nbsp;': ' ' };
 export const unentity = (text) =>
-  String(text).replace(/&(?:amp|lt|gt|quot|apos|nbsp|#39|#(\d{1,6}));/g, (whole, code) => (code ? String.fromCodePoint(Number(code)) : ENTITIES[whole]));
+  String(text)
+    .replace(/&(?:amp|lt|gt|quot|apos|nbsp|#(\d{1,7})|#x([0-9a-f]{1,6}));/gi, (whole, dec, hex) => {
+      if (dec || hex) {
+        const code = dec ? Number(dec) : parseInt(hex, 16);
+        return code <= 0x10ffff ? String.fromCodePoint(code) : '';
+      }
+      return ENTITIES[whole.toLowerCase()] ?? whole;
+    })
+    // a carriage return some entries carry (&#x0D;) is no part of the text
+    .replace(/\r/g, '');
+
+const CYRILLIC = /\p{Script=Cyrillic}/gu;
+const LATIN = /\p{Script=Latin}/gu;
+const count = (text, re) => (String(text).match(re) ?? []).length;
+
+/**
+ * Whether a translation is in the language it should be: MyMemory's shared memory holds entries
+ * people saved, and some are nonsense (a Russian word in Latin capitals, "VRAZHDEBNOST'", for
+ * "hostile"). Text with no letters (numbers, signs) is taken as it is.
+ */
+export function inLanguage(source, translated, to) {
+  const letters = count(source, CYRILLIC) + count(source, LATIN);
+  if (!letters) return true;
+  const cyr = count(translated, CYRILLIC);
+  const lat = count(translated, LATIN);
+  if (!cyr && !lat) return false;
+  return to === 'ru' ? cyr >= lat : lat > cyr;
+}
+
+/**
+ * The translation's first letter as the source's: "Знамение" for "portent" becomes "знамение".
+ * A translation all in capitals for a source that is not becomes ordinary letters.
+ */
+export function matchCase(source, translated) {
+  const src = String(source).trim();
+  let out = String(translated);
+  const letters = out.replace(/[^\p{L}]/gu, '');
+  const srcLetters = src.replace(/[^\p{L}]/gu, '');
+  if (letters.length > 3 && letters === letters.toUpperCase() && srcLetters !== srcLetters.toUpperCase()) out = out.toLowerCase();
+  const first = src.match(/\p{L}/u)?.[0];
+  if (first && first === first.toLowerCase() && first !== first.toUpperCase()) {
+    out = out.replace(/\p{L}/u, (letter) => letter.toLowerCase());
+  }
+  return out;
+}
 
 /** Runs task(item) for every item, a few at a time; the answers in the items' order. */
 async function inTurns(items, task, width = 3) {
@@ -284,7 +328,15 @@ export function myMemoryEngine({ fetchImpl = (...args) => globalThis.fetch(...ar
     const translated = answer?.responseData?.translatedText;
     if (answer?.quotaFinished || Number(answer?.responseStatus) === 429 || /^MYMEMORY WARNING/i.test(translated ?? '')) throw new TranslateError('quota');
     if (Number(answer?.responseStatus) !== 200 || typeof translated !== 'string') throw new TranslateError('failed');
-    return unentity(translated);
+    // the best answer if it is in the right language; else another it offered (machine translation
+    // first); else none — the device's engine takes the passage (translateCard.js)
+    const candidates = [translated, ...(Array.isArray(answer.matches) ? [...answer.matches].sort((a, b) => (b?.['created-by'] === 'MT!') - (a?.['created-by'] === 'MT!')).map((m) => m?.translation) : [])];
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string') continue;
+      const clean = unentity(candidate).trim();
+      if (clean && inLanguage(text, clean, to)) return matchCase(text, clean);
+    }
+    throw new TranslateError('nonsense');
   }
   return {
     name: 'mymemory',
