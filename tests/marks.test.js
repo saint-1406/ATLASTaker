@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_MARKS, mergeRects, newMarkId, sortMarks, validAnchor, validMark, validMarks } from '../src/marks.js';
+import { MAX_BOOKMARK_NOTE, MAX_BOOKMARK_NOTES, MAX_MARKS, mergeRects, newMarkId, sortMarks, validAnchor, validBookmark, validMark, validMarks } from '../src/marks.js';
 
 const mark = (patch = {}) => ({ id: newMarkId(), color: 'yellow', note: '', text: 'a passage', anchor: { a: 2, ao: 5, b: 3, bo: 1 }, created: 1, ...patch });
 
@@ -125,4 +125,15 @@ test('the line under a point: runs on one baseline, a wide gap is another column
   assert.equal(pickLine(runs, 320, 96).text, 'Column two');
   assert.equal(pickLine(runs, 60, 112).text, 'Next line');
   assert.equal(pickLine(runs, 250, 96), null);
+});
+
+test('a bookmark keeps its notes: dated, oldest first, within limits', () => {
+  const base = { id: 'b-abcd1234', position: { block: 3 }, progress: 0.4, label: 'Глава 3', created: 1 };
+  assert.ok(validBookmark(base), 'no notes yet');
+  assert.ok(validBookmark({ ...base, notes: [{ at: 2, text: 'Здесь герой уходит из дома' }, { at: 3, text: 'и возвращается' }], edited: 3 }));
+  assert.ok(!validBookmark({ ...base, notes: [{ at: 2, text: '' }] }), 'an empty note is no note');
+  assert.ok(!validBookmark({ ...base, notes: [{ text: 'no date' }] }));
+  assert.ok(!validBookmark({ ...base, notes: 'text' }));
+  assert.ok(!validBookmark({ ...base, notes: [{ at: 2, text: 'x'.repeat(MAX_BOOKMARK_NOTE + 1) }] }));
+  assert.ok(!validBookmark({ ...base, notes: Array.from({ length: MAX_BOOKMARK_NOTES + 1 }, (_, i) => ({ at: i, text: 'n' })) }));
 });

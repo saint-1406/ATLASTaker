@@ -3,14 +3,14 @@
 // remembers the place and sends a selected passage, as a quote, to the document's own note.
 // The reader's code (dist/reader.js, with pdf.js) is loaded the first time it is needed.
 
-import { h, toast, confirmDialog, showMenu, isOverlayOpen, openDialog } from './overlays.js';
-import { count, STRINGS, t } from './i18n.js';
+import { h, toast, confirmDialog, showMenu, isOverlayOpen, openDialog, openCommentDialog } from './overlays.js';
+import { count, formatDay, formatTime, STRINGS, t } from './i18n.js';
 import { addShelf, groupShelves, isShelf, renameShelf, shelfList } from './shelves.js';
 import { cleanSeries, foldSeries, inSeries, searchText, seriesNames, seriesNumber, seriesOrder } from './series.js';
 import { shownTheme } from './skins.js';
 import { icon } from './icons.js';
 import { drawQuickPanel, paintTheme, setDim } from './readLook.js';
-import { live, MARK_COLORS, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, MAX_TEXT_LENGTH, MAX_TEXTS, newBookmarkId, newEditId, newMarkId, newTextId, remapPdf, remapTexts, sortMarks, sortTexts, TEXT_COLORS, TEXT_SIZES } from './marks.js';
+import { live, MARK_COLORS, MAX_BOOKMARK_NOTE, MAX_BOOKMARK_NOTES, MAX_BOOKMARKS, MAX_NOTE, MAX_TEXT, MAX_TEXT_LENGTH, MAX_TEXTS, newBookmarkId, newEditId, newMarkId, newTextId, remapPdf, remapTexts, sortMarks, sortTexts, TEXT_COLORS, TEXT_SIZES } from './marks.js';
 import { openPageEditor } from './pageEditor.js';
 import { createFind } from './readerFind.js';
 import { changedKeys, createSteps, stepButtons, stepKey } from './undo.js';
@@ -1619,6 +1619,9 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       toast(t('clipboard.blocked', 'Ctrl+C'));
     }
   }
+  /** A bookmark's words for the clipboard: its place, its passage and its notes with their dates. */
+  const bookmarkWords = (b) =>
+    [b.label, b.snippet, ...(b.notes ?? []).map((n) => `💬 ${formatDay(n.at)}, ${formatTime(n.at)}: ${n.text}`)].filter(Boolean).join('\n');
   const markWords = (mark) => (mark.note?.trim() ? `${mark.text}\n\n💬 ${mark.note.trim()}` : mark.text);
   /** A small ⧉ at the end of a row in the list of marks and bookmarks. */
   const copyRowButton = (text) =>
@@ -2588,14 +2591,42 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     const label = (about.page ? t('reader.pageN', about.page) : [about.heading, pages ? t('reader.pageN', pages.index + 1) : t('library.progress', Math.round(progress * 100))].filter(Boolean).join(' · ')).slice(0, 300);
     const chosen = selected ? selected.toString().replace(/\s+/g, ' ').trim() : '';
     const snippet = (chosen || about.snippet).slice(0, 300);
-    list.push({ id: newBookmarkId(), position, progress, label, snippet, created: Date.now() });
+    const bookmark = { id: newBookmarkId(), position, progress, label, snippet, created: Date.now() };
+    list.push(bookmark);
     list.sort((x, y) => x.progress - y.progress || x.created - y.created);
     if (chosen) {
       document.getSelection()?.removeAllRanges();
       hideSelBar();
     }
     saveBookmarks();
-    toast(t('reader.bookmarks.added', label));
+    // a bookmark is often worth a word about what happens there: one tap away
+    toast(t('reader.bookmarks.added', label), { action: { text: t('reader.bookmarks.note'), run: () => noteBookmark(bookmark.id) } });
+  }
+
+  /**
+   * A bookmark's notes: what happens at this place, written over time. The dialog shows them all,
+   * oldest first, each with its date, and takes a new one.
+   */
+  async function noteBookmark(id) {
+    if (!reading) return;
+    const session = reading;
+    const bookmark = liveBookmarks(session.doc).find((b) => b.id === id);
+    if (!bookmark) return;
+    const notes = Array.isArray(bookmark.notes) ? bookmark.notes : [];
+    const text = await openCommentDialog({
+      kicker: `🔖 ${bookmark.label}`,
+      quote: bookmark.snippet || bookmark.label,
+      history: notes.map((n) => ({ stamp: `${formatDay(n.at)}, ${formatTime(n.at)}`, text: n.text })),
+      title: t('reader.bookmarks.notesTitle'),
+      placeholder: t('reader.bookmarks.notePlaceholder'),
+      maxLength: MAX_BOOKMARK_NOTE,
+    });
+    if (!text || session.closed) return;
+    const now = Date.now();
+    bookmark.notes = [...notes, { at: now, text: text.slice(0, MAX_BOOKMARK_NOTE) }].slice(-MAX_BOOKMARK_NOTES);
+    bookmark.edited = now;
+    saveBookmarks(session);
+    if (!marksPanel.hidden) fillMarks();
   }
 
   /** Into the trash, with "Undo" at hand. */
@@ -2657,9 +2688,21 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
           'button',
           { type: 'button', onclick: () => goToBookmark(b) },
           h('span', { class: 'rd-bm-icon', 'aria-hidden': 'true' }, '🔖'),
-          h('span', { class: 'rd-marks-body' }, h('span', { class: 'rd-marks-text' }, b.label), b.snippet ? h('span', { class: 'rd-marks-where' }, b.snippet) : null),
+          h(
+            'span',
+            { class: 'rd-marks-body' },
+            h('span', { class: 'rd-marks-text' }, b.label),
+            b.snippet ? h('span', { class: 'rd-marks-where' }, b.snippet) : null,
+            // the latest note, and how many came before it
+            b.notes?.length ? h('span', { class: 'rd-marks-note' }, `💬 ${b.notes.at(-1).text}${b.notes.length > 1 ? ` · ${t('reader.bookmarks.notesMore', b.notes.length - 1)}` : ''}`) : null,
+          ),
         ),
-        copyRowButton(b.snippet ? `${b.label}\n${b.snippet}` : b.label),
+        copyRowButton(bookmarkWords(b)),
+        h(
+          'button',
+          { type: 'button', class: 'rd-bm-note', title: t('reader.bookmarks.notesTitle'), 'aria-label': t('reader.bookmarks.notesTitle'), onclick: () => noteBookmark(b.id) },
+          '💬',
+        ),
         h('button', { type: 'button', class: 'rd-bm-remove', title: t('reader.bookmarks.remove'), 'aria-label': t('reader.bookmarks.remove'), onclick: () => removeBookmark(b.id) }, '✕'),
       ),
     );

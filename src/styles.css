@@ -2997,6 +2997,21 @@ textarea {
   color: var(--danger);
 }
 
+/* a bookmark's notes (💬): its history of what happens at that place */
+.rd-bm-note {
+  flex: none;
+  width: 36px;
+  border: 0;
+  background: none;
+  color: var(--ink-dim);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.rd-bm-note:hover {
+  color: var(--accent-text);
+}
+
 /* a mark's card: the passage, its comment, its colour */
 .rd-markpanel {
   position: fixed;
@@ -7712,7 +7727,8 @@ body.typing .dictate:not(.listening) {
   min-width: 0;
 }
 
-.rd-marks-item > .rd-bm-remove {
+.rd-marks-item > .rd-bm-remove,
+.rd-marks-item > .rd-bm-note {
   flex: none;
   width: 40px;
   padding: 0;

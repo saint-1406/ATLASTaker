@@ -21,6 +21,15 @@ const inTrash = (item) => item.trashed === undefined || item.trashed === null ||
 export const live = (list) => (Array.isArray(list) ? list.filter((item) => !item.trashed) : []);
 
 export const MAX_BOOKMARKS = 1000;
+// a bookmark's notes: what happens there, written down over time — { at, text }, oldest first
+export const MAX_BOOKMARK_NOTES = 200;
+export const MAX_BOOKMARK_NOTE = 2000;
+
+const validBookmarkNotes = (notes) =>
+  notes === undefined ||
+  (Array.isArray(notes) &&
+    notes.length <= MAX_BOOKMARK_NOTES &&
+    notes.every((n) => Boolean(n) && typeof n === 'object' && num(n.at) && typeof n.text === 'string' && n.text.length > 0 && n.text.length <= MAX_BOOKMARK_NOTE));
 
 export function newMarkId() {
   return `m-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -115,6 +124,7 @@ export function validBookmark(b) {
     typeof b.label === 'string' &&
     b.label.length <= 300 &&
     (b.snippet === undefined || (typeof b.snippet === 'string' && b.snippet.length <= 300)) &&
+    validBookmarkNotes(b.notes) &&
     num(b.created) &&
     (b.edited === undefined || num(b.edited)) &&
     inTrash(b)

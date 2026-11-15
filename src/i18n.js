@@ -1022,6 +1022,7 @@ const ru = {
     offlineNow: {
       quota: 'MyMemory на сегодня исчерпан — перевожу на устройстве',
       network: 'Нет интернета — перевожу на устройстве',
+      nonsense: 'MyMemory не дал нормального перевода — перевожу на устройстве',
     },
     offline: {
       title: 'Перевод без интернета: модель Firefox',
@@ -1063,6 +1064,7 @@ const ru = {
       failed: 'Перевод не получился — попробуйте ещё раз',
       quota: 'Бесплатный лимит MyMemory на сегодня исчерпан, а модели на устройстве ещё нет',
       network: 'Нет связи с MyMemory, а модели на устройстве ещё нет',
+      nonsense: 'MyMemory не нашёл нормального перевода. Скачайте модель Firefox в настройках — она переводит лучше',
     },
   },
   reader: {
@@ -1143,6 +1145,10 @@ const ru = {
       added: (label) => `Закладка: ${label}`,
       remove: 'Убрать закладку',
       none: 'Закладок нет. Ctrl+D или кнопка выше запоминает текущее место.',
+      note: 'Подписать',
+      notesTitle: 'Заметки к закладке',
+      notePlaceholder: 'Что происходит в этом месте…',
+      notesMore: (n) => `ещё ${n}`,
     },
     edit: {
       menu: 'Править текст PDF',
@@ -2204,6 +2210,7 @@ const en = {
     offlineNow: {
       quota: 'MyMemory is used up for today — translating on the device',
       network: 'No internet — translating on the device',
+      nonsense: 'MyMemory gave no proper translation — translating on the device',
     },
     offline: {
       title: 'Offline translation: Firefox’s model',
@@ -2245,6 +2252,7 @@ const en = {
       failed: 'Translation failed — try again',
       quota: 'MyMemory’s free allowance for today is used up, and the device has no model yet',
       network: 'MyMemory is out of reach, and the device has no model yet',
+      nonsense: 'MyMemory found no proper translation. Download Firefox’s model in the settings — it translates better',
     },
   },
   reader: {
@@ -2325,6 +2333,10 @@ const en = {
       added: (label) => `Bookmark: ${label}`,
       remove: 'Remove bookmark',
       none: 'No bookmarks. Ctrl+D or the button above keeps the current place.',
+      note: 'Add a note',
+      notesTitle: 'Bookmark notes',
+      notePlaceholder: 'What happens at this place…',
+      notesMore: (n) => `${n} more`,
     },
     edit: {
       menu: 'Edit PDF text',

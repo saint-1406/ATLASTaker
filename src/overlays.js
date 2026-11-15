@@ -169,15 +169,15 @@ export function openDialog(build,{ onClose, dismissable = true, className = '' }
 }
 
 /** Resolves to the comment text, or null when cancelled. */
-export function openCommentDialog({ quote, history = [], kicker = t('comment.kicker') }) {
+export function openCommentDialog({ quote, history = [], kicker = t('comment.kicker'), title = t('comment.title'), placeholder = t('comment.placeholder'), maxLength = 2000 }) {
   return new Promise((resolve) => {
     openDialog(
       (box, close) => {
         const area = h('textarea', {
           class: 'field field-area',
           rows: '3',
-          maxlength: '2000',
-          placeholder: t('comment.placeholder'),
+          maxlength: String(maxLength),
+          placeholder,
           'aria-label': t('comment.label'),
           'data-autofocus': true,
         });
@@ -200,7 +200,7 @@ export function openCommentDialog({ quote, history = [], kicker = t('comment.kic
         });
         box.append(
           h('div', { class: 'modal-kicker' }, kicker),
-          h('h2', { class: 'modal-title' }, t('comment.title')),
+          h('h2', { class: 'modal-title' }, title),
           h('blockquote', { class: 'modal-quote' }, quote),
           history.length
             ? h(
