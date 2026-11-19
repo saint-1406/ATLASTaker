@@ -3,6 +3,7 @@
 // to go. The avatar (top right) opens the menu, as in the notes; the tab bar sits at the bottom.
 
 import { h } from './overlays.js';
+import { logoMark } from './logo.js';
 import { count, currentLocale, t } from './i18n.js';
 
 /** The person's picture, their initial, or a plain figure: for the header and the main page. */
@@ -192,7 +193,8 @@ export function drawHome(root, ctx) {
         h('button', { type: 'button', class: 'home-avatar', title: t('chrome.menuKey'), 'aria-label': t('chrome.menu'), onclick: () => ctx.onMenu() }, avatarNode(profile, 40)),
       ),
       h('p', { class: 'home-hello' }, greeting(profile.name)),
-      h('h1', { class: 'home-brand' }, 'ATLAS'),
+      // the emblem before the word, in the word's own colour (logo.js, the same as the app's icon)
+      h('h1', { class: 'home-brand' }, logoMark('home-logo'), h('span', {}, 'ATLAS')),
       h('p', { class: 'home-tagline' }, t('home.tagline')),
     ),
     h('div', { class: 'home-body' }, book, goal, books, sections, notesBlock),

@@ -10966,3 +10966,17 @@ html[data-easter="cats"] body:not(.has-tabbar) .cat-peek {
 ::highlight(atlas-carry) {
   background-color: var(--sel);
 }
+
+/* the home screen's title: the ATLAS emblem (logo.js) before the word, in its colour */
+.home-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.22em;
+}
+
+.home-logo {
+  flex: none;
+  width: auto;
+  height: 0.9em;
+  margin-top: -0.04em;
+}
