@@ -1,126 +1,127 @@
 # ATLAS Notetaker
 
-Локальный блокнот с визуальным редактором и хранением в Markdown: пишешь — сохраняется, код подсвечивается, у задач есть комментарии с датой. Заметки остаются обычными `.md`-файлами на твоём диске. Рядом с заметками — библиотека для чтения: PDF, EPUB, FB2, DOCX, ODT, RTF, Markdown, TXT, HTML, комиксы CBZ и картинки — с подсветкой, комментариями и закладками прямо в книге и цитатами в заметки. PDF можно переделывать: поворачивать, убирать и переставлять страницы, добавлять страницы из другого PDF. Есть для Windows и для Android.
+**English** · [Русский](README.ru.md)
 
-![Оформление «Минимал»](docs/minimal.png)
+A local-first notepad and reading app. Notes are written in a visual editor and kept as plain Markdown (`.md`) files on your own disk. Next to them is a library for reading PDF, EPUB, FB2, DOCX, ODT, RTF, Markdown, TXT, HTML, CBZ comics and pictures, with highlights, comments, bookmarks and quotes into notes. It runs on Windows, Android and iPhone; Windows and Android sync through your own Google Drive. The interface speaks English and Russian.
 
-## Установка
+![The Minimal look](docs/minimal.png)
 
-**MSI.** Скачай `ATLASTaker-<версия>-x64.msi` со страницы [Releases](https://github.com/saint-1406/ATLASTaker/releases) и запусти. Установщик кладёт приложение в `Program Files` (нужны права администратора) и создаёт ярлыки в меню «Пуск» и на рабочем столе. Внутри своя копия Node, отдельно ничего ставить не нужно.
+## Install
 
-**Без установки.** Архив `ATLASTaker-<версия>-portable.zip` оттуда же: распакуй и запусти `ATLAS Notetaker.cmd` в папке. Работает так же, как установленная версия: окно Edge или Chrome, заметки в той же папке `%APPDATA%\ATLAS Notetaker`.
+Download from the latest [release](https://github.com/saint-1406/ATLASTaker/releases/latest):
 
-**Android.** `ATLASTaker-<версия>-android.apk` оттуда же. Скачай на телефон и открой; Android попросит разрешить установку из этого источника (браузера или файлового менеджера). Заметки и книги живут в приложении на телефоне, копия заметок — «Скачать все заметки (.zip)» через лупу. Книгу можно открыть прямо из другого приложения: «Открыть с помощью» или «Поделиться» → ATLAS. Следующие версии ставятся поверх, заметки остаются.
+| File | For |
+| --- | --- |
+| `ATLASTaker-<version>-x64.msi` | **Windows**, installed into Program Files (administrator rights needed), with Start menu and desktop shortcuts. Node is inside: nothing else to install. |
+| `ATLASTaker-<version>-portable.zip` | **Windows without installing**: unzip anywhere and run `ATLAS Notetaker.cmd`. Same app, same notes folder as the installed one. |
+| `ATLASTaker-<version>-android.apk` | **Android 8 and later**: open it on the phone and allow installing from that source. Later versions install over it (or from inside the app); notes and books stay. |
+| `ATLASTaker-<version>-ios.ipa` | **iPhone and iPad**: an unsigned app that you sign with your own Apple ID while installing it with Sideloadly. A free Apple ID's signature lasts 7 days and is then renewed; notes and books stay. Step by step: [docs/ios-install.md](docs/ios-install.md) (in Russian). |
+| `SHA256SUMS.txt` | The checksums of the files above. |
 
-**Из исходников** (нужен Node 22+):
+**From source** (Node 22 or later):
 
 ```bash
 npm install
 npm start
 ```
 
-`npm run shortcut` создаёт ярлыки на рабочем столе и в «Пуске» для запуска из исходников.
+`npm run shortcut` adds desktop and Start menu shortcuts that run the app from the source folder.
 
-**Браузерная версия.** Один файл `ATLAS-Notetaker.html` без установки, без Node и без сервера: открывается двойным щелчком или в окне Edge. Заметки хранятся в IndexedDB браузера. Если очистить данные браузера, они пропадут, поэтому есть «Скачать все заметки (.zip)» и «Импорт .md» (Ctrl+K или Ctrl+,), а если копии не было неделю, ATLAS напоминает сам. Подходит для компьютеров, где ничего нельзя ставить.
+**Browser build.** One `ATLAS-Notetaker.html` file: no installing, no Node, no server, for computers where nothing may be installed. Notes live in the browser's IndexedDB, so the app offers "Download all notes (.zip)" and ".md import", and reminds you when there has been no copy for a week. `npm run build:browser` makes `out/browser/ATLAS-Notetaker.html`; `npm run install:browser` also copies it to `%LOCALAPPDATA%\ATLAS Notetaker\browser` and adds a shortcut that opens it in Edge as an app.
 
-```bash
-npm run build:browser
-```
+## Notes
 
-Собирает `out/browser/ATLAS-Notetaker.html`. Команда `npm run install:browser` ещё и копирует его в `%LOCALAPPDATA%\ATLAS Notetaker\browser` и ставит ярлык «ATLAS Notetaker (браузер)», который открывает файл в Edge как отдельное приложение.
+- **A visual editor.** Buttons change how the text looks, not visible Markdown marks; the file stays plain Markdown, and a source mode shows it as typed. Headings, bold, italic, underline, strikethrough, lists that continue on Enter, tasks with a box to tick, quotes, code blocks with highlighting, links, tables, pictures and collapsible accordion blocks. Opening a note never rewrites it.
+- **One bar at the foot** with the kind of paragraph, the formats (a pressed one stays on until pressed again), blocks, pictures, links and the note's menu; which buttons it has and in what order is up to you. On a phone it sits right above the keyboard.
+- **Autosave.** Text reaches the disk 0.4 s after the last key. If the server goes away mid-sentence, the unsaved text waits in a rescue copy and is offered back at the next start; what is not taken back goes to `backups\несохранённое\`, never lost.
+- **Pictures and screenshots.** Paste a screenshot (Win+Shift+S, then Ctrl+V) or drop a file; on a phone, pick one from the gallery or the camera. A click opens it full screen.
+- **Comments on task lines.** Right click → "Add comment" (Ctrl+Shift+M) puts a dated line under the task, `💬 26.10.2026 17:52 · text`, with the earlier ones shown.
+- **Tags.** Write `#word`, or select text and mark it with a tag; the list of tags gathers them from every note and leads to the lines they stand on.
+- **Version history.** While you write, a version is kept at most every 10 minutes; any one can be compared with the text now (lines in and out) and put back, and ↶ undoes that.
+- **Writing statistics.** Over the note: characters, words, sentences, paragraphs, reading time and typing speed (it folds to one line). A tap shows how much you wrote and how the text grew today, this week and this month, the days in a row, and a heat map of the last half year.
+- **Back and forward one step** (↶ ↷, Ctrl+Z / Ctrl+Y) on every screen: the note's text; a book's marks, bookmarks and texts; deletions, moves and folders in Notes and the Library.
+- **Focus mode** (Ctrl+.): only the text, with everything but the paragraph or sentence you are writing faded.
+- **Reading a note.** On a phone a note with text opens for reading, so a stray tap changes nothing; ✎ turns writing on.
+- **Export** a note to Markdown, plain text, a web page (pictures inside) or PDF (through printing: "Save as PDF").
+- **Ctrl+K** finds notes by title and text and runs every command; the outline on the side lists the headings.
+- **Dictation** (the microphone, or Ctrl+Shift+D): the words show grey at the cursor, and a finished phrase goes in with its spacing and capital letter. Android uses its own speech recognition (offline where the language pack is downloaded); Edge and Chrome use their online service.
+- **Translation** of a selection, Russian ↔ English: MyMemory online (free, no key); without the internet, Firefox's own offline engine (its models, about 42 MB a direction, downloaded once and checked) or the phone's.
+- **Document scanner** (Android): the camera or the gallery, the sheet's edges found and adjustable, the perspective straightened, the text read on the phone (PaddleOCR, Russian and English, no network) and saved as a note or a TXT file.
 
-## Что умеет
+## Library and reader
 
-- **Автосохранение.** Текст пишется на диск через 0,4 с после последней буквы, при закрытии окна дописывается остаток. Если сервер упал или его сменило обновление посреди работы, несохранённое лежит в аварийной копии: при следующем запуске ATLAS покажет, что нашёл, и спросит, что вернуть. Невозвращённое не пропадает — оно ложится файлом в `backups\несохранённое\`. Курсор, прокрутка и настройки переживают перезапуск.
-- **Код.** «Вставить → Блок кода» или Ctrl+E. Shift+Enter добавляет строку внутри кода, Enter создаёт обычный абзац после него. Подсветка языков, синтаксис /# и умная вставка кода остаются в явно выбранном режиме исходника.
-- **Комментарии к задачам.** Правая кнопка на строке → «Добавить комментарий» (или Ctrl+Shift+M). Комментарий встаёт под строку с датой и временем: `💬 26.10.2026 17:52 · текст`. В окне комментария видна история прошлых.
-- **Картинки и скриншоты.** Win+Shift+S, затем Ctrl+V прямо в заметке — или перетащи файл. Картинка показывается под строкой `![…](assets/…png)`, щелчок открывает её на весь экран. В установленной версии файлы лежат в `notes\assets\` рядом с заметками, в браузерной — в IndexedDB; резервная копия .zip забирает их в папку `assets/`.
-- **Палитра Ctrl+K.** Поиск по заметкам (по названию и по тексту) и все команды в одном месте; `>` в начале — только команды.
-- **Оглавление.** Заголовки заметки справа, раздел с курсором подсвечен, клик переносит к разделу.
-- **Режим фокуса** (Ctrl+.): только текст, всё, кроме текущей строки, приглушено.
-- **Корзина** (☰ → «Корзина», «+» на экране заметок или «Корзина» в панели пометок). Удалённые заметки, книги, пометки, комментарии и закладки ждут там целыми, пока их не вернуть или не удалить навсегда — только из корзины, вторым нажатием. Корзина синхронизируется: удалил на телефоне — вернёшь на ноутбуке.
-- **Заметка для чтения.** На телефоне заметка с текстом открывается только для чтения: случайное касание ничего не изменит. Карандаш ✎ в заголовке включает и выключает правку.
-- **Шаг назад и вперёд** (↶ ↷, Ctrl+Z / Ctrl+Y) на каждом экране: в заметке — текст, в книге — пометки, закладки и надписи, на экранах «Заметки» и «Библиотека» — удаление, перенос и папки.
-- **Письмо.** Над заметкой — полоса статистики: знаки, слова, предложения, абзацы, время чтения, скорость набора; нажатие на неё открывает статистику письма — сколько написано и как вырос текст за день, неделю и месяц, дни подряд и тепловую карту за полгода. Над клавиатурой телефона — выбор типа абзаца, кнопки форматов с активными состояниями и закреплённое «＋ Вставить». Состав и порядок кнопок форматов настраиваются; вставка остаётся доступной. В режиме фокуса светится только текущий абзац или предложение.
-- **Заметка как она читается.** Разметка Markdown спрятана: жирный виден жирным, курсив курсивом, подчёркнутый подчёркнутым, список точками, задача галочкой, которую можно нажать; в тексте она остаётся, поэтому заметки переносятся между устройствами как есть. Показать её снова — ☰ → Настройки → Письмо.
-- **Меню заметки** (⋯ в заголовке): копировать весь текст, очистить страницу, отметить выделенное тегом (#слово) и найти всё с тегом в списке тегов, история версий, статистика, экспорт в Markdown, TXT, HTML и PDF (через печать — «Сохранить как PDF»).
-- **История версий** (☰ → Заметки → «История версий»). Пока вы пишете, версия заметки сохраняется не чаще раза в 10 минут; любую можно сравнить с текущим текстом и вернуть, а ↶ отменит возврат. Версии хранятся на своём устройстве и не синхронизируются.
-- **PIN-код** (☰ → Настройки → Защита): приложение на этом устройстве открывается только с ним и снова закрывается, когда побудет в фоне. Хранится только хеш PIN; файлы на диске он не шифрует.
-- **Синхронизация через Google** (☰ → Аккаунт). Заметки, папки, книги с местом чтения, пометки, закладки, корзина и все настройки — оформление, тема, язык, темы чтения, профиль, цель чтения, разделы библиотеки — общие для Windows (MSI и portable) и Android. Свежая установка берёт настройки с Диска, а не затирает их своими.
-- **Обновление на телефоне** (☰ → Аккаунт → «Обновления»). Приложение само скачивает новую версию с GitHub, сверяет размер, SHA-256, пакет, версию и ключ подписи и только потом открывает установку поверх старой — удалять приложение не нужно, заметки и книги остаются. Битый файл до установки не дойдёт. В Windows приложение сообщает о новой версии и открывает страницу загрузки; данные в `%APPDATA%ATLAS Notetaker` обновление не трогает. В каждом релизе есть `SHA256SUMS.txt`.
-- **Диктовка** (кнопка с микрофоном в углу или Ctrl+Shift+D). Пока говоришь, слова видны серым у курсора; законченная фраза встаёт в текст с нужным пробелом и заглавной буквой. «Новая строка» и «новый абзац» — команды, а не слова. На Android слушает системное распознавание речи (на новых телефонах — и без интернета, если скачан языковой пакет); в Edge и Chrome — сервис браузера, онлайн: звук уходит в облако Microsoft или Google. Остановить — ещё раз на микрофон или Esc.
-- **Библиотека** (кнопка с книгами или Ctrl+O). PDF, EPUB, FB2 (и FB2 в zip), DOCX, ODT, RTF, Markdown, TXT, HTML, комиксы CBZ (страница за страницей) и картинки (JPEG, PNG, WebP — скан или фото страницы) ложатся на полку с обложкой и процентом прочитанного; файлы можно перетащить прямо на полку. Книга открывается там, где остановился, ☰ — оглавление, «Aa» — вид: размер текста, шрифт, интервал, тема и режим чтения. Читать можно лентой или **по страницам**, слева направо: свайп, тап по краю страницы, стрелки или колесо. Перелистывание на выбор — «Книга» (страница переворачивается через корешок), «Стопка» (новая ложится поверх), «Сдвиг», «Растворение» или «Сразу»; при системной настройке «уменьшить движение» анимации нет. Выдели текст — внизу появится панель: **цвет** подсвечивает место, **«Комментарий»** подсвечивает и открывает поле для заметки к нему, **«В заметку»** кладёт цитату в заметку «Цитаты: <книга>» с главой или страницей (место в книге тоже подсвечивается). Пометки живут в самой книге: видны при каждом открытии, в ленте и по страницам, при любом шрифте и размере; в PDF — прямо поверх строк. Тап по пометке открывает её карточку: текст, комментарий, цвет, «Удалить». Кнопка ✎ в шапке — список пометок и **закладок** книги, щелчок переносит к месту; Ctrl+D (или «Закладка здесь» в том же списке) запоминает текущее место. **Поиск** — кнопка ⌕ или Ctrl+F: слово или фраза ищутся по всему документу без учёта регистра и ё/е, в том числе через переносы строк; Enter / Shift+Enter (или F3) — к следующему и предыдущему месту, ≡ — список всех мест с кусочком текста вокруг. В большом PDF поиск идёт порциями и показывает, сколько пройдено; в комиксах и картинках текста нет — поиск так и скажет. У цитаты в заметке подпись — ссылка обратно: Ctrl+клик по ней открывает книгу ровно на этом месте. Старые `.doc` не читаются — их надо пересохранить в `.docx`.
-- **PDF: страницы и пометки в файле.** Меню ⋯ в читалке → «Страницы»: все страницы картинками — повернуть ↺ ↻, убрать ✕, перетащить или подвинуть стрелками, добавить страницы из другого PDF. «Сохранить» (Ctrl+S) пишет новый файл; прежний остаётся в корзине библиотеки (`library\.trash`), пометки и закладки переезжают вместе со своими страницами. **Надписи:** кнопка «T» в шапке (или ⋯ → «Надпись на странице»), затем щелчок по странице — там появится надпись; цвет и размер выбираются в её карточке, саму надпись можно перетащить. **Правка текста:** ⋯ → «Править текст PDF», затем нажатие на строку — она открывается для правки на своём месте, тем же цветом и похожим шрифтом (Noto: без засечек, с засечками или моноширинный, обычный или жирный). Правки видны сразу и синхронизируются; «Сохранить в PDF» записывает их в сам файл настоящим текстом (старая строка закрывается цветом страницы и остаётся под ним — для скрытия секретов это не годится), прежний файл уходит в корзину библиотеки. Повёрнутый текст и сканы так не правятся. «Скачать PDF с пометками» — копия файла, где каждая пометка стала настоящей подсветкой PDF с комментарием, а каждая надпись — текстовой аннотацией: их видят Acrobat, Edge, Chrome и другие программы. Подсветку и заметки, оставленные в PDF другими программами, ATLAS тоже показывает. «Скачать файл» в том же меню отдаёт исходный документ любого формата. Текст книг показывается без скриптов и стилей самого файла, только знакомые теги.
+- **Formats:** PDF, EPUB, FB2 (also zipped), DOCX, ODT, RTF, Markdown, TXT, HTML, CBZ comics (page by page) and pictures (JPEG, PNG, WebP: a scan or a photo of a page). Old `.doc` files need saving as `.docx` first.
+- **The shelf:** covers and progress, sections, and **series** (a series lies as one folder, its books by part). Files can be dropped right onto it; on Android, "Open with" or "Share" → ATLAS.
+- **Reading** as one scroll or **by pages**: swipe, tap an edge, arrow keys or the wheel. Page turns: Book (the corner lifts and the page folds over, following your finger), Stack, Slide, Fade or None, with a speed slider; none when the system asks for reduced motion. On Android, the screen's full refresh rate or 60 Hz.
+- **Reading looks:** themes, font, size, spacing and margins, in the "Aa" panel.
+- **Highlights** in colours, with comments, grouped by colour in the list; **bookmarks** with notes about what happens at that place, and their history; **texts** written onto PDF pages. A deleted one waits in the trash.
+- **Search** in a document (Ctrl+F): the whole text, any case, across line breaks, with a list of every place.
+- **Quotes** go into a "Quotes: <book>" note with the chapter or page; Ctrl+click on the quote opens the book exactly there.
+- **PDF editing:** rotate, remove, reorder and add pages; edit a line of text in place; save highlights and texts into a copy as real PDF annotations that Acrobat, Edge and Chrome show.
+- **Apocrypha, a shared library:** a collection of public domain classics (searched by title, author and language, each download checked against its checksum, the list kept for offline use), and books readers share from their own Google Drive.
 
-## Оформления
+## Sync, safety and updates
 
-Ctrl+, открывает настройки: язык, оформление, тема, акцент и размер текста.
+- **Sync through Google Drive** (Account): notes, folders, books with their reading place, highlights, bookmarks, the trash and every setting are shared between Windows (MSI and portable) and Android. Only the app's own Drive folder is used. A fresh install takes its settings from Drive instead of overwriting them.
+- **The trash** keeps deleted notes, books, highlights, comments and bookmarks whole until you restore them or delete them for good from there; it syncs too.
+- **A PIN** (Settings → Protection) locks the app on that device, and locks it again after a while in the background. Only a salted hash of the PIN is kept; it keeps the notes from other eyes in the app but does not encrypt the files on the disk.
+- **Backups on Windows:** a copy of every note before each update and once a day; the last 20 are kept.
+- **Updates:** on Android the app downloads the new version from GitHub and checks its size, SHA-256, package, version and signing key before Android installs it over the old one. On Windows the app tells you of a new version and opens its download page.
 
-**Темы.** Тёмная и светлая, а для разных глаз и времени суток — **Сепия** (тёплая бумага для долгого чтения), **Сумерки** (мягкая сине-серая тёмная), **Ночь** (чёрная для AMOLED-экранов, тёплый неяркий текст без резкого синего) и **Контраст** (белое на чёрном, жёлтые метки, заметная рамка фокуса). Или «Как в системе». Тему можно сменить и прямо в читалке, в панели «Aa».
+## Looks
 
-**Язык.** Интерфейс говорит по-русски и по-английски: «Язык · Language» в настройках или команда «Language: English» в Ctrl+K, переключается сразу, без перезагрузки. При первом запуске язык берётся из браузера, и приветственная заметка будет на нём же; у тех, кто пользовался ATLAS раньше, остаётся русский. Папки бэкапов (`до обновления`, `ежедневная`, `несохранённое`) называются по-прежнему на любом языке.
+Settings (Ctrl+,): language, look, theme, accent, text size and animations.
 
-| | |
+- **Looks:** **Cosy** (the default: warm paper, serif titles, soft cards), **Minimal** (monochrome, fine lines, one accent colour) and **Atlas** (each note becomes a relief map, its headings peaks in the margins, all notes an archipelago: Ctrl+M).
+- **Themes:** light and dark, **Sepia** for long reading, **Dusk** (a soft blue-grey dark), **Night** (black for AMOLED screens, warm dim text), **Contrast** (white on black, yellow marks), or the system's.
+- **Language:** English or Russian, switched at once; at the first start it follows the browser.
+
+## Where your data lives
+
+On Windows, in `%APPDATA%\ATLAS Notetaker`:
+
+| Folder | What |
 | --- | --- |
-| **Минимал** — по умолчанию. Монохром, тонкие линии, Inter и JetBrains Mono, один акцентный цвет на выбор. | ![Настройки](docs/settings.png) |
-| **Атлас** — каждая заметка становится картой с рельефом: заголовки превращаются в вершины на полях, все заметки вместе — в архипелаг (Ctrl+M). | ![Оформление «Атлас»](docs/atlas.png) |
+| `notes\` | the notes as plain `.md` files; dates, cursor places and settings in `atlas.json`; deleted notes in `notes\.trash\`, earlier versions in `notes\.versions\` |
+| `library\` | the documents as they are, their cards in `library.json`; deleted ones in `library\.trash\` |
+| `backups\` | the copies before updates and the daily ones |
+| `server.log` | what the local server reports: its starts, why it stopped, errors |
 
-**Аккордеон.** Закреплённая кнопка «＋ Вставить → Аккордеон» создаёт отдельный сворачиваемый блок; выделенный текст попадает внутрь. Название и содержимое редактируются на месте. Есть кнопка «Абзац после блока». HTML-экспорт сохраняет интерактивность, TXT и печать/PDF включают всё содержимое.
+Uninstalling the app leaves all of it. On Android and iPhone everything lives inside the app; "Download all notes (.zip)" makes a copy, and on Android sync keeps one on Drive.
 
-**Визуальный ввод.** Кнопки меняют свойства текста, а не вставляют видимые Markdown-маркеры. Активный формат подсвечен, пробел его сохраняет. В маркированном и нумерованном списках Enter после заполненного пункта добавляет следующий. На пустом пункте Enter завершает список или возвращает на уровень выше. В остальных блоках Enter создаёт обычный абзац. Пустой чекбокс при этом сохраняется. Shift+Enter переносит строку внутри блока. Исходный Markdown доступен отдельным режимом; простое открытие заметки не перезаписывает её. Существующие неоднозначные и неподдерживаемые фрагменты сохраняются, а не удаляются автоматически.
+## How it works
 
-## Где лежат заметки
+On Windows the interface opens in the installed Edge or Chrome as an app window (`--app`: no tabs, no address bar). A small Node server writes the files and listens on `127.0.0.1` only: it checks the `Host` header and takes API requests only with the current run's token, which only its own page sees. Writes are atomic (a temporary file, then a rename), a newer write always beats an older one still under way, and only one server may own a notes folder. The app brings no browser of its own, so the installer is about 30 MB, and it runs where unsigned `.exe` files are blocked by policy. The window holds a line open to the server, and the portable app's keeper starts the server again if it ever stops while the window is open.
 
-`%APPDATA%\ATLAS Notetaker\notes\` — обычные `.md`-файлы. Даты, позиция курсора и настройки лежат там же в `atlas.json`. Удалённые заметки переезжают в `notes\.trash\`. Удаление программы заметки не трогает.
+On Android the same page runs in a WebView (served from the app's assets), on iPhone in a WKWebView; notes and books are kept in the page's IndexedDB there.
 
-Документы библиотеки — в `%APPDATA%\ATLAS Notetaker\library\`, как есть, с карточками в `library.json`; удалённые уходят в `library\.trash\`.
-
-Резервные копии — в `%APPDATA%\ATLAS Notetaker\backups\`: копия всех заметок при первом запуске новой версии («до обновления») и раз в день («ежедневная»), хранятся 20 последних. Картинки в копиях — жёсткие ссылки, места они не занимают. Папку открывает команда «Папка бэкапов» в Ctrl+K или кнопка в настройках.
-
-## Как устроено
-
-Интерфейс открывается в установленном Edge или Chrome в режиме приложения (`--app`), без вкладок и адресной строки. Файлы пишет маленький сервер на Node, который слушает только `127.0.0.1`. Своего браузера приложение не тащит, поэтому установщик весит около 30 МБ, а запускается там, где неподписанные `.exe` запрещены политикой.
-
-Сервер проверяет заголовок `Host` и принимает запросы к API только с токеном текущего запуска, который видит лишь своя страница. Запись атомарная (временный файл и переименование), более новая запись всегда побеждает ту, что ещё в пути. На одну папку с заметками может работать только один сервер.
-
-## Разработка
+## Development
 
 ```bash
-npm test
-
-# Браузерные регрессии редактора (перед первым запуском: npx playwright install chromium)
-npm run test:editor
-```
-
-```bash
+npm test                 # unit tests (node:test)
+npm run test:editor      # the editor's browser tests (first: npx playwright install chromium)
 npm run serve -- --port 5183 --data .dev-data
-```
-
-```bash
 npm run watch
 ```
 
-| Папка | Что внутри |
+| Folder | What |
 | --- | --- |
-| `server/` | HTTP-сервер, хранилище заметок и библиотеки, запускалка окна |
-| `src/` | интерфейс: редактор (CodeMirror 6), оформления, оглавление, палитра, карта «Атласа», библиотека |
-| `src/rich/`, `src/noteEditor.js` | визуальная модель ProseMirror, безопасное преобразование Markdown и адаптер сохранения |
-| `src/reader/` | читалка (отдельный бандл `dist/reader.js`): разбор FB2, EPUB, DOCX, ODT, RTF, CBZ, картинок, Markdown, TXT, HTML и PDF через pdf.js; правка PDF через pdf-lib |
-| `android/` | приложение для Android: WebView с той же страницей, «Открыть с помощью», сохранение файлов |
-| `tests/` | тесты `node:test` |
-| `installer/` | описание MSI для WiX 5 и файлы portable-версии |
-| `scripts/` | раскладка для установщика и для Android, иконка, ярлыки |
+| `server/` | the HTTP server, the notes and library stores, sync on Windows, the launcher and the portable keeper |
+| `src/` | the interface: the editor, looks, outline, palette, the Atlas map, the library, sync |
+| `src/rich/`, `src/noteEditor.js` | the visual editor (ProseMirror): its model, safe conversion to and from Markdown, saving |
+| `src/reader/` | the reader (its own bundle, `dist/reader.js`): FB2, EPUB, DOCX, ODT, RTF, CBZ, pictures, Markdown, TXT, HTML, and PDF through pdf.js and pdf-lib |
+| `android/` | the Android app: a WebView with the same page, "Open with", file saving, speech, translation, the scanner |
+| `ios/` | the iPhone app: a WKWebView with the same page |
+| `apocrypha/` | the shared library's catalogue (a Cloudflare Worker) |
+| `installer/` | the MSI (WiX 5) and the portable app's files |
+| `scripts/` | staging for the installer, Android and iPhone, icons, shortcuts |
+| `tests/` | the tests |
 
-**Релиз.** Подними версию в `package.json` (`npm version 0.7.0 --no-git-tag-version`), запушь `main`, дождись зелёной сборки и отправь тег:
-
-```bash
-git tag v0.7.0
-```
+**A release.** Raise the version (`npm version 0.20.0 --no-git-tag-version`), push `main`, wait for a green build, then push a tag:
 
 ```bash
-git push origin v0.7.0
+git tag -a v0.20.0 -m "ATLAS Notetaker v0.20.0"
+git push origin v0.20.0
 ```
 
-GitHub Actions прогонит тесты, соберёт MSI, portable-zip и APK и опубликует их в Releases. Каждый пуш в `main` собирает те же файлы как артефакты сборки.
-
-APK подписывается ключом из секретов репозитория `ANDROID_KEYSTORE_B64` (файл `.p12` в base64) и `ANDROID_KEYSTORE_PASSWORD`. Ключ один на все версии: телефон ставит обновление поверх только с той же подписью. Без секретов сборка релиза останавливается, а обычная сборка подписывает APK отладочным ключом.
+GitHub Actions runs the tests, starts the staged Windows app to check that it answers, builds the MSI, the portable zip, the APK and the IPA, and publishes them with their checksums. Every push to `main` builds the same files as build artifacts. The APK is signed with the key in the repository secrets `ANDROID_KEYSTORE_B64` and `ANDROID_KEYSTORE_PASSWORD`: one key for every version, since a phone installs an update over the app only with the same signature.
