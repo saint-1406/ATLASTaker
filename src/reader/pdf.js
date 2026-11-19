@@ -361,9 +361,12 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
     const rects = mergeRects(boxes).slice(0, 400);
     return rects.length ? { rects } : null;
   }
+  // how much of the pages a mark covers: where marks overlap, the smaller one lies on top and is the one tapped
+  const markArea = (m) => (m.anchor?.rects ?? []).reduce((sum, [, , , w, h]) => sum + w * h, 0);
+
   function paintMarks(activeId = null) {
     for (const layer of markLayers.values()) layer.replaceChildren();
-    for (const m of marks) {
+    for (const m of [...marks].sort((a, b) => markArea(b) - markArea(a))) {
       for (const [n, x, y, w, h] of m.anchor?.rects ?? []) {
         const frame = pages[n - 1];
         if (!frame) continue;
@@ -765,6 +768,7 @@ export async function openPdf(host, bytes, { position, scale = 1, mode = 'scroll
       marks = list;
       paintMarks(activeId);
     },
+    /** The mark under a point on screen, or null; where marks overlap, the smallest (painted on top). */
     markAt(x, y) {
       let found = null;
       for (const layer of markLayers.values()) {

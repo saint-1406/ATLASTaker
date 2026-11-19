@@ -9318,6 +9318,9 @@ html:has(.app.formatting) .note-selbar {
   border-radius: 3px;
   background: var(--bg-raised);
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  /* where it stands (--fan-x), how it leans (--fan-r), how far a hover spreads the fan and lifts it */
+  left: var(--fan-x, 24%);
+  transform: rotate(calc(var(--fan-r, 0deg) * var(--fan-spread, 1))) translateY(var(--fan-lift, 0px));
   transition: transform 0.18s;
 }
 
@@ -9337,19 +9340,76 @@ html:has(.app.formatting) .note-selbar {
   overflow-wrap: anywhere;
 }
 
-.lib-folder-book.b0 { left: 24%; transform: rotate(0deg); z-index: 3; }
-.lib-folder-book.b1 { left: 10%; transform: rotate(-9deg); z-index: 2; }
-.lib-folder-book.b2 { left: 38%; transform: rotate(9deg); z-index: 1; }
+/* the bouquet (shelfLook.js, Settings → Library): 2, 3 or 5 covers, the first one in front */
+.lib-folder-book.b0 { --fan-x: 24%; --fan-r: 0deg; z-index: 5; }
+.lib-folder-book.b1 { --fan-x: 10%; --fan-r: -9deg; z-index: 4; }
+.lib-folder-book.b2 { --fan-x: 38%; --fan-r: 9deg; z-index: 3; }
+.lib-folder-book.b3 { --fan-x: 2%; --fan-r: -16deg; z-index: 2; }
+.lib-folder-book.b4 { --fan-x: 46%; --fan-r: 16deg; z-index: 1; }
 
-.lib-series:hover .lib-folder-book.b0 { transform: translateY(-6px); }
-.lib-series:hover .lib-folder-book.b1 { transform: rotate(-13deg) translateY(-3px); }
-.lib-series:hover .lib-folder-book.b2 { transform: rotate(13deg) translateY(-3px); }
+.lib-folder-book:is(.b3, .b4),
+:root[data-bouquet="s"] .lib-folder-book.b2 {
+  display: none;
+}
+
+:root[data-bouquet="l"] .lib-folder-book:is(.b3, .b4) {
+  display: block;
+}
+
+:root[data-bouquet="s"] .lib-folder-book.b0 { --fan-x: 30%; --fan-r: 5deg; }
+:root[data-bouquet="s"] .lib-folder-book.b1 { --fan-x: 14%; --fan-r: -6deg; }
+
+.lib-series:hover .lib-folder-book { --fan-spread: 1.4; --fan-lift: -3px; }
+.lib-series:hover .lib-folder-book.b0 { --fan-lift: -6px; }
+
+/* Settings → Library, folders off: the covers alone, fanned from their foot like a bouquet */
+:root[data-folders="off"] :is(.lib-folder-back, .lib-folder-front) {
+  display: none;
+}
+
+:root[data-folders="off"] .lib-folder-book {
+  --fan-x: 15%;
+  top: auto;
+  bottom: 2%;
+  width: 70%;
+  transform-origin: 50% 100%;
+}
+
+:root[data-folders="off"] .lib-folder-book.b0 { --fan-r: 0deg; }
+:root[data-folders="off"] .lib-folder-book.b1 { --fan-r: -12deg; }
+:root[data-folders="off"] .lib-folder-book.b2 { --fan-r: 12deg; }
+:root[data-folders="off"][data-bouquet="s"] .lib-folder-book { --fan-x: 13%; width: 74%; }
+:root[data-folders="off"][data-bouquet="s"] .lib-folder-book.b1 { --fan-r: -8deg; }
+:root[data-folders="off"][data-bouquet="l"] .lib-folder-book { --fan-x: 18%; width: 64%; }
+:root[data-folders="off"][data-bouquet="l"] .lib-folder-book.b1 { --fan-r: -9deg; }
+:root[data-folders="off"][data-bouquet="l"] .lib-folder-book.b2 { --fan-r: 9deg; }
+:root[data-folders="off"][data-bouquet="l"] .lib-folder-book.b3 { --fan-r: -17deg; }
+:root[data-folders="off"][data-bouquet="l"] .lib-folder-book.b4 { --fan-r: 17deg; }
+:root[data-folders="off"] .lib-series:hover .lib-folder-book { --fan-spread: 1.25; --fan-lift: 0px; }
+:root[data-folders="off"] .lib-series:hover .lib-folder-book.b0 { --fan-lift: -4px; }
+
+/* the kind of card, without its folder: a small label on the covers */
+:root[data-folders="off"] .lib-folder-mark {
+  left: 6px;
+  bottom: 6px;
+  padding: 4px 8px 4px 6px;
+  border-radius: 999px;
+  background: rgba(20, 16, 32, 0.62);
+  font-size: 10.5px;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+:root[data-folders="off"] .lib-folder-mark svg {
+  width: 13px;
+  height: 13px;
+}
 
 /* the folder's front, over the lower part of the books */
 .lib-folder-front {
   position: absolute;
   inset: 48% 0 0;
-  z-index: 4;
+  z-index: 6;
   border-radius: 6px 6px 10px 10px;
   background: color-mix(in srgb, var(--accent-text) 62%, var(--bg-raised));
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.18);
@@ -9359,7 +9419,7 @@ html:has(.app.formatting) .note-selbar {
   position: absolute;
   left: 10px;
   bottom: 10px;
-  z-index: 5;
+  z-index: 7;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -9842,7 +9902,7 @@ html:has(.app.formatting) .note-selbar {
 
 /* a folder of a series, pressed: the front book lifts out of it */
 :root[data-motion="on"] .lib-series.m-press .lib-folder-book.b0 {
-  transform: translateY(-9px);
+  --fan-lift: -9px;
 }
 
 /* ---------- the reader comes up out of the book it opens ---------- */
@@ -10823,4 +10883,86 @@ html[data-easter="cats"] body:not(.has-tabbar) .cat-peek {
 :root[data-skin="cozy"] .lib-pocket-glass::before,
 :root[data-skin="cozy"] .lib-pocket-glass::after {
   background: color-mix(in srgb, var(--ink) 45%, transparent);
+}
+
+/* ---------- the shelf narrowed to one author (library.js pickAuthor, authors.js) ---------- */
+
+.lib-chip.lib-author {
+  border-color: var(--hairline);
+}
+
+.lib-chip.lib-author.on {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent-text);
+}
+
+.modal-authors {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(86vh - 16px);
+}
+
+.modal-authors .field {
+  margin: 8px 0 4px;
+}
+
+.author-pick {
+  min-height: 0;
+  margin: 6px 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+
+.author-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 6px;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.author-row[aria-pressed="true"] {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.author-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.author-count {
+  flex: none;
+  color: var(--ink-dim);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.author-none {
+  padding: 14px 6px;
+  color: var(--ink-dim);
+}
+
+/* the selection goes on over the page turn (library.js carryOn): an arrow at the end of the bar */
+.rd-sel-carry {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent);
+}
+/* a selection carried over a page turn: all of it shows as selected, the earlier pages too */
+::highlight(atlas-carry) {
+  background-color: var(--sel);
 }

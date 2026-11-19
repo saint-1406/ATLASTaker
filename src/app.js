@@ -39,6 +39,7 @@ import {
 import { fileNameFor, makeZip } from './backup.js';
 import { createSyncClient } from './sync/client.js';
 import { createSideMenu, sideGroup, sideItem, sideToggle } from './sidemenu.js';
+import { BOUQUET_SIZES, setShelfLook, shelfLook } from './shelfLook.js';
 import { onlineHint, openOfflineDialog, openOnlineDialog } from './translateSettings.js';
 import { openAppearance } from './appearance.js';
 import welcomeText from './welcome.md';
@@ -1438,6 +1439,16 @@ function sideChoice(label, values, current, choose, name) {
   );
 }
 
+/** Settings → Library: a series as a folder or as its covers alone, and how many covers fan out (shelfLook.js). */
+function shelfSettings() {
+  const look = shelfLook();
+  return sideGroup(
+    t('shelfLook.group'),
+    sideToggle({ icon: '▱', text: t('shelfLook.folders'), hint: t('shelfLook.foldersHint'), on: look.folders, toggle: () => { setShelfLook({ folders: !shelfLook().folders }); sideMenu?.refresh(); } }),
+    sideChoice(t('shelfLook.bouquet'), BOUQUET_SIZES, look.bouquet, (bouquet) => { setShelfLook({ bouquet }); sideMenu?.refresh(); }, (size) => t(`shelfLook.size.${size}`)),
+  );
+}
+
 /** Settings → Writing: the strip, the bar and its buttons, what focus lights. */
 function writingSettings(close) {
   return sideGroup(
@@ -2580,6 +2591,7 @@ function menuSections() {
           else setLook(patch);
         },
       }),
+      shelfSettings(),
       writingSettings(close),
       // the translator online (translateSettings.js): free, an e-mail raises the daily allowance;
       // not in the single-file browser build, which may not reach the network

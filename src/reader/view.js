@@ -763,13 +763,20 @@ export function renderBook(host, book, { position, scale = 1, mode = 'scroll', t
       }
       paintMarks(activeId);
     },
-    /** The mark under a point on screen (the newest, where they overlap), or null. */
+    /**
+     * The mark under a point on screen, or null. Where marks overlap, the smallest: a few words marked
+     * inside a long passage are reached by a tap on them, and the passage by a tap beside them.
+     */
     markAt(x, y) {
+      let found = null;
+      let size = Infinity;
       for (let i = marks.length - 1; i >= 0; i--) {
         const r = markRanges.get(marks[i].id);
-        if (r && hits(r, x, y)) return marks[i].id;
+        if (!r || !hits(r, x, y)) continue;
+        const length = r.toString().length;
+        if (length < size) [found, size] = [marks[i].id, length];
       }
-      return null;
+      return found;
     },
     goToMark,
     /**

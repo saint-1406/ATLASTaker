@@ -4,9 +4,11 @@
 // The reader's code (dist/reader.js, with pdf.js) is loaded the first time it is needed.
 
 import { h, toast, confirmDialog, showMenu, isOverlayOpen, openDialog, openCommentDialog } from './overlays.js';
-import { count, formatDay, formatTime, STRINGS, t } from './i18n.js';
+import { count, currentLocale, formatDay, formatTime, STRINGS, t } from './i18n.js';
 import { addShelf, groupShelves, isShelf, renameShelf, shelfList } from './shelves.js';
 import { cleanSeries, foldSeries, inSeries, searchText, seriesNames, seriesNumber, seriesOrder } from './series.js';
+import { authorList, byAuthor } from './authors.js';
+import { BOUQUET_MOST } from './shelfLook.js';
 import { shownTheme } from './skins.js';
 import { icon } from './icons.js';
 import { drawQuickPanel, paintTheme, setDim } from './readLook.js';
@@ -64,6 +66,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   let marksTimer = 0;
   let pendingMarks = null;
   let selected = null; // the selection the bar acts on, kept while the bar shows
+  let carried = null; // { range, joined }: a selection's start carried over a page turn, joined to the next selection
+  let carryTimer = 0;
   let openMarkId = null; // the mark whose card is open
 
   // ---------- the shelf ----------
@@ -76,6 +80,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   let shelves = []; // the saved order of sections (shelves.js)
   let activeShelf = null; // null: all; otherwise the section shown
   let activeSeries = null; // a series opened like a folder (series.js): its books by part
+  let activeAuthor = null; // the author the shelf is narrowed to (authors.js): { key, name }, or null
   const emptyNote = h('p', { class: 'lib-empty', hidden: true });
   const seriesHead = h('div', { class: 'lib-series-head', hidden: true });
   const filter = h('input', { class: 'field lib-filter', type: 'search', spellcheck: 'false' });
@@ -176,6 +181,8 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   const translateButton = h('button', { type: 'button', class: 'rd-sel-btn', onclick: () => translateSelection() }, icon('translate'), translateText);
   const copyText = h('span');
   const copyButton = h('button', { type: 'button', class: 'rd-sel-btn', onclick: () => copySelected() }, icon('copy'), copyText);
+  // a book by pages: the selection goes on over the page turn (carryOn), its end chosen on the next page
+  const carryButton = h('button', { type: 'button', class: 'rd-sel-btn rd-sel-icon rd-sel-carry', hidden: true, title: t('reader.carry'), 'aria-label': t('reader.carry'), onclick: () => carryOn() }, '→');
   const selBar = h(
     'div',
     { class: 'rd-selbar', hidden: true, role: 'toolbar' },
@@ -185,6 +192,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     translator ? translateButton : null,
     quoteButton,
     bookmarkSelButton,
+    carryButton,
   );
   // the card of one mark: its passage, its comment, its colour
   const markPanel = h('aside', { class: 'rd-markpanel', hidden: true });
@@ -491,10 +499,12 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
 
   /**
    * A series on the shelf: one card like a folder (the WinRAR kind, a folder with books in it), its
-   * first covers fanned inside, how many books. Opened, it lists them by part.
+   * first covers fanned inside, how many books. Opened, it lists them by part. Settings → Library may
+   * leave the folder out (the covers alone, as a bouquet) and choose how many covers fan out
+   * (shelfLook.js): the card always carries up to five, styles.css shows as many as chosen.
    */
   function seriesCard(folder) {
-    const covers = folder.docs.slice(0, 3).map((doc, i) =>
+    const covers = folder.docs.slice(0, BOUQUET_MOST).map((doc, i) =>
       h('span', { class: `lib-folder-book b${i}` }, doc.cover ? h('img', { src: doc.cover, alt: '' }) : h('span', { class: 'lib-folder-blank' }, nameOf(doc))),
     );
     const read = folder.docs.filter((d) => d.finished || (d.progress || 0) >= 0.99).length;
@@ -557,9 +567,11 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     chips.hidden = false;
     shelf.classList.toggle('in-series', activeSeries !== null && !q);
     const newest = (a, b) => (b.opened || b.added) - (a.opened || a.added);
+    // an author chosen narrows every view below to that author's books
+    const mine = activeAuthor ? (d) => byAuthor(d, activeAuthor.key) : () => true;
     if (q) {
       // a search looks through every section and series; a series found by its name shows as its folder
-      const found = [...docs].sort(newest).filter((d) => searchText(d).includes(q));
+      const found = [...docs].sort(newest).filter((d) => searchText(d).includes(q) && mine(d));
       const named = new Set(seriesNames(found).filter((name) => name.toLowerCase().includes(q)).map((name) => name.toLowerCase()));
       const folded = foldSeries(found).flatMap((item) => (item.doc ? [card(item.doc)] : named.has(item.series.toLowerCase()) ? [seriesCard({ ...item, docs: seriesOrder(docs.filter((d) => inSeries(d, item.series))) })] : item.docs.map(card)));
       grid.replaceChildren(...folded);
@@ -568,6 +580,14 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       drawSeriesHead(books);
       chips.hidden = true;
       grid.replaceChildren(...books.map(card));
+    } else if (activeShelf === null && activeAuthor) {
+      // all of one author's books, whatever their section, newest first (a series stays a folder)
+      const books = docs.filter(mine).sort(newest);
+      grid.replaceChildren(...shelfCards(books));
+      if (!books.length && docs.length) {
+        emptyNote.textContent = t('library.authorEmpty');
+        emptyNote.hidden = false;
+      }
     } else if (activeShelf === null) {
       const { groups, unsorted } = groupShelves(list, docs);
       const full = groups.filter((g) => g.docs.length);
@@ -576,10 +596,10 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
       looseHead.textContent = t('library.unsorted');
       looseHead.hidden = !full.length || !unsorted.length;
     } else {
-      const inShelf = docs.filter((d) => isShelf(d, activeShelf)).sort(newest);
+      const inShelf = docs.filter((d) => isShelf(d, activeShelf) && mine(d)).sort(newest);
       grid.replaceChildren(...shelfCards(inShelf));
       if (!inShelf.length && docs.length) {
-        emptyNote.textContent = t('library.shelfEmpty', activeShelf);
+        emptyNote.textContent = activeAuthor ? t('library.authorEmpty') : t('library.shelfEmpty', activeShelf);
         emptyNote.hidden = false;
       }
     }
@@ -593,6 +613,58 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
   }
 
   // ---------- sections ----------
+
+  /**
+   * The authors of the shelf's books, with how many each, a search over them, and "All authors" to
+   * take the filter off. A choice narrows the shelf, a section and a search to that author's books.
+   */
+  function pickAuthor() {
+    const authors = authorList(docs, currentLocale());
+    openDialog(
+      (box, close) => {
+        const field = h('input', { class: 'field', type: 'search', placeholder: t('library.findAuthor'), 'aria-label': t('library.findAuthor'), spellcheck: 'false' });
+        const list = h('ol', { class: 'author-pick' });
+        const choose = (author) => {
+          activeAuthor = author;
+          close(null);
+          flip(grid, cardKey, render);
+        };
+        const row = (label, n, author) =>
+          h(
+            'li',
+            {},
+            h(
+              'button',
+              { type: 'button', class: 'author-row', 'aria-pressed': String((activeAuthor?.key ?? null) === (author?.key ?? null)), onclick: () => choose(author) },
+              h('span', { class: 'author-name' }, label),
+              n === null ? null : h('span', { class: 'author-count' }, String(n)),
+            ),
+          );
+        const draw = () => {
+          const q = field.value.trim().toLocaleLowerCase();
+          const shown = authors.filter((a) => !q || (a.name || t('library.noAuthor')).toLocaleLowerCase().includes(q));
+          list.replaceChildren(
+            ...(q ? [] : [row(t('library.allAuthors'), docs.length, null)]),
+            ...shown.map((a) => row(a.name || t('library.noAuthor'), a.count, { key: a.key, name: a.name })),
+            ...(shown.length || !q ? [] : [h('li', { class: 'author-none' }, t('library.noAuthorFound'))]),
+          );
+        };
+        field.addEventListener('input', draw);
+        draw();
+        // the search shows only for a long list (append would write a left-out one as the word "null")
+        box.append(
+          ...[
+            h('div', { class: 'modal-kicker' }, t('library.title')),
+            h('h2', { class: 'modal-title' }, t('library.authors')),
+            authors.length > 8 ? field : null,
+            list,
+            h('div', { class: 'modal-actions' }, h('button', { type: 'button', class: 'btn', 'data-autofocus': true, onclick: () => close(null) }, t('dialog.cancel'))),
+          ].filter(Boolean),
+        );
+      },
+      { className: 'modal-authors' },
+    );
+  }
 
   function showAllBooks() {
     activeShelf = null;
@@ -686,7 +758,20 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
         },
         label,
       );
+    // first in the row, where a phone shows it without scrolling: who the shelf is narrowed to
+    const authorChip = h(
+      'button',
+      {
+        type: 'button',
+        class: `lib-chip lib-author${activeAuthor ? ' on' : ''}`,
+        'aria-haspopup': 'dialog',
+        title: t('library.authors'),
+        onclick: () => pickAuthor(),
+      },
+      activeAuthor ? `${activeAuthor.name || t('library.noAuthor')} ▾` : `${t('library.author')} ▾`,
+    );
     chips.replaceChildren(
+      authorChip,
       chip(t('library.all'), null),
       ...list.map((name) => {
         const node = chip(name, name);
@@ -1399,6 +1484,7 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     flush();
     finder.close({ keepText: false });
     reading.closed = true;
+    dropCarried();
     reading.controller?.close();
     reading = null;
     stopBookSteps();
@@ -1580,18 +1666,63 @@ export function createLibrary({ api, phone = false, getReading, onReading, onCus
     if (!reading?.controller) return hideSelBar();
     const sel = document.getSelection();
     if (sel && !sel.isCollapsed && sel.rangeCount && scroll.contains(sel.anchorNode) && sel.toString().trim()) {
-      selected = sel.getRangeAt(0).cloneRange();
+      let range = sel.getRangeAt(0).cloneRange();
+      if (carried) {
+        // the start was chosen on a page before: the selection runs from the first start to the last end.
+        // The phone's own selection stays on this page (its handles move the end); the rest shows as a highlight.
+        const before = carried.range;
+        const joined = document.createRange();
+        const first = before.compareBoundaryPoints(Range.START_TO_START, range) <= 0 ? before : range;
+        const last = before.compareBoundaryPoints(Range.END_TO_END, range) >= 0 ? before : range;
+        joined.setStart(first.startContainer, first.startOffset);
+        joined.setEnd(last.endContainer, last.endOffset);
+        carried.joined = true;
+        paintCarried(joined);
+        range = joined;
+      }
+      selected = range;
+      carryButton.hidden = !(reading.controller.paged && reading.controller.kind !== 'pdf');
       selBar.hidden = false;
       placeSelBar(selected);
       keepNearSelection(sel);
       closeMark();
-    } else if (!selBar.contains(document.activeElement)) hideSelBar();
+    } else if (!selBar.contains(document.activeElement)) {
+      // a selection joined to a carried start, let go (a tap, a mark made): the start goes with it
+      if (carried?.joined) dropCarried();
+      hideSelBar();
+    }
   }
 
   function hideSelBar() {
     selBar.hidden = true;
     selected = null;
     keepNearSelection(null);
+  }
+
+  /**
+   * The selection runs on to the next page: its start is kept (and shown, as a highlight), the page
+   * turns, and the next selection made there (a long press, the handles) becomes its end. Pages may
+   * be turned on before choosing it; a few minutes for it, and "Cancel" lets the start go.
+   */
+  function carryOn() {
+    if (!selected || !reading?.controller?.paged) return;
+    carried = { range: selected.cloneRange(), joined: false };
+    paintCarried(carried.range);
+    clearTimeout(carryTimer);
+    carryTimer = setTimeout(() => carried && !carried.joined && dropCarried(), 5 * 60_000);
+    document.getSelection()?.removeAllRanges();
+    hideSelBar();
+    reading.controller.next();
+    toast(t('reader.carryHint'), { timeout: 6000, action: { text: t('dialog.cancel'), run: () => dropCarried() } });
+  }
+  function dropCarried() {
+    carried = null;
+    clearTimeout(carryTimer);
+    window.CSS?.highlights?.delete('atlas-carry');
+  }
+  /** The whole of a carried selection shows, past the phone's own selection on this page. */
+  function paintCarried(range) {
+    if (window.CSS?.highlights && typeof Highlight === 'function') CSS.highlights.set('atlas-carry', new Highlight(range));
   }
 
   // a press on the bar keeps the selection (and its handles) where it is
