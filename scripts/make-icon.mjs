@@ -1,8 +1,8 @@
-// Draws the app icon (contour rings around an amber summit inside a map neatline, on a night-chart
-// square) straight into PNG and ICO files, with no image libraries.
+// Draws the app icon, the ATLAS emblem (assets/logo.svg: a figure holding up a crescent) in black on
+// white, straight into PNG and ICO files, with no image libraries.
 
 import { deflateSync } from 'node:zlib';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -65,65 +65,106 @@ function ico(images) {
   return Buffer.concat([header, dir, ...images.map((img) => img.data)]);
 }
 
-const TOP = [18, 40, 56];
-const BOTTOM = [9, 20, 32];
-const TEAL = [110, 205, 200];
-const AMBER = [242, 166, 90];
-const CREAM = [232, 223, 204];
+const WHITE = [255, 255, 255];
+const INK = [20, 20, 20];
 const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
 
-function inTriangle(px, py, [ax, ay], [bx, by], [cx, cy]) {
-  const d1 = (px - bx) * (ay - by) - (ax - bx) * (py - by);
-  const d2 = (px - cx) * (by - cy) - (bx - cx) * (py - cy);
-  const d3 = (px - ax) * (cy - ay) - (cx - ax) * (py - ay);
-  return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+// ---------- the emblem: assets/logo.svg's paths (M, L, C, Z only) as polygons, filled by scanlines ----------
+
+const SVG = readFileSync(path.join(OUT, 'logo.svg'), 'utf8');
+const [VIEW_W, VIEW_H] = SVG.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/).slice(1).map(Number);
+
+function polygonsOf(d) {
+  const tokens = d.match(/[MLCZ]|-?[\d.]+/g);
+  const polys = [];
+  let poly = null;
+  let cur = [0, 0];
+  let cmd = '';
+  let i = 0;
+  const num = () => Number(tokens[i++]);
+  while (i < tokens.length) {
+    if (/[MLCZ]/.test(tokens[i])) cmd = tokens[i++];
+    if (cmd === 'M') {
+      cur = [num(), num()];
+      poly = [cur];
+      polys.push(poly);
+      cmd = 'L';
+    } else if (cmd === 'L') {
+      cur = [num(), num()];
+      poly.push(cur);
+    } else if (cmd === 'C') {
+      const c1 = [num(), num()];
+      const c2 = [num(), num()];
+      const p = [num(), num()];
+      for (let k = 1; k <= 16; k++) {
+        const t = k / 16;
+        const s = 1 - t;
+        const at = (n) => s * s * s * cur[n] + 3 * s * s * t * c1[n] + 3 * s * t * t * c2[n] + t * t * t * p[n];
+        poly.push([at(0), at(1)]);
+      }
+      cur = p;
+    }
+  }
+  return polys;
 }
 
-/** Colour at (u, v) in the unit square, or null outside the rounded tile. */
+// every edge of every path; the paths do not overlap, so even-odd over all of them is the emblem
+const EDGES = [...SVG.matchAll(/ d="([^"]+)"/g)]
+  .flatMap((m) => polygonsOf(m[1]))
+  .flatMap((poly) => poly.map((a, i) => [a, poly[(i + 1) % poly.length]]))
+  .filter(([a, b]) => a[1] !== b[1]);
+
+const rows = new Map(); // y -> where that line crosses the emblem's edges, left to right
+function crossings(y) {
+  let xs = rows.get(y);
+  if (xs) return xs;
+  xs = [];
+  for (const [a, b] of EDGES) {
+    if ((a[1] <= y && y < b[1]) || (b[1] <= y && y < a[1])) xs.push(a[0] + ((y - a[1]) * (b[0] - a[0])) / (b[1] - a[1]));
+  }
+  xs.sort((p, q) => p - q);
+  if (rows.size > 64) rows.clear();
+  rows.set(y, xs);
+  return xs;
+}
+
+/**
+ * Is (u, v) of the unit square on the emblem? It stands `height` of the square tall, its point
+ * (ax, ay) — in the SVG's own units — at (cx, cy) of the square.
+ */
+function onEmblem(u, v, { height, cx = 0.5, cy = 0.5, ax = VIEW_W / 2, ay = VIEW_H / 2 }) {
+  const s = height / VIEW_H;
+  const x = (u - cx) / s + ax;
+  const y = (v - cy) / s + ay;
+  if (x < 0 || y < 0 || x > VIEW_W || y > VIEW_H) return false;
+  let inside = false;
+  for (const cross of crossings(y)) {
+    if (cross > x) break;
+    inside = !inside;
+  }
+  return inside;
+}
+
+// the rounded tile of the desktop icon (and Android's own before adaptive icons): white, a faint edge so
+// it holds its shape on a white taskbar, the emblem two thirds of its height
+const TILE = { height: 0.64 };
 function shade(u, v) {
   const r = 0.2;
   const half = 0.47;
   const qx = Math.max(Math.abs(u - 0.5) - (half - r), 0);
   const qy = Math.max(Math.abs(v - 0.5) - (half - r), 0);
-  if (Math.hypot(qx, qy) > r) return null;
-
-  let col = mix(TOP, BOTTOM, v);
-  const edge = Math.max(Math.abs(u - 0.5), Math.abs(v - 0.5));
-  if (Math.abs(edge - 0.385) < 0.007) col = mix(col, CREAM, 0.5);
-
-  const cx = 0.5;
-  const cy = 0.53;
-  const ang = Math.atan2(v - cy, u - cx);
-  const d = Math.hypot(u - cx, v - cy);
-  for (let k = 0; k < 5; k++) {
-    const base = 0.07 + k * 0.058;
-    const rr = base * (1 + 0.13 * Math.sin(3 * ang + k * 0.9) + 0.07 * Math.sin(5 * ang + 1.7 * k));
-    const width = k === 2 ? 0.009 : 0.0055;
-    if (Math.abs(d - rr) < width) col = mix(col, TEAL, k === 2 ? 0.95 : 0.7);
-  }
-  if (inTriangle(u, v, [0.5, 0.485], [0.455, 0.565], [0.545, 0.565])) col = AMBER;
-  return col;
+  const edge = Math.hypot(qx, qy) - r;
+  if (edge > 0) return null;
+  if (onEmblem(u, v, TILE)) return INK;
+  return edge > -0.014 ? mix(WHITE, INK, 0.14) : WHITE;
 }
 
-// The Android adaptive icon: the launcher cuts its own shape (circle, squircle…) out of a plain
-// background, so the foreground is the rings and the summit alone, shrunk into the 66 dp safe zone.
-const ICON_BG = mix(TOP, BOTTOM, 0.5).map(Math.round); // the background colour in android/…/colors.xml
-function foreground(u, v) {
-  const x = 0.5 + (u - 0.5) * 1.2;
-  const y = 0.5 + (v - 0.5) * 1.2;
-  if (inTriangle(x, y, [0.5, 0.485], [0.455, 0.565], [0.545, 0.565])) return AMBER;
-  const cx = 0.5;
-  const cy = 0.53;
-  const ang = Math.atan2(y - cy, x - cx);
-  const d = Math.hypot(x - cx, y - cy);
-  for (let k = 0; k < 5; k++) {
-    const base = 0.07 + k * 0.058;
-    const rr = base * (1 + 0.13 * Math.sin(3 * ang + k * 0.9) + 0.07 * Math.sin(5 * ang + 1.7 * k));
-    const width = k === 2 ? 0.009 : 0.0055;
-    if (Math.abs(d - rr) < width) return mix(ICON_BG, TEAL, k === 2 ? 0.95 : 0.7);
-  }
-  return null;
-}
+// The Android adaptive icon: the launcher cuts its own shape (circle, squircle…) out of a plain white
+// background (android/…/colors.xml, icon_bg), so the foreground is the emblem alone, inside the 66 dp
+// safe circle of the 108 dp square: its tips are what reach furthest from the middle.
+const ICON_BG = WHITE;
+const SAFE = { height: 0.47, cy: 0.5, ay: 161 };
+const foreground = (u, v) => (onEmblem(u, v, SAFE) ? INK : null);
 
 function render(size, colorAt = shade) {
   const ss = 4;
@@ -159,11 +200,11 @@ function render(size, colorAt = shade) {
 // node scripts/make-icon.mjs --android android/app/src/main/res → the launcher icons for every density
 const androidAt = process.argv.indexOf('--android');
 // node scripts/make-icon.mjs --ios → the iPhone app's icon: 1024 px, square and opaque (iOS rounds it
-// itself), the rings and the summit on the plain background, as Android's adaptive icon has them
+// itself, only at the corners, so the emblem may stand larger than in Android's safe circle)
 const iosAt = process.argv.indexOf('--ios');
 if (iosAt > 0) {
   const file = path.join(OUT, '..', 'ios', 'ATLAS', 'Assets.xcassets', 'AppIcon.appiconset', 'icon-1024.png');
-  writeFileSync(file, render(1024, (u, v) => foreground(u, v) ?? ICON_BG));
+  writeFileSync(file, render(1024, (u, v) => (onEmblem(u, v, { height: 0.62 }) ? INK : ICON_BG)));
   console.log(`иконка iOS записана в ${file}`);
 } else if (androidAt > 0) {
   const res = path.resolve(process.argv[androidAt + 1]);
