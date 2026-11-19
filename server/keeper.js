@@ -47,6 +47,7 @@ export function createKeeper({ dataDir, root = ROOT, nodePath = process.execPath
   let restarts = [];
   let healthTimer = null;
   let unwell = 0;
+  let restarting = false; // a server is on its way back: not asked how it is until it answers
   let lingerSince = 0;
   let done;
   const finished = new Promise((resolve) => (done = resolve));
@@ -93,16 +94,22 @@ export function createKeeper({ dataDir, root = ROOT, nodePath = process.execPath
       return stop();
     }
     restarts.push(now);
-    await sleep(restarts.length > 2 ? 2000 : 300);
-    if (stopping) return;
-    const child = startServer();
-    const info = await waitForServer(child);
-    if (info) log(`server back on port ${info.port}`);
-    else log('server did not come back in time');
+    restarting = true;
+    try {
+      await sleep(restarts.length > 2 ? 2000 : 300);
+      if (stopping) return;
+      const child = startServer();
+      const info = await waitForServer(child, 30_000);
+      if (info) log(`server back on port ${info.port}`);
+      else log('server did not come back in time');
+    } finally {
+      restarting = false;
+      unwell = 0;
+    }
   }
 
   async function checkHealth() {
-    if (stopping || !server || !port) return;
+    if (stopping || restarting || !server || !port) return;
     const answer = await hello(port, 3000);
     if (answer) {
       unwell = 0;
@@ -124,6 +131,7 @@ export function createKeeper({ dataDir, root = ROOT, nodePath = process.execPath
       unwell = 0;
       const stuck = server;
       server = null;
+      restarting = true; // at once, so the next check does not replace it a second time
       try {
         stuck.kill();
       } catch {
