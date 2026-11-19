@@ -235,8 +235,10 @@ export function createTabBar(onPick, { without = [] } = {}) {
     node,
     select(tab) {
       for (const b of buttons) {
-        b.lastChild.textContent = t(`home.tabs.${b.dataset.tab}`);
-        b.setAttribute('aria-current', b.dataset.tab === tab ? 'page' : 'false');
+        const label = t(`home.tabs.${b.dataset.tab}`);
+        if (b.lastChild.textContent !== label) b.lastChild.textContent = label;
+        const current = b.dataset.tab === tab ? 'page' : 'false';
+        if (b.getAttribute('aria-current') !== current) b.setAttribute('aria-current', current);
       }
       // the soft pill behind the chosen tab slides to it (styles.css, .tabbar::before)
       const at = buttons.findIndex((b) => b.dataset.tab === tab);

@@ -1960,7 +1960,22 @@ function pageSelectionInNote() {
   if (!sel?.rangeCount || !host || host.closest('[hidden]')) return '';
   // the selection may begin or end outside the note (a select-all of the page): it counts when it covers some of it
   if (!host.contains(sel.anchorNode) && !sel.getRangeAt(0).intersectsNode(host)) return '';
+  // a screen over the note (the main page, the list, the library, the menu): its selection is not in sight
+  if (noteCovered(host)) return '';
   return sel.toString().trim() ? sel.toString() : '';
+}
+
+/**
+ * Whether something else lies over the note: what is on top in the middle of it is not the note's own
+ * page. (The selection's own card and bar, a notice, do not count.)
+ */
+function noteCovered(host) {
+  const r = host.getBoundingClientRect();
+  if (!r.width || !r.height) return true;
+  const x = Math.min(Math.max(r.left + r.width / 2, 0), innerWidth - 1);
+  const y = Math.min(Math.max(r.top + Math.min(r.height / 2, 160), 0), innerHeight - 1);
+  const top = document.elementFromPoint(x, y);
+  return Boolean(top) && !top.closest('.app, .sel-focus, .note-selbar, .toast');
 }
 
 // Words selected in a note get the app's own actions: copy, cut, paste, select all, translate. The phone's
@@ -2008,7 +2023,7 @@ function selKey() {
 
 function hideSelFocus(dismiss = false) {
   if (dismiss) selDismissed = selKey();
-  selFocus.hidden = true;
+  if (!selFocus.hidden) selFocus.hidden = true;
   document.documentElement.classList.remove('sel-focused');
 }
 
@@ -2017,21 +2032,24 @@ function drawNoteSel() {
   document.documentElement.classList.toggle('note-selecting', show);
   clearTimeout(selRestTimer);
   if (!show) {
-    noteSel.hidden = true;
+    // only what changes is touched: the watch on screens (below) would hear every write
+    if (!noteSel.hidden) noteSel.hidden = true;
     hideSelFocus();
     selDismissed = '';
     return;
   }
   for (const button of noteSelButtons) {
     const id = button.dataset.sel;
-    button.lastChild.textContent = t(button.dataset.key);
-    button.setAttribute('aria-label', t(button.dataset.key));
-    button.hidden = (!editing && (id === 'cut' || id === 'paste')) || (id === 'translate' && !phone);
+    const label = t(button.dataset.key);
+    if (button.lastChild.textContent !== label) button.lastChild.textContent = label;
+    if (button.getAttribute('aria-label') !== label) button.setAttribute('aria-label', label);
+    const hide = (!editing && (id === 'cut' || id === 'paste')) || (id === 'translate' && !phone);
+    if (button.hidden !== hide) button.hidden = hide;
   }
   if (!fingerFirst()) {
     hideSelFocus();
     if (noteSel.parentNode !== document.body) document.body.append(noteSel);
-    noteSel.hidden = false;
+    if (noteSel.hidden) noteSel.hidden = false;
     return;
   }
   // a finger: the card, once the selection has stopped moving (a handle being dragged moves it)
@@ -2120,6 +2138,20 @@ visualViewport?.addEventListener('resize', () => {
   if (pageSelectionInNote()) drawNoteSel();
 });
 document.addEventListener('selectionchange', drawNoteSel);
+// a screen opened over the note, or closed: the bar goes with it, or comes back for a selection still there
+// (it stayed over the main page and the list, a selection left in the note from before)
+{
+  let pending = 0;
+  new MutationObserver((records) => {
+    // a write of the same value is no change (the tab bar rewrites its own state now and then)
+    if (!records.some((r) => r.oldValue !== r.target.getAttribute(r.attributeName))) return;
+    if (pending || (noteSel.hidden && !getSelection()?.toString())) return;
+    pending = requestAnimationFrame(() => {
+      pending = 0;
+      drawNoteSel();
+    });
+  }).observe(document.body, { subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['hidden', 'class'] });
+}
 
 /** All of the note selected: by the editor while writing, on the page while reading (the editor is shut then). */
 function selectAllNote() {
@@ -2711,7 +2743,8 @@ function updateTabs() {
   const libraryOpen = document.documentElement.classList.contains('library-open');
   const notesOpen = notesScreen.isOpen();
   const apocryphaOpen = Boolean(apocrypha?.isOpen());
-  tabBar.node.hidden = homeEl.hidden && !libraryOpen && !notesOpen && !apocryphaOpen;
+  const hideBar = homeEl.hidden && !libraryOpen && !notesOpen && !apocryphaOpen;
+  if (tabBar.node.hidden !== hideBar) tabBar.node.hidden = hideBar;
   document.body.classList.toggle('has-tabbar', !tabBar.node.hidden);
   tabBar.select(libraryOpen ? 'library' : notesOpen ? 'notes' : apocryphaOpen ? 'apocrypha' : 'home');
 }
