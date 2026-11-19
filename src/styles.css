@@ -10727,3 +10727,100 @@ html[data-easter="cats"] body:not(.has-tabbar) .cat-peek {
 .lib-head.searching .lib-apocrypha-btn {
   display: none;
 }
+
+/* ---------- 0.20: softer — rounder corners, fainter lines, filled buttons instead of outlines ----------
+   The cosy look kept a hairline round every card and button, a bright chip for the chosen filter and
+   black squares over book covers: on a phone at night that read as hard edges. Here surfaces part by
+   a shade of their own instead of a line, round things are filled softly, and nothing glares. */
+
+:root[data-skin="cozy"] {
+  --radius: 16px;
+  --radius-sm: 12px;
+}
+
+/* the dark: lines a little fainter, raised surfaces a little lighter, so they part without a line */
+:root[data-skin="cozy"][data-theme="dark"]:not([data-palette]) {
+  --bg-raised: #1e1d1b;
+  --hairline: rgba(240, 232, 220, 0.05);
+  --sheet-edge: rgba(240, 232, 220, 0.075);
+}
+
+/* cards: rounder, and their line no more than a whisper */
+:root[data-skin="cozy"] :is(.home-card, .notes-card, .home-cat) {
+  border-color: var(--hairline);
+  border-radius: 20px;
+}
+
+/* round buttons in the heads (back, search, the shared library…): a soft fill, no ring */
+:root[data-skin="cozy"] .tb-btn.icon {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+:root[data-skin="cozy"] .tb-btn.icon:hover {
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+/* the chosen filter: the accent, softly, instead of a bright plate of the text's colour */
+:root[data-skin="cozy"] .lib-chip[aria-selected="true"] {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-raised));
+  color: var(--accent-text);
+}
+
+:root[data-skin="cozy"] .lib-chip[aria-selected="true"] :is(.chip-count, b, span) {
+  color: inherit;
+}
+
+/* the ⋯ over a book's cover: a small round pane of frosted glass, not a black square */
+:root[data-skin="cozy"] .lib-more {
+  top: 7px;
+  right: 7px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  color: var(--ink);
+  backdrop-filter: blur(6px);
+}
+
+/* the switch: its knob in the page's light colour, and on in the accent (not a system green) */
+:root[data-skin="cozy"] .switch i {
+  background: color-mix(in srgb, var(--ink) 92%, var(--bg));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+:root[data-skin="cozy"] [aria-checked="true"] > .switch {
+  background: color-mix(in srgb, var(--accent) 85%, var(--bg));
+}
+
+/* the notes "+": a lighter plus, a softer shadow */
+:root[data-skin="cozy"] .notes-fab {
+  font-weight: 200;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* a series' pocket: only the front cover names the book (the others peeked out in pieces), its name at
+   the top where the glass does not cut it; the glass itself quieter */
+.lib-pocket-cover:not(.c0) .lib-pocket-blank {
+  color: transparent;
+}
+
+.lib-pocket-cover.c0 .lib-pocket-blank {
+  align-items: start;
+  padding-top: 12px;
+}
+
+:root[data-skin="cozy"] .lib-pocket-cover {
+  border-radius: 10px;
+}
+
+:root[data-skin="cozy"] .lib-pocket-glass {
+  border-color: color-mix(in srgb, var(--ink) 14%, transparent);
+  border-radius: 14px;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+:root[data-skin="cozy"] .lib-pocket-glass::before,
+:root[data-skin="cozy"] .lib-pocket-glass::after {
+  background: color-mix(in srgb, var(--ink) 45%, transparent);
+}
