@@ -261,6 +261,8 @@ const ru = {
     lostTitle: 'Связь с ATLAS потеряна',
     lostText: 'Сервер заметок не отвечает. Несохранённый текст лежит в аварийной копии этого окна. Запустите ATLAS с ярлыка — текст вернётся.',
     retry: 'Попробовать снова',
+    reconnectingTitle: 'Переподключаюсь к ATLAS…',
+    reconnectingText: 'Связь с сервером заметок прервалась. Окно подождёт его само и продолжит, несохранённый текст не потеряется.',
   },
   restore: {
     kicker: 'Восстановление',
@@ -1464,6 +1466,8 @@ const en = {
     lostTitle: 'Lost touch with ATLAS',
     lostText: 'The notes server is not responding. Unsaved text is in this window’s rescue copy. Start ATLAS from its shortcut and the text will come back.',
     retry: 'Try again',
+    reconnectingTitle: 'Reconnecting to ATLAS…',
+    reconnectingText: 'The notes server went quiet. The window waits for it and goes on by itself; unsaved text is not lost.',
   },
   restore: {
     kicker: 'Recovery',

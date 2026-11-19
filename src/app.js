@@ -730,16 +730,58 @@ async function yieldTo(claimant) {
   });
 }
 
+let lostNotice = null; // closes the notice over the window while it is cut off
+
 function connectionLost(err) {
   if (lost) return;
   lost = true;
   setSaveState('error');
-  const restarted = err.status === 403;
-  showBlocker({
-    title: t(restarted ? 'connection.restartedTitle' : 'connection.lostTitle'),
-    text: t(restarted ? 'connection.restartedText' : 'connection.lostText'),
-    action: { text: t(restarted ? 'connection.reload' : 'connection.retry'), run: () => location.reload() },
+  if (err.status === 403) return serverRestarted();
+  // The server may be on its way back: the portable app's keeper (server/keeper.js) brings it back in a
+  // second or two, with the same token. The window waits for it and goes on by itself, unsaved text
+  // and all; only after a long while does it say the server is gone.
+  lostNotice = showBlocker({ title: t('connection.reconnectingTitle'), text: t('connection.reconnectingText') });
+  reconnect(Date.now());
+}
+
+/** A server of a new session (another token): only reloading the window reaches it. */
+function serverRestarted() {
+  lostNotice?.();
+  lostNotice = showBlocker({
+    title: t('connection.restartedTitle'),
+    text: t('connection.restartedText'),
+    action: { text: t('connection.reload'), run: () => location.reload() },
   });
+}
+
+async function reconnect(since) {
+  let toldGone = false;
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    try {
+      await api.ping();
+      break;
+    } catch (err) {
+      if (err.status === 403) return serverRestarted();
+      if (!toldGone && Date.now() - since > 120_000) {
+        // two minutes: it is not coming back by itself; the window still listens, in case it does
+        toldGone = true;
+        lostNotice?.();
+        lostNotice = showBlocker({
+          title: t('connection.lostTitle'),
+          text: t('connection.lostText'),
+          action: { text: t('connection.retry'), run: () => location.reload() },
+        });
+      }
+    }
+  }
+  lostNotice?.();
+  lostNotice = null;
+  lost = false;
+  console.info('ATLAS: the server is back');
+  holdLine();
+  if (dirty) flushSave();
+  else setSaveState('saved', undefined, { quiet: true });
 }
 
 // ---------- notes ----------
@@ -1444,7 +1486,9 @@ function onDocChange(update) {
   if (suspended) return;
   if (lost) {
     // no server to save to: the text goes straight into the rescue copy
+    // (and is saved once the server is back: reconnect)
     if (currentId) rescue.put(currentId, update.state.doc.toString());
+    dirty = true;
     return;
   }
   notePace(update);

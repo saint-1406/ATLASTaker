@@ -9,7 +9,11 @@ import { acquireLock, BUILD, createAtlasServer, VERSION } from '../server/server
 test('hello names the code the server runs, so the launcher can spot a stale one', async (t) => {
   const { app } = await start(t);
   const hello = await (await fetch(`${app.url}api/hello`)).json();
-  assert.deepEqual(hello, { app: 'atlas-notetaker', version: VERSION, build: BUILD });
+  const { windows, quietMs, ...rest } = hello;
+  assert.deepEqual(rest, { app: 'atlas-notetaker', version: VERSION, build: BUILD });
+  // and how many windows hold a line, how long it has been quiet (server/keeper.js)
+  assert.equal(windows, 0);
+  assert.ok(Number.isFinite(quietMs) && quietMs >= 0);
   assert.match(BUILD, /^[0-9a-f]{12}$/);
 });
 

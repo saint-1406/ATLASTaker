@@ -175,7 +175,7 @@ function openFolder(dir) {
   spawn(cmd, [dir], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
 }
 
-export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEFAULT_PORT, portTries = 20, idleExitMs = 0, onIdle } = {}) {
+export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEFAULT_PORT, portTries = 20, idleExitMs = 0, onIdle, onQuit, token: givenToken } = {}) {
   const notesDir = path.join(dataDir, 'notes');
   const store = createStore(notesDir);
   const backups = createBackups(dataDir, { version: VERSION, build: BUILD });
@@ -186,7 +186,9 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
   await backups.atStart().catch((err) => console.error('Резервная копия не сделана:', err.message));
   const dailyTimer = setInterval(() => backups.daily().catch((err) => console.error('Резервная копия не сделана:', err.message)), 60 * 60 * 1000);
   dailyTimer.unref();
-  const token = crypto.randomBytes(24).toString('base64url');
+  // A new token each run, unless the keeper (server/keeper.js) hands one in: then a server it brings back
+  // after a crash takes the same one, and the open window goes on without being reloaded.
+  const token = typeof givenToken === 'string' && /^[A-Za-z0-9_-]{32,64}$/.test(givenToken) ? givenToken : crypto.randomBytes(24).toString('base64url');
   const tokenBytes = Buffer.from(token);
   const distDir = path.join(ROOT, 'dist') + path.sep;
   const fixedAssets = {
@@ -254,7 +256,8 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
   async function handleApi(req, res, url) {
     const route = url.pathname.slice('/api/'.length);
     if (route === 'hello' && req.method === 'GET') {
-      send(res, 200, { app: 'atlas-notetaker', version: VERSION, build: BUILD });
+      // windows: the lines open windows hold (server/keeper.js asks before it lets the server go)
+      send(res, 200, { app: 'atlas-notetaker', version: VERSION, build: BUILD, windows: live.size, quietMs: Date.now() - lastSeen });
       return;
     }
     const origin = req.headers.origin;
@@ -264,6 +267,13 @@ export async function createAtlasServer({ dataDir = defaultDataDir(), port = DEF
     const given = Buffer.from(String(req.headers['x-atlas-token'] ?? ''));
     if (given.length !== tokenBytes.length || !crypto.timingSafeEqual(given, tokenBytes)) throw new HttpError(403, 'bad token');
     lastSeen = Date.now();
+
+    // the keeper (server/keeper.js) lets the server go: it finishes what it was writing and ends
+    if (route === 'quit' && req.method === 'POST' && onQuit) {
+      send(res, 204);
+      setImmediate(onQuit);
+      return;
+    }
 
     // the window's open line (src/app.js holdLine): while one is held the window is open, even when
     // the browser has frozen its timers (a window covered or minimised for long) and no pings come
@@ -521,6 +531,8 @@ function parseArgs(argv) {
     if (argv[i] === '--port') args.port = Number(argv[++i]);
     else if (argv[i] === '--data') args.data = argv[++i];
     else if (argv[i] === '--no-idle-exit') args.idleExit = false;
+    // under the keeper (server/keeper.js): the token comes from it (ATLAS_TOKEN), it decides when to stop
+    else if (argv[i] === '--kept') args.kept = true;
   }
   return args;
 }
@@ -572,15 +584,23 @@ async function main() {
     dataDir,
     port: Number.isInteger(args.port) ? args.port : DEFAULT_PORT,
     portTries: Number.isInteger(args.port) ? 1 : 20,
+    token: args.kept ? process.env.ATLAS_TOKEN : undefined,
     // the window holds a line open and pings every 20 s (once a minute when hidden); ten minutes with
     // neither means it was closed (or the browser put it away, and may bring it back for a while)
-    idleExitMs: args.idleExit ? 600_000 : 0,
+    idleExitMs: args.idleExit && !args.kept ? 600_000 : 0,
     onIdle: () => {
       console.log(`${new Date().toISOString()} ATLAS: no window for 10 minutes, stopping`);
       shutdown();
     },
+    onQuit: args.kept
+      ? () => {
+          console.log(`${new Date().toISOString()} ATLAS: the keeper lets the server go`);
+          shutdown();
+        }
+      : undefined,
   });
-  await fsp.writeFile(infoFile, JSON.stringify({ port: app.port, pid: process.pid, startedAt: Date.now() }));
+  // keeper: the portable app's keeper (server/keeper.js), so an update can let it go before this server
+  await fsp.writeFile(infoFile, JSON.stringify({ port: app.port, pid: process.pid, startedAt: Date.now(), ...(args.kept ? { keeper: process.ppid } : {}) }));
   console.log(`${new Date().toISOString()} ATLAS: ${app.url} · заметки в ${app.notesDir}`);
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);

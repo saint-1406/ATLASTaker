@@ -604,7 +604,7 @@ function swipeAway(node, { hold, resume, gone }) {
 
 /** A non-dismissable notice over everything (another window took over, or startup failed). */
 export function showBlocker({ title, text, action }) {
-  openDialog(
+  return openDialog(
     (box) => {
       box.append(
         h('div', { class: 'modal-kicker' }, 'ATLAS'),
