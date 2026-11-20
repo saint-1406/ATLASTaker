@@ -18,6 +18,18 @@ const BROWSERS = () =>
 /** Edge or Chrome, for a window without the browser's bars; null where there is neither. */
 export const browserPath = () => BROWSERS().find((file) => fs.existsSync(file)) ?? null;
 
+/**
+ * What a start does about the ATLAS server already running on its data folder ({ version, build } as
+ * it answers hello): 'open' a window to it — it is this very build, or a newer version, and an older
+ * start never ends a newer app (a forgotten old shortcut used to cut a newer window off) — or 'replace'
+ * it: an older version, one too old to say its version, or this version built anew.
+ */
+export function whenRunning(running, mine, isNewer) {
+  if (running.build === mine.build) return 'open';
+  if (running.version && isNewer(running.version, mine.version)) return 'open';
+  return 'replace';
+}
+
 /** The server's answer on a port ({ app, version, build, windows, quietMs }), or null. */
 export async function hello(port, ms = 800) {
   try {

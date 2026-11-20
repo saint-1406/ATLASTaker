@@ -601,7 +601,8 @@ async function main() {
   });
   // keeper: the portable app's keeper (server/keeper.js), so an update can let it go before this server
   await fsp.writeFile(infoFile, JSON.stringify({ port: app.port, pid: process.pid, startedAt: Date.now(), ...(args.kept ? { keeper: process.ppid } : {}) }));
-  console.log(`${new Date().toISOString()} ATLAS: ${app.url} · заметки в ${app.notesDir}`);
+  // the version and the folder it runs from: with several copies on one machine, the log says which one
+  console.log(`${new Date().toISOString()} ATLAS ${VERSION} (${ROOT}, pid ${process.pid}): ${app.url} · заметки в ${app.notesDir}`);
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 }
