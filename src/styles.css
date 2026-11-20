@@ -10821,6 +10821,16 @@ html[data-easter="cats"] body:not(.has-tabbar) .cat-peek {
   background: color-mix(in srgb, var(--ink) 10%, transparent);
 }
 
+/* search sits in the same row: the same soft fill, not the one outlined button among them */
+:root[data-skin="cozy"] .tb-search {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+:root[data-skin="cozy"] .tb-search:hover {
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
 /* the chosen filter: the accent, softly, instead of a bright plate of the text's colour */
 :root[data-skin="cozy"] .lib-chip[aria-selected="true"] {
   background: color-mix(in srgb, var(--accent) 18%, var(--bg-raised));
@@ -10838,14 +10848,15 @@ html[data-easter="cats"] body:not(.has-tabbar) .cat-peek {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  background: color-mix(in srgb, var(--bg-raised) 82%, transparent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
   color: var(--ink);
   backdrop-filter: blur(6px);
 }
 
-/* the switch: its knob in the page's light colour, and on in the accent (not a system green) */
+/* the switch: a warm white knob in both tones (the ink is dark on light paper), on in the accent */
 :root[data-skin="cozy"] .switch i {
-  background: color-mix(in srgb, var(--ink) 92%, var(--bg));
+  background: #fbf7f1;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
@@ -10861,6 +10872,11 @@ html[data-easter="cats"] body:not(.has-tabbar) .cat-peek {
 
 /* a series' pocket: only the front cover names the book (the others peeked out in pieces), its name at
    the top where the glass does not cut it; the glass itself quieter */
+/* the same in a series folder and its bouquet: only the front book shows its title, the others no fragments */
+.lib-folder-book:not(.b0) .lib-folder-blank {
+  color: transparent;
+}
+
 .lib-pocket-cover:not(.c0) .lib-pocket-blank {
   color: transparent;
 }
@@ -10979,4 +10995,20 @@ html[data-easter="cats"] body:not(.has-tabbar) .cat-peek {
   width: auto;
   height: 0.9em;
   margin-top: -0.04em;
+}
+
+/* light paper: the warm gold of streaks and goals is too pale to read on white; a deeper amber */
+:root[data-skin="cozy"][data-theme="light"] {
+  --accent-warm: #a8670e;
+}
+
+/* the cozy look's own picture in the settings (it had none): warm paper, a serif title, two soft cards */
+.set-skin-cozy .set-skin-art {
+  background:
+    linear-gradient(#3a2f26, #3a2f26) 12% 22% / 40% 6px no-repeat,
+    linear-gradient(#8a7a6a, #8a7a6a) 12% 38% / 58% 3px no-repeat,
+    radial-gradient(circle at 88% 22%, #ff6b2c 0 4px, transparent 4.5px),
+    linear-gradient(#fffaf3, #fffaf3) 10% 82% / 38% 26px no-repeat,
+    linear-gradient(#fffaf3, #fffaf3) 90% 82% / 38% 26px no-repeat,
+    #efe5d6;
 }
